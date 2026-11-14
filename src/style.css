@@ -762,3 +762,7 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .wheel-title { display: flex; flex-direction: column; gap: 2px; }
 .wheel-title .wt-ex { font-size: 15px; font-weight: 600; color: var(--ink); }
 .wheel-title .wt-sub { font-size: 14px; font-weight: 500; color: var(--muted); }
+/* Annuler la séance : en rouge (bouton de la séance et confirmation) */
+.btn.cancel-ses { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: color-mix(in srgb, var(--danger) 9%, var(--card)); font-weight: 700; }
+.btn.red { background: var(--danger); color: var(--card); border-color: transparent; font-weight: 700; }
+.credit .credit-msg { margin-bottom: 18px; }

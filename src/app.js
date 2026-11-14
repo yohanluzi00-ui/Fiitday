@@ -245,8 +245,8 @@ function lastPerfCompute(w, ex) {
 /* ================= Thème, son, vibration ================= */
 const darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
 // couleurs de l'appli (Réglages › Apparence) : nom, libellé, les 3 teintes du dégradé
-const ACCENTS = [["rose", "Rose", "#FF8A32,#FF3D7F,#E0209A"], ["bleu", "Bleu", "#2EC5FF,#3D7BFF,#5B3DF5"], ["vert", "Vert", "#B8F03A,#2FD27A,#0FA89A"], ["jaune", "Jaune", "#FFE14D,#FFC21A,#FF9F0A"],
-  ["violet", "Violet", "#F25CFF,#A24DFF,#6A3DF5"], ["orange", "Orange", "#FFB23D,#FF7A1A,#F2492C"], ["marron", "Marron", "#B87A4B,#8E5530,#5E341C"]];
+const ACCENTS = [["rose", "Rose", "#FF8A32,#FF3D7F,#E0209A"], ["bleu", "Bleu", "#1E9BE8,#2A62E6,#4A2FD8"], ["vert", "Vert", "#B8F03A,#2FD27A,#0FA89A"], ["jaune", "Jaune", "#FFE14D,#FFC21A,#FF9F0A"],
+  ["violet", "Violet", "#C93FE8,#8636E6,#5A2FD6"], ["orange", "Orange", "#FFB23D,#FF7A1A,#F2492C"], ["marron", "Marron", "#B87A4B,#8E5530,#5E341C"]];
 function applyTheme() {
   if (flashTimer) return; // pendant le clignotement de fin de repos
   const t = settings().theme;

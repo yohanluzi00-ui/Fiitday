@@ -608,6 +608,7 @@ function viewLogin() {
     '<p class="msg" data-msg role="status"></p>' +
     '<p class="muted small">Pas reçu ? Regarde dans les spams, ou</p><button class="btn" data-act="resend">Renvoyer le code</button>' +
     '<button class="link" data-act="changemail">Changer d\'adresse e-mail</button></div>';
+  if (resetStep) return viewReset();
   const up = loginMode === "up", em = esc(loginEmail);
   // (le mode « sans compte » existe toujours dans le code, mais n'est plus proposé sur cet écran)
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Fiitday</h1>' +
@@ -623,8 +624,86 @@ function viewLogin() {
     "</form>" +
     '<p class="msg" data-msg role="status"></p>' +
     (up ? '<button class="link" data-act="loginmode" data-m="in">J\'ai déjà un compte : me connecter</button>'
-        : '<button class="link" data-act="loginmode" data-m="up">Créer un compte</button>') + "</div>";
+        : '<button class="link" data-act="forgot">Mot de passe oublié ?</button><button class="link" data-act="loginmode" data-m="up">Créer un compte</button>') + "</div>";
 }
+/* ================= Mot de passe oublié ================= */
+// 1) l'e-mail du compte → Supabase envoie un code ; 2) le code + le nouveau mot de passe → connexion
+// (si l'e-mail contient un lien au lieu d'un code, le lien ramène sur le site et la fenêtre « Nouveau mot de passe » s'ouvre)
+let resetStep = null, resetEmail = "";
+function viewReset() {
+  const back = '<button class="link" data-act="resetback">Retour à la connexion</button>';
+  if (resetStep === "code") return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Nouveau mot de passe</h1>' +
+    '<p class="muted">Si un compte existe avec <b>' + esc(resetEmail) + '</b>, un code vient d\'y être envoyé. Saisis-le avec ton nouveau mot de passe.</p>' +
+    '<form data-form="reset2" class="stack" autocomplete="on"><input type="email" name="username" autocomplete="username" value="' + esc(resetEmail) + '" readonly hidden tabindex="-1" aria-hidden="true">' +
+    '<label class="fl">Code reçu par e-mail<input class="f code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9 ]*" required></label>' +
+    '<label class="fl">Nouveau mot de passe<input class="f" type="password" name="password" minlength="8" autocomplete="new-password" required></label>' +
+    '<label class="fl">Confirme le nouveau mot de passe<input class="f" type="password" name="password2" minlength="8" autocomplete="new-password" required></label>' +
+    '<button class="btn primary big" type="submit">Changer le mot de passe</button></form>' +
+    '<p class="msg" data-msg role="status"></p><p class="muted small">Pas reçu ? Regarde dans les spams, ou</p><button class="btn" data-act="resetresend">Renvoyer le code</button>' + back + "</div>";
+  return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Mot de passe oublié</h1>' +
+    '<p class="muted">Indique l\'e-mail de ton compte : tu vas recevoir un code pour choisir un nouveau mot de passe.</p>' +
+    '<form data-form="reset1" class="stack"><label class="fl">E-mail<input class="f" type="email" name="email" autocomplete="email" value="' + esc(resetEmail || loginEmail) + '" required></label>' +
+    '<button class="btn primary big" type="submit">Recevoir un code</button></form><p class="msg" data-msg role="status"></p>' + back + "</div>";
+}
+async function onReset1(form) {
+  const msg = $app.querySelector("[data-msg]"), email = form.email.value.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) { msg.className = "msg err"; msg.textContent = "Indique une adresse e-mail valide."; return; }
+  msg.className = "msg"; msg.textContent = "Envoi du code…"; form.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  try { await authReq("recover", { email }); resetEmail = email; resetStep = "code"; render(); }
+  catch (e) { msg.className = "msg err"; msg.textContent = authMessage(e); form.querySelectorAll("button").forEach(b => { b.disabled = false; }); }
+}
+// compte protégé par la double authentification : Supabase exige le code à 6 chiffres avant de changer le mot de passe
+async function askMfaCode() {
+  const u = await authApi("GET", "user"), f = (u.factors || []).find(x => x.factor_type === "totp" && x.status === "verified");
+  if (!f) return false;
+  const code = await ask({ title: "Double authentification", text: "Ton compte est protégé : tape le code à 6 chiffres de ton appli d'authentification.", input: "", code: true, ok: "Valider" });
+  if (!code) return false;
+  const ch = await authApi("POST", "factors/" + f.id + "/challenge", {});
+  const j = await authApi("POST", "factors/" + f.id + "/verify", { challenge_id: ch.id, code: code.replace(/\D/g, "") });
+  if (j && j.access_token && j.user) setSession(j);
+  return true;
+}
+async function setNewPassword(password) {
+  try { await authApi("PUT", "user", { password }); }
+  catch (e) {
+    if (/aal2|mfa/i.test(String(e.message) + " " + (e.code || "")) && await askMfaCode()) { await authApi("PUT", "user", { password }); return; }
+    throw e;
+  }
+}
+async function onReset2(form) {
+  const msg = $app.querySelector("[data-msg]"), token = form.code.value.replace(/\D/g, ""), pw = form.password.value;
+  const err = t => { msg.className = "msg err"; msg.textContent = t; };
+  if (token.length < 6) return err("Le code fait au moins 6 chiffres.");
+  if (pw.length < 8) return err("Choisis un mot de passe d'au moins 8 caractères.");
+  if (pw !== form.password2.value) return err("Les deux mots de passe ne sont pas identiques.");
+  msg.className = "msg"; msg.textContent = "Vérification…"; form.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  try {
+    const j = await authReq("verify", { type: "recovery", email: resetEmail, token });
+    if (!j.access_token) throw new Error("Code incorrect ou expiré");
+    setSession(j);
+    await setNewPassword(pw);
+    resetStep = null; toast("Mot de passe changé, tu es connecté");
+    await afterLogin();
+  } catch (e) { err(authMessage(e)); form.querySelectorAll("button").forEach(b => { b.disabled = false; }); }
+}
+// lien de réinitialisation (ancien modèle d'e-mail) : #access_token=…&type=recovery
+async function recoveryFromLink() {
+  const h = location.hash.replace(/^#\/?/, "");
+  if (!/(^|&)(access_token|error_description)=/.test(h)) return;
+  const q = new URLSearchParams(h); history.replaceState(null, "", location.pathname + "#/home");
+  if (q.get("error_description")) { toast("Lien expiré ou déjà utilisé : demande un nouveau code"); return; }
+  if (q.get("type") !== "recovery" || !q.get("access_token")) return;
+  try {
+    const r = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + q.get("access_token") } });
+    const user = await r.json(); if (!r.ok || !user.id) throw new Error("lien");
+    setSession({ access_token: q.get("access_token"), refresh_token: q.get("refresh_token"), expires_in: +q.get("expires_in") || 3600, user });
+    const pw = await ask({ title: "Nouveau mot de passe", text: "Choisis ton nouveau mot de passe (8 caractères au moins).", input: "", ok: "Enregistrer" });
+    if (pw && pw.length >= 8) { await setNewPassword(pw); toast("Mot de passe changé"); }
+    else if (pw) toast("8 caractères au moins : recommence depuis « Mot de passe oublié »");
+    await afterLogin();
+  } catch (e) { toast("Ce lien ne fonctionne plus : demande un nouveau code"); }
+}
+
 function authMessage(e) {
   const m = String(e.message || "");
   if (/invalid login credentials/i.test(m)) return "E-mail ou mot de passe incorrect.";
@@ -2224,6 +2303,7 @@ const FAQ = [
     ["sauvegarde", "Comment faire une sauvegarde de mes données ?", "<a href=\"#/settings\">Réglages</a> › Données › « Sauvegarde » crée un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…). « Restaurer » le relit : ce qui a été supprimé depuis revient, et ce que tu as modifié depuis garde sa version la plus récente."],
     ["transfert", "Comment passer mes données sur un autre compte ?", "Dans l'ancien compte : Réglages › Données › « Créer un code ». Tu obtiens un code de 8 caractères, valable 1 heure. Dans le nouveau compte : « J'ai un code », puis tape-le. Ne le donne à personne d'autre : il donne accès à toutes tes données."],
     ["partage", "Comment partager une séance avec un ami ?", "Dans la configuration de la séance, appuie sur « Partager » et envoie le lien (WhatsApp, SMS…). Ton ami, connecté à son compte Fiitday, ouvre le lien ou le colle dans Accueil › Importer, puis choisit où ajouter la séance."],
+    ["mot-de-passe", "J'ai oublié mon mot de passe, que faire ?", "Sur l'écran de connexion, appuie sur « Mot de passe oublié ? » et indique l'e-mail de ton compte. Tu reçois un code par e-mail (regarde aussi dans les spams) : saisis-le avec ton nouveau mot de passe, et tu es connecté. Une fois connecté, tu peux aussi le changer dans <a href=\"#/settings\">Réglages</a> › Compte › « Changer mon mot de passe »."],
     ["supprimer-compte", "Comment supprimer mon compte ?", "Réglages › Compte › « Supprimer mon compte », puis tape SUPPRIMER pour confirmer. Ton compte et toutes tes données sont effacés définitivement : fais une sauvegarde avant si tu veux les garder."]]],
   ["Appli et montre", [
     ["montre", "Comment être prévenu sur ma montre ?", "C'est automatique dans l'appli Android : la montre vibre à la fin du repos et quand l'objectif d'un chrono est atteint, avec « Terminer » pour arrêter le chrono. Sur Galaxy Watch, dans l'appli Galaxy Wearable › Paramètres de la montre › Notifications : autorise Fiitday et choisis « Toujours afficher sur les deux » dans « Notifications du téléphone sur la montre »."],
@@ -2553,7 +2633,9 @@ async function changePassword() {
       const nonce = await ask({ title: "Code de sécurité", text: "Pour confirmer, tape le code reçu par e-mail.", input: "", code: true, ok: "Confirmer" });
       if (!nonce) return;
       try { await put({ password: p.nw, nonce: nonce.trim() }); } catch (er) { toast(authMessage(er)); return; }
-    } else if (/aal2|mfa/i.test(m)) { toast("Valide d'abord ton code à 6 chiffres dans Réglages › Administration, puis recommence"); return; }
+    } else if (/aal2|mfa/i.test(m)) {
+      try { if (!await askMfaCode()) return; await put({ password: p.nw }); } catch (er) { toast(mfaMessage(er)); return; }
+    }
     else if (/same/i.test(m)) { toast("Choisis un mot de passe différent de l'actuel"); return; }
     else { toast(authMessage(e)); return; }
   }
@@ -2786,6 +2868,8 @@ $app.addEventListener("submit", e => {
   e.preventDefault();
   if (f.dataset.form === "login") onLogin(f, (e.submitter && e.submitter.value) || loginMode);
   if (f.dataset.form === "verify") onVerify(f);
+  if (f.dataset.form === "reset1") onReset1(f);
+  if (f.dataset.form === "reset2") onReset2(f);
 });
 
 $app.addEventListener("click", async e => {
@@ -2827,6 +2911,9 @@ $app.addEventListener("click", async e => {
     case "loginmode": { const em = $app.querySelector('input[name="email"]'); if (em) loginEmail = em.value; const fn = $app.querySelector('input[name="firstname"]'); if (fn) loginName = fn.value; loginMode = b.dataset.m === "up" ? "up" : "in"; render(); const f = $app.querySelector(loginEmail ? 'input[name="password"]' : 'input[name="email"]'); if (f) f.focus(); } break;
     case "tologin": db.mode = null; saveNow(); render(); break;
     case "changemail": db.verify = null; saveNow(); render(); break;
+    case "forgot": { const em = $app.querySelector('input[name="email"]'); resetEmail = em ? em.value.trim() : ""; resetStep = "email"; render(); } break;
+    case "resetback": resetStep = null; render(); break;
+    case "resetresend": try { await authReq("recover", { email: resetEmail }); toast("Nouveau code envoyé"); } catch (err) { toast(authMessage(err)); } break;
     case "resend": {
       const msg = $app.querySelector("[data-msg]");
       try { await authReq("resend", { type: "signup", email: db.verify }); msg.className = "msg"; msg.textContent = "Nouveau code envoyé à " + db.verify + "."; }
@@ -3287,6 +3374,7 @@ render();
 if (history.state && history.state.k) applyScroll(scrollPos[history.state.k] || 0); // page rechargée : même position
 else history.replaceState({ k: navKey(), prev: "" }, "");
 if (db.auth) sync();
+recoveryFromLink();
 setTimeout(() => window.__fiitdayPending(), 300);
 if ("serviceWorker" in navigator && location.protocol === "https:" && !Native && !window.claude) {
   navigator.serviceWorker.register("sw.js").catch(() => { });

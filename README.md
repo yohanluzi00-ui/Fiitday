@@ -42,6 +42,7 @@ Application personnelle pour noter mes performances pendant mes séances de musc
 3. **Vérification de l'e-mail par code** (à la création d'un compte, l'appli demande un code reçu par e-mail) :
    - **Authentication › Sign In / Providers › Email** : active **Confirm email** ;
    - **Authentication › Emails › Templates › Confirm signup** : sujet « Ton code Fiitday », puis remplace le contenu par celui du fichier [`supabase/email-code-inscription.html`](supabase/email-code-inscription.html) (il affiche le code `{{ .Token }}`).
+   - **Authentication › Emails › Templates › Reset Password** : sujet « Ton code Fiitday pour changer de mot de passe », puis remplace le contenu par celui du fichier [`supabase/email-code-mot-de-passe.html`](supabase/email-code-mot-de-passe.html) (code `{{ .Token }}` pour « Mot de passe oublié ? »).
    - Le serveur d'e-mails intégré à Supabase n'envoie que quelques e-mails par heure : pour plus d'inscriptions, configure un serveur SMTP (Authentication › Emails › SMTP Settings).
 
 ### 2. Installer l'appli Android (APK + Obtainium)

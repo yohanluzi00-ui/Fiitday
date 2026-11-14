@@ -750,3 +750,12 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .tpick.empty { color: var(--muted); font-size: 15px; }
 .grid .cell .tpick { flex: 1; min-height: 38px; font-size: 15px; justify-content: center; padding: 0 6px; min-width: 64px; }
 .done-row .tpick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); font-weight: 700; }
+.wheels.multi { grid-template-columns: repeat(var(--n, 2), 1fr); }
+.wheels:not(.multi) { display: block; }
+.wheel-lab { text-align: center; font-size: 12.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; min-height: 16px; }
+.set .npick, .grid .cell .npick { flex: 1 1 0; min-width: 0; min-height: 44px; justify-content: center; text-align: center; font-size: 17px; font-variant-numeric: tabular-nums; padding: 0 4px; }
+.grid .cell .npick { min-height: 38px; font-size: 15px; min-width: 52px; }
+.set .npick::after, .grid .cell .npick::after, .cv-grid .cv-pick::after { content: none; }
+.npick.empty { color: var(--muted); opacity: .8; }
+.done-row .npick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); font-weight: 700; }
+.cv-grid .cv-pick { justify-content: center; text-align: center; }

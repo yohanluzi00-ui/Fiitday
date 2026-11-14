@@ -1044,11 +1044,11 @@ function inputsHtml(w, e, i, k, d, label) {
   const a = ' data-i="' + i + '" data-s="' + k + '"' + (d == null ? "" : ' data-d="' + d + '"');
   if (e.type === "cardio") return '<button type="button" class="f pick cv-pick' + (num(v.sec) != null ? "" : " empty") + '" data-act="cvdur"' + a + ' aria-label="Durée ' + label + '">' + (num(v.sec) != null ? fmtClock(v.sec) : "Durée") + "</button>";
   if (e.type === "time") return '<input class="ro" readonly tabindex="-1" aria-readonly="true" aria-label="Temps ' + label + ' (rempli par le chrono)" data-f="sec"' + a + ' value="' + esc(fmtHold(v.sec)) + '" placeholder="' + esc(ph.sec) + '">';
-  if (e.type === "rep") return '<input inputmode="numeric" aria-label="Répétitions ' + label + '" data-f="reps"' + a + ' value="' + esc(v.reps) + '" placeholder="' + esc(ph.reps) + '">';
-  if (e.type === "dist") return (e.load ? '<input inputmode="decimal" aria-label="Kilos ' + label + '" data-f="kg"' + a + ' value="' + esc(v.kg) + '" placeholder="' + esc(ph.kg) + '">' : "") +
+  const nb = (f, lab) => '<button type="button" class="f pick npick' + (num(v[f]) != null ? "" : " empty") + '" data-act="setpick" data-f="' + f + '"' + a + ' aria-label="' + lab + " " + label + " : " + (num(v[f]) != null ? fmtNum(num(v[f])) : "à choisir") + '">' + (num(v[f]) != null ? fmtNum(num(v[f])) : esc(ph[f])) + "</button>";
+  if (e.type === "rep") return nb("reps", "Répétitions");
+  if (e.type === "dist") return (e.load ? nb("kg", "Kilos") : "") +
     '<button type="button" class="f pick tpick' + (num(v.sec) != null ? "" : " empty") + '" data-act="distclock"' + a + ' aria-label="Temps ' + label + " : " + (num(v.sec) != null ? fmtClock(v.sec) : "à choisir") + '">' + (num(v.sec) != null ? fmtClock(v.sec) : ph.clock === "m:ss" ? "Temps" : ph.clock) + "</button>";
-  return '<input inputmode="decimal" aria-label="Kilos ' + label + '" data-f="kg"' + a + ' value="' + esc(v.kg) + '" placeholder="' + esc(ph.kg) + '">' +
-    '<input inputmode="numeric" aria-label="Répétitions ' + label + '" data-f="reps"' + a + ' value="' + esc(v.reps) + '" placeholder="' + esc(ph.reps) + '">';
+  return nb("kg", "Kilos") + nb("reps", "Répétitions");
 }
 function chronoBtn(w, i, s) {
   const c = db.live.chrono, run = c && c.wid === w.id && c.i === i && c.s === s;
@@ -1108,11 +1108,11 @@ function cardioBody(w, e, i) {
         const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
         return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
           (d.k === "dist" || d.k === "distm" ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvdist" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtNum(num(v)) + " " + d.u : "à choisir") + '">' +
-            (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? "Dernière fois " + fmtNum(pv) + " " + d.u : "Choisir") + "</button>" :
+            (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? fmtNum(pv) + " " + d.u : "Choisir") + "</button>" :
           d.clock ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvclock" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtClock(v) : "à choisir") + '">' +
-            (num(v) != null ? fmtClock(v) : pv != null ? "Dernière fois " + fmtClock(pv) : "Choisir") + "</button>" :
-          '<span class="cv-in"><input inputmode="decimal" data-f="cv" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab + (d.u ? " en " + d.u : "")) + '" value="' +
-          esc(v == null || v === "" ? "" : String(v).replace(".", ",")) + '" placeholder="' + esc(pv != null ? fmtNum(pv) : "") + '">' + (d.u ? "<em>" + esc(d.u) + "</em>" : "") + "</span>") + "</div>";
+            (num(v) != null ? fmtClock(v) : pv != null ? fmtClock(pv) : "Choisir") + "</button>" :
+          '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvnum" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? esc(cvFmt(d, num(v))) : "à choisir") + '">' +
+            (num(v) != null ? esc(cvFmt(d, num(v))) : pv != null ? esc(cvFmt(d, pv)) : "Choisir") + "</button>") + "</div>";
       }).join("") + "</div>" +
       '<div class="cv-foot"><button type="button" class="link small" data-act="cvadd" data-i="' + i + '">+ Ajouter un indicateur</button><span class="cv-ok">' + (s.done ? "Validé" : "Valider") + okBtn(s, i, k) + "</span></div></div>";
   }).join("");
@@ -1327,11 +1327,11 @@ function exFields(e, k, letter, inGroup) {
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
     (cardio ? '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
       '<div class="fl full cv-info" data-cvinfo="' + k + '"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
-    (inGroup || cardio ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
+    (inGroup || cardio ? "" : '<div class="fl"><span>Séries</span><button type="button" class="f pick" data-act="picksec" data-sf="sets" data-e="' + k + '">' + (num(e.sets) || 1) + "</button></div>") +
     (cardio ? "" : dist ? '<div class="fl"><span>Distance</span><button type="button" class="f pick" data-act="picksec" data-sf="dtarget" data-e="' + k + '">' + fmtDist(num(e.target) || 1000, "m") + "</button></div>" +
       '<label class="fl">Charge<select class="f" data-p="load" data-e="' + k + '"><option value="0"' + (!e.load ? " selected" : "") + '>Sans charge</option><option value="1"' + (e.load ? " selected" : "") + ">Avec charge (kg)</option></select></label>"
     : time ? '<div class="fl"><span>Temps cible</span><button type="button" class="f pick" data-act="picksec" data-sf="target" data-e="' + k + '">' + fmtSecs(num(e.target) || 0) + "</button></div>"
-      : '<label class="fl">Reps cible<input class="f" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="8-10"></label>') +
+      : '<div class="fl"><span>Reps cible</span><button type="button" class="f pick" data-act="picksec" data-sf="reps" data-e="' + k + '">' + esc(String(e.target || "8-10").replace("-", " à ")) + "</button></div>") +
     (inGroup || cardio ? "" : '<div class="fl"><span>Repos</span><button type="button" class="f pick" data-act="picksec" data-sf="rest" data-e="' + k + '">' + fmtSecs(num(e.rest) || 0) + "</button></div>") +
     (time || dist || rep || cardio ? "" : '<label class="fl">Dégressif<select class="f" data-p="drops" data-e="' + k + '">' + [0, 1, 2, 3].map(n => '<option value="' + n + '"' + (d === n ? " selected" : "") + ">" + (n ? "Oui · " + n + " baisse" + (n > 1 ? "s" : "") : "Non") + "</option>").join("") + "</select></label>") +
     (time || dist || rep || cardio || !d ? "" : '<label class="fl">Dégressif sur<select class="f" data-p="dscope" data-e="' + k + '"><option value="all"' + (e.dropScope !== "last" ? " selected" : "") + '>Toutes les séries</option><option value="last"' + (e.dropScope === "last" ? " selected" : "") + ">La dernière série</option></select></label>") +
@@ -1375,7 +1375,7 @@ function viewProgram(tid, vid) {
       h += '<div class="blk-body">' +
         '<div class="ed-grid"><label class="fl">Enchaînement<select class="f" data-p="gkind" data-e="' + fi + '">' +
         (blk.items.length >= 3 ? '<option value="triset" selected>Triset</option>' : '<option value="superset"' + (f.groupKind !== "biset" ? " selected" : "") + '>Superset</option><option value="biset"' + (f.groupKind === "biset" ? " selected" : "") + ">Biset</option>") + "</select></label>" +
-        '<label class="fl">Tours (séries)<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="gsets" data-e="' + fi + '" value="' + esc(f.sets) + '"></label>' +
+        '<div class="fl"><span>Tours (séries)</span><button type="button" class="f pick" data-act="picksec" data-sf="gsets" data-e="' + fi + '">' + (num(f.sets) || 1) + "</button></div>" +
         '<div class="fl"><span>Repos</span><button type="button" class="f pick" data-act="picksec" data-sf="grest" data-e="' + fi + '">' + fmtSecs(num(f.rest) || 0) + "</button></div></div>";
       blk.items.forEach((x, n) => { h += '<div class="member">' + exFields(x.e, x.i, LETTERS[n], true) + "</div>"; });
       h += nextField;
@@ -2337,12 +2337,30 @@ function pickDistance(title, value, unit) {
   const m = Math.round(v / 10) * 10;
   return pickWheels(title, [{ vals: rng(43), fmt: x => x + " km", value: Math.min(42, Math.floor(m / 1000)) }, { vals: rng(100, 10), fmt: x => String(x).padStart(3, "0") + " m", value: m % 1000 }]).then(r => (r ? r[0] * 1000 + r[1] : null));
 }
+// roues d'un indicateur de cardio : [maximum, décimales (10 : dixièmes), valeur de départ]
+const CV_W = { vit: [30, 10, 10], incl: [40, 10, 1], res: [40, 0, 8], cad: [200, 0, 80], watts: [1000, 0, 150], spm: [250, 0, 120], etages: [500, 0, 50], marches: [3000, 0, 500],
+  niv: [30, 0, 8], cpm: [60, 0, 25], cal: [2000, 0, 200], fc: [220, 0, 130] };
+function pickNumber(title, value, spec, unit) {
+  const [max, dec, def] = spec, v = num(value) != null ? num(value) : def, u = unit ? " " + unit : "";
+  if (!dec) return pickWheels(title, [{ vals: rng(max + 1), fmt: x => x + u, value: Math.min(max, Math.round(v)) }]).then(r => (r ? r[0] : null));
+  const t = Math.round(v * dec);
+  return pickWheels(title, [{ vals: rng(max + 1), fmt: x => String(x), value: Math.min(max, Math.floor(t / dec)) }, { vals: rng(dec), fmt: x => "," + x + u, value: t % dec }]).then(r => (r ? Math.round((r[0] + r[1] / dec) * 10) / 10 : null));
+}
+// une série : kilos (entiers + quarts) et / ou répétitions, dans la même fenêtre
+const KG_DEC = [0, 0.25, 0.5, 0.75];
+function pickSet(title, kg, reps) {
+  const cols = [];
+  if (kg != null) { const q = Math.round(kg * 4) / 4; cols.push({ label: "Kilos", vals: rng(401), fmt: x => String(x), value: Math.min(400, Math.floor(q)) }, { label: " ", vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: q - Math.floor(q) }); }
+  if (reps != null) cols.push({ label: "Répétitions", vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
+  return pickWheels(title, cols).then(r => r && { kg: kg != null ? r[0] + r[1] : null, reps: reps != null ? r[r.length - 1] : null });
+}
 const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fmtNum(v / 1000) + " km" : fmtNum(v) + " m");
 // fenêtre à une ou plusieurs roues à faire défiler ; renvoie les valeurs choisies (ou null)
 function pickWheels(title, cols) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal sheet";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '">' +
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '" style="--n:' + cols.length + '">' +
+      (cols.some(c => c.label) ? cols.map(c => '<div class="wheel-lab">' + esc(c.label || "") + "</div>").join("") : "") +
       cols.map((c, n) => '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" data-col="' + n + '" tabindex="0" role="listbox" aria-label="' + esc(title) + '">' +
         c.vals.map((x, k) => '<div class="wv" role="option" data-k="' + k + '">' + esc(c.fmt(x)) + "</div>").join("") + "</div></div>").join("") + "</div>" +
       '<div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">OK</button></div></div>';
@@ -3171,6 +3189,32 @@ $app.addEventListener("click", async e => {
       set.cv = Object.assign({}, set.cv); if (val > 0) set.cv[k] = String(val); else delete set.cv[k];
       put("workout", w); render();
     } break;
+    case "setpick": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
+      const e = w.exercises[i], set = e.sets[s], d = b.dataset.d != null && b.dataset.d !== "" ? +b.dataset.d : null;
+      if (d != null) { set.drops = set.drops || []; set.drops[d] = set.drops[d] || { kg: "", reps: "" }; }
+      const tgt = d == null ? set : set.drops[d];
+      const lp = lastPerf(w, e); let src = lp && lp.e.sets[s]; if (src && d != null) src = src.drops && src.drops[d];
+      // valeurs de départ des roues : cette série, la dernière fois, les séries d'avant ; une baisse part de la charge de la série moins 20 %
+      const earlier = e.sets.slice(0, s).reverse(), lastSets = lp ? lp.e.sets.slice().reverse() : [];
+      const cands = d == null ? [tgt, src].concat(earlier, lastSets) : [tgt, src, d ? set.drops[d - 1] : null];
+      const first = f => { for (const o of cands) { const x = o && num(o[f]); if (x != null && x > 0) return x; } return null; };
+      let k0 = first("kg"), r0 = first("reps");
+      if (d != null) { const base = [set].concat(earlier).find(o => num(o.kg) > 0); if (k0 == null && base) k0 = num(base.kg) * 0.8; const rb = [set].concat(earlier).find(o => num(o.reps) > 0); if (r0 == null && rb) r0 = num(rb.reps); }
+      const withKg = e.type === "reps" || !e.type || (e.type === "dist" && e.load), withReps = e.type !== "dist";
+      const r = await pickSet(e.name + " · série " + (s + 1) + (d != null ? " · baisse " + (d + 1) : ""), withKg ? (k0 != null ? k0 : 20) : null,
+        withReps ? (r0 != null ? r0 : num(String(e.target || "").split("-")[0]) || 10) : null);
+      if (!r) return;
+      if (r.kg != null) tgt.kg = r.kg > 0 ? String(r.kg) : "";
+      if (r.reps != null) tgt.reps = r.reps > 0 ? String(r.reps) : "";
+      put("workout", w); render();
+    } break;
+    case "cvnum": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
+      const e = w.exercises[i], set = e.sets[s], k = b.dataset.k, d = cvDef(k); if (!d) return;
+      const lp = lastPerf(w, e), pv = lp && lp.e.sets[s] && lp.e.sets[s].cv ? num(lp.e.sets[s].cv[k]) : null, cur = set.cv ? num(set.cv[k]) : null;
+      const val = await pickNumber(d.n + " · " + e.name, cur != null ? cur : pv, CV_W[k] || [2000, 10, 0], d.u); if (val == null) return;
+      set.cv = Object.assign({}, set.cv); if (val > 0) set.cv[k] = String(val); else delete set.cv[k];
+      put("workout", w); render();
+    } break;
     case "cvdist": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
       const e = w.exercises[i], set = e.sets[s], k = b.dataset.k, d = cvDef(k); if (!d) return;
       const lp = lastPerf(w, e), pv = lp && lp.e.sets[s] && lp.e.sets[s].cv ? num(lp.e.sets[s].cv[k]) : null, cur = set.cv ? num(set.cv[k]) : null;
@@ -3365,6 +3409,18 @@ $app.addEventListener("click", async e => {
         if (val == null) return;
         v.exercises.forEach(x => { if (x === ex || (ex.groupId && x.groupId === ex.groupId)) x.restNext = val; });
         put("template", t); render(); return;
+      }
+      if (b.dataset.sf === "sets" || b.dataset.sf === "gsets") {
+        const g = b.dataset.sf === "gsets", r = await pickWheels(g ? "Tours" : "Séries · " + ex.name, [{ vals: rng(20).map(x => x + 1), fmt: x => x + (g ? " tour" : " série") + (x > 1 ? "s" : ""), value: Math.min(20, Math.max(1, num(ex.sets) || 1)) }]);
+        if (!r) return;
+        v.exercises.forEach(x => { if (x === ex || (g && ex.groupId && x.groupId === ex.groupId)) x.sets = r[0]; });
+        put("template", t); render(); return;
+      }
+      if (b.dataset.sf === "reps") { // une cible (12) ou une fourchette (8 à 10)
+        const m = String(ex.target || "").match(/^(\d+)(?:\s*-\s*(\d+))?$/), lo = m ? +m[1] : 8, hi = m ? (m[2] ? +m[2] : 0) : 10;
+        const r = await pickWheels("Reps cible · " + ex.name, [{ label: "De", vals: rng(50).map(x => x + 1), fmt: String, value: Math.min(50, Math.max(1, lo)) }, { label: "À", vals: rng(51), fmt: x => (x ? "à " + x : "—"), value: Math.min(50, hi) }]);
+        if (!r) return;
+        ex.target = r[1] > r[0] ? r[0] + "-" + r[1] : String(r[0]); put("template", t); render(); return;
       }
       if (b.dataset.sf === "dtarget") {
         const val = await pickDistance("Distance · " + ex.name, num(ex.target) || 1000, "m"); if (val == null) return;

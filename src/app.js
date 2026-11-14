@@ -533,6 +533,7 @@ function render() {
 let localFixed = false; // sans compte : anciens noms et anciennes mesures corrigés une fois par lancement
 function renderNow() {
   applyTheme();
+  if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
   if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = viewLogin(); return; }
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
@@ -632,13 +633,18 @@ function viewLogin() {
 let resetStep = null, resetEmail = "";
 function viewReset() {
   const back = '<button class="link" data-act="resetback">Retour à la connexion</button>';
-  if (resetStep === "code") return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Nouveau mot de passe</h1>' +
-    '<p class="muted">Si un compte existe avec <b>' + esc(resetEmail) + '</b>, un code vient d\'y être envoyé. Saisis-le avec ton nouveau mot de passe.</p>' +
-    '<form data-form="reset2" class="stack" autocomplete="on"><input type="email" name="username" autocomplete="username" value="' + esc(resetEmail) + '" readonly hidden tabindex="-1" aria-hidden="true">' +
-    '<label class="fl">Code reçu par e-mail<input class="f code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9 ]*" required></label>' +
+  const head = t => '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>' + t + "</h1>";
+  if (resetStep === "password") return head("Nouveau mot de passe") +
+    '<p class="muted">Code validé. Choisis maintenant ton nouveau mot de passe.</p>' +
+    '<form data-form="reset3" class="stack" autocomplete="on"><input type="email" name="username" autocomplete="username" value="' + esc(resetEmail) + '" readonly hidden tabindex="-1" aria-hidden="true">' +
     '<label class="fl">Nouveau mot de passe<input class="f" type="password" name="password" minlength="8" autocomplete="new-password" required></label>' +
     '<label class="fl">Confirme le nouveau mot de passe<input class="f" type="password" name="password2" minlength="8" autocomplete="new-password" required></label>' +
-    '<button class="btn primary big" type="submit">Changer le mot de passe</button></form>' +
+    '<button class="btn primary big" type="submit">Enregistrer</button></form><p class="msg" data-msg role="status"></p></div>';
+  if (resetStep === "code") return head("Code reçu par e-mail") +
+    '<p class="muted">Si un compte existe avec <b>' + esc(resetEmail) + '</b>, un code vient d\'y être envoyé. Saisis-le ci-dessous.</p>' +
+    '<form data-form="reset2" class="stack">' +
+    '<label class="fl">Code reçu par e-mail<input class="f code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9 ]*" required></label>' +
+    '<button class="btn primary big" type="submit">Valider le code</button></form>' +
     '<p class="msg" data-msg role="status"></p><p class="muted small">Pas reçu ? Regarde dans les spams, ou</p><button class="btn" data-act="resetresend">Renvoyer le code</button>' + back + "</div>";
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Mot de passe oublié</h1>' +
     '<p class="muted">Indique l\'e-mail de ton compte : tu vas recevoir un code pour choisir un nouveau mot de passe.</p>' +
@@ -671,16 +677,23 @@ async function setNewPassword(password) {
   }
 }
 async function onReset2(form) {
-  const msg = $app.querySelector("[data-msg]"), token = form.code.value.replace(/\D/g, ""), pw = form.password.value;
+  const msg = $app.querySelector("[data-msg]"), token = form.code.value.replace(/\D/g, "");
   const err = t => { msg.className = "msg err"; msg.textContent = t; };
   if (token.length < 6) return err("Le code fait au moins 6 chiffres.");
-  if (pw.length < 8) return err("Choisis un mot de passe d'au moins 8 caractères.");
-  if (pw !== form.password2.value) return err("Les deux mots de passe ne sont pas identiques.");
   msg.className = "msg"; msg.textContent = "Vérification…"; form.querySelectorAll("button").forEach(b => { b.disabled = true; });
   try {
     const j = await authReq("verify", { type: "recovery", email: resetEmail, token });
     if (!j.access_token) throw new Error("Code incorrect ou expiré");
-    setSession(j);
+    setSession(j); resetStep = "password"; render();
+  } catch (e) { err(authMessage(e)); form.querySelectorAll("button").forEach(b => { b.disabled = false; }); }
+}
+async function onReset3(form) {
+  const msg = $app.querySelector("[data-msg]"), pw = form.password.value;
+  const err = t => { msg.className = "msg err"; msg.textContent = t; };
+  if (pw.length < 8) return err("Choisis un mot de passe d'au moins 8 caractères.");
+  if (pw !== form.password2.value) return err("Les deux mots de passe ne sont pas identiques.");
+  msg.className = "msg"; msg.textContent = "Enregistrement…"; form.querySelectorAll("button").forEach(b => { b.disabled = true; });
+  try {
     await setNewPassword(pw);
     resetStep = null; toast("Mot de passe changé, tu es connecté");
     await afterLogin();
@@ -2870,6 +2883,7 @@ $app.addEventListener("submit", e => {
   if (f.dataset.form === "verify") onVerify(f);
   if (f.dataset.form === "reset1") onReset1(f);
   if (f.dataset.form === "reset2") onReset2(f);
+  if (f.dataset.form === "reset3") onReset3(f);
 });
 
 $app.addEventListener("click", async e => {

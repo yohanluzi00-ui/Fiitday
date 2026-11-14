@@ -607,7 +607,7 @@ function viewLogin() {
     '<label class="fl">Code reçu par e-mail<input class="f code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9 ]*" required></label>' +
     '<button class="btn primary big" type="submit">Valider</button></form>' +
     '<p class="msg" data-msg role="status"></p>' +
-    '<p class="muted small">Pas reçu ? Regarde dans les spams, ou</p><button class="btn" data-act="resend">Renvoyer le code</button>' +
+    '<p class="muted small">Pas reçu ? Regarde dans les spams.</p><button class="btn" data-act="resend">Renvoyer le code</button>' +
     '<button class="link" data-act="changemail">Changer d\'adresse e-mail</button></div>';
   if (resetStep) return viewReset();
   const up = loginMode === "up", em = esc(loginEmail);
@@ -645,7 +645,7 @@ function viewReset() {
     '<form data-form="reset2" class="stack">' +
     '<label class="fl">Code reçu par e-mail<input class="f code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" pattern="[0-9 ]*" required></label>' +
     '<button class="btn primary big" type="submit">Valider le code</button></form>' +
-    '<p class="msg" data-msg role="status"></p><p class="muted small">Pas reçu ? Regarde dans les spams, ou</p><button class="btn" data-act="resetresend">Renvoyer le code</button>' + back + "</div>";
+    '<p class="msg" data-msg role="status"></p><p class="muted small">Pas reçu ? Regarde dans les spams.</p><button class="btn" data-act="resetresend">Renvoyer le code</button>' + back + "</div>";
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Mot de passe oublié</h1>' +
     '<p class="muted">Indique l\'e-mail de ton compte : tu vas recevoir un code pour choisir un nouveau mot de passe.</p>' +
     '<form data-form="reset1" class="stack"><label class="fl">E-mail<input class="f" type="email" name="email" autocomplete="email" value="' + esc(resetEmail || loginEmail) + '" required></label>' +

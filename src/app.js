@@ -348,7 +348,7 @@ function ask(o) {
       (o.html || "") + (o.text ? "<p>" + esc(o.text) + "</p>" : "") +
       (o.input !== undefined ? (o.code ? '<input class="f code-in" aria-label="' + esc(o.title) + '" maxlength="12" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="ex. K7P2X9QM" value="' + esc(o.input) + '">' : o.multiline ? '<textarea class="f" rows="6" aria-label="' + esc(o.title) + '">' + esc(o.input) + "</textarea>" : o.suggest ? '<div class="fl"><input class="f" data-suggest autocomplete="off" maxlength="80" placeholder="Tape un nom ou un muscle" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '"><div class="sugg" hidden></div></div>' : '<input class="f" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '">') : "") +
       '<div class="modal-btns">' + (o.cancel === false ? "" : '<button class="btn" data-r="0">' + esc(o.cancel || "Annuler") + "</button>") +
-      '<button class="btn ' + (o.red ? "red" : o.danger ? "strong" : "primary") + '" data-r="1">' + esc(o.ok || "OK") + "</button></div></div>";
+      '<button class="btn ' + (o.danger ? "strong" : "primary") + '" data-r="1">' + esc(o.ok || "OK") + "</button></div></div>";
     document.body.appendChild(d);
     const inp = d.querySelector("input, textarea");
     if (inp) { inp.focus(); if (inp.select) inp.select(); }
@@ -1185,7 +1185,7 @@ function viewSession(id) {
     (active ? '<button class="btn sm primary" data-act="finish">Terminer la séance</button>' : "") + "</div>" +
     '<div class="page-head"><div><div class="muted small">' + esc(vLabel(w.variantName)) + " · " + esc(fmtDateLong(w.startedAt)) + "</div><h1>" + esc(w.templateName) + "</h1></div>" +
     '<div class="row"><span class="num" style="font-size:18px;font-weight:700" data-tick="elapsed" data-id="' + w.id + '"></span>' +
-    (active ? '<button class="btn sm cancel-ses" data-act="cancel">Annuler</button>' : "") + "</div></div>";
+    (active ? '<button class="btn sm" data-act="cancel">Annuler</button>' : "") + "</div></div>";
   if (!active) { const tn = workoutTon(w), kc = workoutKcal(w);
     h += '<div class="sess-sum"><div class="card stat"><div class="muted small">Durée</div><div class="v num">' + fmtDurH(workoutDur(w)) + "</div></div>" +
       (w.cardio || (!tn && kc) ? '<div class="card stat"><div class="muted small">Calories</div><div class="v num">' + (kc ? fmtNum(Math.round(kc)) + " kcal" : "—") + "</div></div>" : '<div class="card stat"><div class="muted small">Tonnage</div><div class="v num">' + (tn ? fmtTon(tn) : "—") + "</div></div>") + "</div>" +
@@ -3414,7 +3414,7 @@ $app.addEventListener("click", async e => {
       finishWorkout(getItem(w.id));
     } break;
     case "cancel": if (w) {
-      if (!await ask({ title: "Annuler la séance ?", text: "Elle ne sera pas enregistrée.", ok: "Annuler la séance", cancel: "Continuer", danger: true, red: true })) return;
+      if (!await ask({ title: "Annuler la séance ?", text: "Elle ne sera pas enregistrée.", ok: "Annuler la séance", cancel: "Continuer" })) return;
       remove(w.id); db.live = {}; save(); go("home");
     } break;
     case "delworkout": if (w) {

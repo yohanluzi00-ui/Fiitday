@@ -2325,6 +2325,7 @@ const FAQ = [
 // espaces insécables de la typographie française : « ? », « : », « » » ne passent jamais seuls à la ligne
 const nbsp = t => t.replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0");
 function viewFaq(open) {
+  faqIdx = null;
   const n = FAQ.reduce((a, c) => a + c[1].length, 0);
   return '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>Questions fréquentes</h1><span class="muted small">' + n + " questions</span></div>" +
     '<input class="f" id="faq-q" type="search" autocomplete="off" placeholder="Rechercher : repos, sauvegarde…" aria-label="Rechercher dans les questions fréquentes">' +
@@ -2333,11 +2334,26 @@ function viewFaq(open) {
     '<p class="muted faq-none" hidden>Aucune question ne correspond. Essaie un autre mot.</p>' +
     '<div class="card faq-more"><b>Tu n\'as pas trouvé ta réponse ?</b><div class="small muted" style="margin-top:4px">Écris-nous : l\'adresse de contact est dans Réglages › Informations légales › Mentions légales.</div></div>';
 }
-// recherche sans tenir compte des accents ni des majuscules ; une seule réponse : elle s'ouvre
+// recherche sans tenir compte des accents, des majuscules, des apostrophes (« jai » = « j'ai ») ni des petites fautes ; une seule réponse : elle s'ouvre
+const FAQ_STOP = new Set("je tu il on le la les de des du un une mon ma mes ton ta tes et ou a au aux en est que qui quoi comment pour par sur dans avec ce ca se sa son ses ne pas plus faire fait".split(" "));
+const faqWords = t => norm(t).replace(/['’`´]/g, "").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+const faqWordsAll = t => Array.from(new Set(faqWords(t).concat(norm(t).replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean)))); // « j'ai » donne « jai », « j » et « ai »
+let faqIdx = null;
+// abréviations et mots collés courants
+const FAQ_SYN = { mdp: ["mot", "passe"], motdepasse: ["mot", "passe"], pwd: ["mot", "passe"], password: ["mot", "passe"], appli: ["application"], synchro: ["synchronisation"], stats: ["statistiques"] };
+const faqExpand = ws => ws.flatMap(w => FAQ_SYN[w] ? FAQ_SYN[w].concat(w === "appli" || w === "synchro" || w === "stats" ? [w] : []) : [w]);
 $app.addEventListener("input", e => {
   if (e.target.id !== "faq-q") return;
-  const words = norm(e.target.value).split(/\s+/).filter(Boolean), shown = [];
-  document.querySelectorAll(".faq-q").forEach(d => { const ok = words.every(w => norm(d.textContent).includes(w)); d.hidden = !ok; if (ok) shown.push(d); });
+  const all = faqExpand(faqWords(e.target.value)), key = all.filter(w => w.length > 1 && !FAQ_STOP.has(w)), words = key.length ? key : all.filter(w => w.length > 1), shown = [];
+  const qs = [...document.querySelectorAll(".faq-q")];
+  if (!faqIdx) faqIdx = new Map(qs.map(d => [d, { t: faqWordsAll(d.querySelector("summary").textContent), a: faqWordsAll(d.textContent) }]));
+  // un mot tapé vaut plus s'il est dans la question que dans la réponse, et s'il est exact plutôt qu'avec une faute
+  const hit = (w, list) => list.some(t => t.startsWith(w)) ? 2 : list.some(t => fuzzy(w, t) || (t.length >= 4 && w.startsWith(t)) || (w.length >= 5 && t.length >= 5 && w.slice(0, 4) === t.slice(0, 4))) ? 1 : 0;
+  const rate = d => { const ix = faqIdx.get(d); let n = 0, pts = 0; words.forEach(w => { const v = Math.max(hit(w, ix.t) * 2, hit(w, ix.a)); if (v) { n++; pts += v; } }); return { n, pts }; };
+  const sc = new Map(qs.map(d => [d, rate(d)])), bestN = Math.max(0, ...[...sc.values()].map(x => x.n));
+  const bestPts = Math.max(0, ...[...sc.values()].filter(x => x.n === bestN).map(x => x.pts));
+  // on garde les questions qui ont le plus de mots trouvés, et parmi elles les plus pertinentes
+  qs.forEach(d => { const x = sc.get(d), ok = !words.length || (bestN > 0 && x.n === bestN && x.pts >= bestPts * 0.6); d.hidden = !ok; if (ok) shown.push(d); });
   document.querySelectorAll(".faq-cat").forEach(s => { s.hidden = !s.querySelector(".faq-q:not([hidden])"); });
   const none = document.querySelector(".faq-none"); if (none) none.hidden = shown.length > 0;
   if (words.length && shown.length === 1) shown[0].open = true;

@@ -178,6 +178,8 @@ function cvDef(k) {
 const cvNum = v => num(v); // valeurs enregistrées : nombres (les temps « m:ss » en secondes)
 const cvFmt = (d, v) => (v == null ? "—" : d.clock ? fmtClock(v) + (d.u ? " " + d.u : "") : fmtNum(d.int ? Math.round(v) : Math.round(v * 100) / 100) + (d.u ? " " + d.u : ""));
 const cardioMachineOf = name => { const l = libFor(name); return l && CARDIO_MACH[l.id] ? l.id : ""; };
+// renommer une machine de cardio : un autre nom de machine de la bibliothèque change la machine (et ses stats) ; un nom perso garde la machine
+const renameCardio = (e, name) => { if (e && e.type === "cardio") { const m = cardioMachineOf(name); if (m) e.machine = m; } };
 const cardioMachines = () => Object.keys(CARDIO_MACH).map(id => EXO_LIB.find(x => x.id === id)).filter(Boolean);
 const cardioInfo = id => cardioDefs({ machine: id, name: "" }).map(d => d.n + (d.u && !d.clock && !norm(d.n).includes(norm(d.u)) ? " (" + d.u + ")" : ""));
 const newExercise = () => ({ id: "e-" + uid(), name: "Nouvel exercice", type: "reps", sets: 3, target: "8-10", rest: 90, note: "" });
@@ -1323,10 +1325,8 @@ function exFields(e, k, letter, inGroup) {
     '<div class="ed-grid"><label class="fl full">Nom<input class="f" data-suggest autocomplete="off" maxlength="80" data-p="name" data-e="' + k + '" value="' + esc(e.name) + '"><div class="sugg" hidden></div></label>' +
     (libFor(e.name) ? '<div class="full" data-exolink="' + k + '"><button type="button" class="chip-mini" data-act="exoview" data-id="' + libFor(e.name).id + '">' + ICON.play + "Voir le mouvement</button></div>" : '<div class="full" data-exolink="' + k + '" hidden></div>') +
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
-    (cardio ? '<label class="fl">Machine<select class="f" data-p="machine" data-e="' + k + '">' + cardioMachines().map(m => '<option value="' + m.id + '"' + (e.machine === m.id ? " selected" : "") + ">" + esc(m.n) + "</option>").join("") +
-      '<option value=""' + (CARDIO_MACH[e.machine] ? "" : " selected") + ">Autre activité</option></select></label>" +
-      '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
-      '<div class="fl full cv-info"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
+    (cardio ? '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
+      '<div class="fl full cv-info" data-cvinfo="' + k + '"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
     (inGroup || cardio ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
     (cardio ? "" : dist ? '<div class="fl"><span>Distance</span><button type="button" class="f pick" data-act="picksec" data-sf="dtarget" data-e="' + k + '">' + fmtDist(num(e.target) || 1000, "m") + "</button></div>" +
       '<label class="fl">Charge<select class="f" data-p="load" data-e="' + k + '"><option value="0"' + (!e.load ? " selected" : "") + '>Sans charge</option><option value="1"' + (e.load ? " selected" : "") + ">Avec charge (kg)</option></select></label>"
@@ -3276,9 +3276,9 @@ $app.addEventListener("click", async e => {
       const ex = w.exercises[i];
       const n = await ask({ title: "Renommer l'exercice", input: ex.name, ok: "Renommer" });
       if (!n) return;
-      ex.name = n.slice(0, 80); put("workout", w);
+      ex.name = n.slice(0, 80); renameCardio(ex, ex.name); put("workout", w);
       const t = getItem(w.templateId), te = tplExercise(w, ex.exId);
-      if (t && te) { te.name = n.slice(0, 80); put("template", t); }
+      if (t && te) { te.name = n.slice(0, 80); renameCardio(te, te.name); put("template", t); }
       render();
     } break;
     case "addex": case "sessstretch": if (w) {
@@ -3590,7 +3590,7 @@ $app.addEventListener("input", e => {
     if (p === "tname") { t.name = el.value; putLater("template", t); return; }
     if (p === "vname") { v.name = el.value; putLater("template", t); const tab = $app.querySelector("[data-vtab]"); if (tab) tab.textContent = el.value; return; }
     const ex = v.exercises[+el.dataset.e]; if (!ex) return;
-    if (p === "type" || p === "drops" || p === "gkind" || p === "dscope" || p === "machine") return; // géré par « change »
+    if (p === "type" || p === "drops" || p === "gkind" || p === "dscope") return; // géré par « change »
     if (p === "gsets" || p === "grest") {
       const val = num(el.value) == null ? "" : Math.max(0, Math.round(num(el.value)));
       v.exercises.forEach(e => { if (e.groupId && e.groupId === ex.groupId) e[p === "gsets" ? "sets" : "rest"] = val; });
@@ -3598,6 +3598,7 @@ $app.addEventListener("input", e => {
     }
     if (p === "name") {
       const ti = $app.querySelector('[data-title="' + el.dataset.e + '"]'); if (ti) ti.textContent = el.value;
+      if (ex.type === "cardio") { renameCardio(ex, el.value); const ci = $app.querySelector('[data-cvinfo="' + el.dataset.e + '"] .small'); if (ci) ci.textContent = "Durée, " + cardioDefs(ex).map(x => x.n.toLowerCase()).join(", ") + ". Tu peux en ajouter pendant la séance."; }
       const lk = $app.querySelector('[data-exolink="' + el.dataset.e + '"]'), lib = libFor(el.value);
       if (lk) { lk.hidden = !lib; lk.innerHTML = lib ? '<button type="button" class="chip-mini" data-act="exoview" data-id="' + lib.id + '">' + ICON.play + "Voir le mouvement</button>" : ""; }
     }
@@ -3621,10 +3622,6 @@ $app.addEventListener("change", e => {
     if ((ex.type === "reps" || ex.type === "rep") && !/^\d+(-\d+)?$/.test(String(ex.target))) ex.target = "8-10";
     if (ex.type !== "reps") ex.drops = 0;
     put("template", t); render();
-  } else if (el.dataset.p === "machine") {
-    const { t, v } = currentProgram(); if (!t) return;
-    const ex = v.exercises[+el.dataset.e]; if (!ex) return;
-    ex.machine = CARDIO_MACH[el.value] ? el.value : ""; put("template", t); render();
   } else if (el.dataset.p === "load") {
     const { t, v } = currentProgram(); if (!t) return;
     const ex = v.exercises[+el.dataset.e]; if (!ex) return;

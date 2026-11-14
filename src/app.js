@@ -521,6 +521,33 @@ window.addEventListener("hashchange", e => {
   let old = ""; try { old = e.oldURL ? new URL(e.oldURL).hash : ""; } catch (err) { }
   navRestoring = true; flushPending(); render(); afterNavigate(old);
 });
+/* Fenêtres (roues, choix, confirmations) : le bouton retour du téléphone (Android, iPhone) ou du navigateur, et Échap sur PC,
+   font comme « Annuler ». Chaque fenêtre ouverte ajoute une entrée à l'historique (même adresse) ; le retour la referme au lieu de changer de page. */
+let modalStale = false; // l'entrée actuelle vient d'une fenêtre fermée par un bouton : le prochain retour doit changer de page
+const openModals = () => Array.from(document.querySelectorAll("body > .modal"));
+const cancelModal = m => m.dispatchEvent(new MouseEvent("click", { bubbles: true })); // comme un appui à côté de la fenêtre : toutes les fenêtres le traitent comme « Annuler »
+new MutationObserver(muts => {
+  for (const mu of muts) {
+    mu.addedNodes.forEach(n => {
+      if (n.nodeType !== 1 || !n.classList.contains("modal")) return;
+      const st = Object.assign({}, history.state, { modal: true });
+      if (history.state && history.state.modal && openModals().length === 1) history.replaceState(st, ""); else history.pushState(st, ""); // une entrée laissée par une fenêtre fermée resert
+      modalStale = false; n.__hist = true;
+    });
+    mu.removedNodes.forEach(n => { if (n.nodeType === 1 && n.__hist && !n.__popped && !openModals().length && history.state && history.state.modal) modalStale = true; });
+  }
+}).observe(document.body, { childList: true });
+let lastHash = location.hash;
+window.addEventListener("popstate", e => {
+  const moved = location.hash !== lastHash; lastHash = location.hash;
+  if (!e.state && moved) return; // nouvelle page (changement d'adresse), pas un retour
+  const ms = openModals();
+  if (ms.length) { const top = ms[ms.length - 1]; top.__popped = true; modalStale = false; cancelModal(top); return; }
+  if (modalStale) { modalStale = false; history.back(); return; } // on était sur l'entrée d'une fenêtre déjà fermée : on fait le vrai retour
+  if (history.state && history.state.modal) history.back(); // entrée d'une fenêtre fermée, retrouvée en revenant en arrière : on la passe
+});
+window.addEventListener("hashchange", () => { modalStale = false; lastHash = location.hash; });
+document.addEventListener("keydown", e => { if (e.key !== "Escape") return; const ms = openModals(); if (ms.length) { e.preventDefault(); cancelModal(ms[ms.length - 1]); } });
 // changement de page qui remplace la page actuelle dans l'historique (fiche suivante en glissant) : le « Retour » reste le même
 window.__navReplace = hash => {
   const prev = (history.state || {}).prev || "";
@@ -2359,7 +2386,8 @@ const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fm
 function pickWheels(title, cols) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal sheet";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '" style="--n:' + cols.length + '">' +
+    const tl = String(title).split(" · ");
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3 class="wheel-title">' + tl.map((x, k) => k ? '<span class="wt-' + (k === 1 ? "ex" : "sub") + '">' + esc(x) + "</span>" : "<span>" + esc(x) + "</span>").join("") + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '" style="--n:' + cols.length + '">' +
       (cols.some(c => c.label) ? cols.map(c => '<div class="wheel-lab">' + esc(c.label || "") + "</div>").join("") : "") +
       cols.map((c, n) => '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" data-col="' + n + '" tabindex="0" role="listbox" aria-label="' + esc(title) + '">' +
         c.vals.map((x, k) => '<div class="wv" role="option" data-k="' + k + '">' + esc(c.fmt(x)) + "</div>").join("") + "</div></div>").join("") + "</div>" +

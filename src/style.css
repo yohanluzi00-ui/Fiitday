@@ -759,3 +759,6 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .npick.empty { color: var(--muted); opacity: .8; }
 .done-row .npick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); font-weight: 700; }
 .cv-grid .cv-pick { justify-content: center; text-align: center; }
+.wheel-title { display: flex; flex-direction: column; gap: 2px; }
+.wheel-title .wt-ex { font-size: 15px; font-weight: 600; color: var(--ink); }
+.wheel-title .wt-sub { font-size: 14px; font-weight: 500; color: var(--muted); }

@@ -2346,12 +2346,12 @@ function pickNumber(title, value, spec, unit) {
   const t = Math.round(v * dec);
   return pickWheels(title, [{ vals: rng(max + 1), fmt: x => String(x), value: Math.min(max, Math.floor(t / dec)) }, { vals: rng(dec), fmt: x => "," + x + u, value: t % dec }]).then(r => (r ? Math.round((r[0] + r[1] / dec) * 10) / 10 : null));
 }
-// une série : kilos (entiers + quarts) et / ou répétitions, dans la même fenêtre
+// une case de série : les kilos (entiers + quarts) ou les répétitions
 const KG_DEC = [0, 0.25, 0.5, 0.75];
 function pickSet(title, kg, reps) {
   const cols = [];
-  if (kg != null) { const q = Math.round(kg * 4) / 4; cols.push({ label: "Kilos", vals: rng(401), fmt: x => String(x), value: Math.min(400, Math.floor(q)) }, { label: " ", vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: q - Math.floor(q) }); }
-  if (reps != null) cols.push({ label: "Répétitions", vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
+  if (kg != null) { const q = Math.round(kg * 4) / 4; cols.push({ vals: rng(401), fmt: x => String(x), value: Math.min(400, Math.floor(q)) }, { vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: q - Math.floor(q) }); }
+  if (reps != null) cols.push({ vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
   return pickWheels(title, cols).then(r => r && { kg: kg != null ? r[0] + r[1] : null, reps: reps != null ? r[r.length - 1] : null });
 }
 const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fmtNum(v / 1000) + " km" : fmtNum(v) + " m");
@@ -3200,8 +3200,9 @@ $app.addEventListener("click", async e => {
       const first = f => { for (const o of cands) { const x = o && num(o[f]); if (x != null && x > 0) return x; } return null; };
       let k0 = first("kg"), r0 = first("reps");
       if (d != null) { const base = [set].concat(earlier).find(o => num(o.kg) > 0); if (k0 == null && base) k0 = num(base.kg) * 0.8; const rb = [set].concat(earlier).find(o => num(o.reps) > 0); if (r0 == null && rb) r0 = num(rb.reps); }
-      const withKg = e.type === "reps" || !e.type || (e.type === "dist" && e.load), withReps = e.type !== "dist";
-      const r = await pickSet(e.name + " · série " + (s + 1) + (d != null ? " · baisse " + (d + 1) : ""), withKg ? (k0 != null ? k0 : 20) : null,
+      // la case touchée seulement : les kilos (roues des kilos) ou les répétitions (roue des répétitions)
+      const f = b.dataset.f === "kg" ? "kg" : "reps", withKg = f === "kg", withReps = f === "reps";
+      const r = await pickSet((withKg ? "Kilos" : "Répétitions") + " · " + e.name + " · série " + (s + 1) + (d != null ? " · baisse " + (d + 1) : ""), withKg ? (k0 != null ? k0 : 20) : null,
         withReps ? (r0 != null ? r0 : num(String(e.target || "").split("-")[0]) || 10) : null);
       if (!r) return;
       if (r.kg != null) tgt.kg = r.kg > 0 ? String(r.kg) : "";

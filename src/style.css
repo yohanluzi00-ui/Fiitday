@@ -708,3 +708,7 @@ html.is-dragging, html.is-dragging * { user-select: none; -webkit-user-select: n
 .swatch.on { color: var(--ink); font-weight: 700; }
 .swatch.on i { box-shadow: 0 0 0 2px var(--ink); }
 .swatch:focus-visible i { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* dégradé posé sur toute la case, bordure comprise : sinon il se répète sous la bordure transparente
+   et laisse un fin liseré d'une autre couleur à gauche et à droite */
+.btn.primary, .seg button.on, .tabs button.on, .letter, .chrono.run, .meter span, .tabs a.tab.on, .cal-d.has, .rec-box,
+.chip-btn[aria-pressed="true"], .exo-mode button[aria-pressed="true"], .btn.lit, .swatch i { background-origin: border-box; }

@@ -139,9 +139,47 @@ const activeWorkout = () => workouts().find(w => !w.endedAt) || null;
 function settings() { return Object.assign({ id: "settings", theme: "auto", alert: "vibration", goal: "5" }, getItem("settings") || {}); }
 function setSetting(k, v) { const s = settings(); s[k] = v; put("settings", s); applyTheme(); render(); }
 // réglages de départ d'un exercice de la bibliothèque (type, cible, repos, charge)
-const libDefaults = lib => lib.kind === "time" ? Object.assign({ type: "time", target: String(lib.hold || 45), rest: lib.rest || 60 }, lib.hold ? { sets: 2 } : {})
+const libDefaults = lib => CARDIO_MACH[lib.cardioOf] || lib.cat === "cardio" ? { type: "cardio", machine: lib.cardioOf || lib.id, sets: 1, target: "", rest: 0 }
+  : lib.kind === "time" ? Object.assign({ type: "time", target: String(lib.hold || 45), rest: lib.rest || 60 }, lib.hold ? { sets: 2 } : {})
   : lib.kind === "dist" ? { type: "dist", target: String(lib.dist || 1000), rest: lib.rest || 120, load: !!lib.load }
   : { type: /^Poids du corps/.test(lib.gear || "") ? "rep" : "reps", target: (String(lib.reps || "").match(/^\d+(-\d+)?/) || ["8-10"])[0], rest: lib.rest || 90 };
+/* ================= Cardio : machines et indicateurs ================= */
+// indicateurs connus : nom, nom court (boutons de Stats), unité ; clock : saisi en m:ss ; low : plus bas = mieux ; add : s'additionne entre deux blocs
+const CARDIO_M = {
+  dist: { n: "Distance", s: "Distance", u: "km", add: true }, distm: { n: "Distance", s: "Distance", u: "m", add: true, int: true },
+  vit: { n: "Vitesse moyenne", s: "Vitesse", u: "km/h" }, incl: { n: "Inclinaison", s: "Inclinaison", u: "%" },
+  res: { n: "Résistance", s: "Résistance", u: "niveau" }, cad: { n: "Cadence", s: "Cadence", u: "tr/min", int: true }, watts: { n: "Puissance moyenne", s: "Watts", u: "W", int: true },
+  spm: { n: "Foulées", s: "Foulées", u: "/min", int: true }, etages: { n: "Étages montés", s: "Étages", u: "étages", add: true, int: true }, marches: { n: "Marches", s: "Marches", u: "marches", add: true, int: true },
+  niv: { n: "Vitesse", s: "Niveau", u: "niveau" }, t500: { n: "Temps aux 500 m", s: "Temps / 500 m", u: "/500 m", clock: true, low: true }, cpm: { n: "Coups de rame", s: "Coups", u: "/min", int: true },
+  cal: { n: "Calories", s: "Calories", u: "kcal", add: true, int: true }, fc: { n: "Fréquence cardiaque moyenne", s: "FC moy.", u: "bpm", int: true }
+};
+// indicateurs de départ de chaque machine (la fréquence cardiaque partout) ; une activité perso : distance, calories, fréquence cardiaque
+const CARDIO_MACH = {
+  "tapis-course": ["dist", "vit", "incl", "cal", "fc"], "tapis-incurve": ["dist", "vit", "cal", "fc"],
+  "velo-droit": ["dist", "res", "cad", "watts", "cal", "fc"], "velo-semi-allonge": ["dist", "res", "watts", "cal", "fc"], "velo-biking": ["dist", "res", "cad", "cal", "fc"],
+  "velo-elliptique": ["dist", "res", "spm", "cal", "fc"], "escalier": ["etages", "marches", "niv", "cal", "fc"], "arc-trainer": ["dist", "res", "incl", "cal", "fc"],
+  "rameur": ["distm", "t500", "cpm", "watts", "cal", "fc"], "skierg": ["distm", "t500", "watts", "cal", "fc"], "air-bike": ["dist", "watts", "cal", "fc"]
+};
+const CARDIO_BASE = ["dist", "cal", "fc"];
+const CARDIO_MAX_OWN = 10; // indicateurs perso par machine
+const cardioKey = e => (e.machine && CARDIO_MACH[e.machine] ? e.machine : "n:" + norm(e.name || "").slice(0, 40));
+function cardioCustom(key) { const c = settings().cardioCustom, l = c && typeof c === "object" ? c[key] : null; return Array.isArray(l) ? l.filter(x => x && /^c[a-z0-9]{2,16}$/.test(x.k) && x.n) : []; }
+const cvOwn = (k, d) => Object.assign({ k, n: String(d.n).slice(0, 30), s: String(d.n).slice(0, 14), u: String(d.u || "").slice(0, 12), own: true });
+function cardioDefs(e) {
+  return (CARDIO_MACH[e.machine] || CARDIO_BASE).map(k => Object.assign({ k }, CARDIO_M[k])).concat(cardioCustom(cardioKey(e)).map(x => cvOwn(x.k, x)));
+}
+// définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
+function cvDef(k) {
+  if (CARDIO_M[k]) return Object.assign({ k }, CARDIO_M[k]);
+  const c = settings().cardioCustom || {};
+  for (const key in c) { const x = Array.isArray(c[key]) && c[key].find(y => y && y.k === k); if (x) return cvOwn(k, x); }
+  return null;
+}
+const cvNum = v => num(v); // valeurs enregistrées : nombres (les temps « m:ss » en secondes)
+const cvFmt = (d, v) => (v == null ? "—" : d.clock ? fmtClock(v) + (d.u ? " " + d.u : "") : fmtNum(d.int ? Math.round(v) : Math.round(v * 100) / 100) + (d.u ? " " + d.u : ""));
+const cardioMachineOf = name => { const l = libFor(name); return l && CARDIO_MACH[l.id] ? l.id : ""; };
+const cardioMachines = () => Object.keys(CARDIO_MACH).map(id => EXO_LIB.find(x => x.id === id)).filter(Boolean);
+const cardioInfo = id => cardioDefs({ machine: id, name: "" }).map(d => d.n + (d.u && !d.clock && !norm(d.n).includes(norm(d.u)) ? " (" + d.u + ")" : ""));
 const newExercise = () => ({ id: "e-" + uid(), name: "Nouvel exercice", type: "reps", sets: 3, target: "8-10", rest: 90, note: "" });
 const blankSet = drops => ({ kg: "", reps: "", sec: "", done: false, drops: Array.from({ length: Math.max(0, num(drops) || 0) }, () => ({ kg: "", reps: "" })) });
 // baisses d'une série en dégressif : toutes les séries, ou seulement la dernière (dropScope "last")
@@ -196,10 +234,16 @@ function tplExercise(w, exId) {
   const v = t.variants.find(x => x.id === w.variantId); if (!v) return null;
   return v.exercises.find(e => e.id === exId) || null;
 }
-const setHasData = (s, type) => type === "time" || type === "dist" ? num(s.sec) != null : (num(s.kg) != null || num(s.reps) != null);
+const cvHas = s => !!(s.cv && Object.keys(s.cv).some(k => cvNum(s.cv[k], cvDef(k)) != null));
+const setHasData = (s, type) => type === "cardio" ? num(s.sec) != null || cvHas(s) : type === "time" || type === "dist" ? num(s.sec) != null : (num(s.kg) != null || num(s.reps) != null);
 const exHasData = e => e.sets.some(s => setHasData(s, e.type));
 
 function oneLabel(s, type) {
+  if (type === "cardio") {
+    const out = num(s.sec) != null ? [fmtClock(s.sec)] : [];
+    Object.keys(s.cv || {}).forEach(k => { const d = cvDef(k), v = cvNum(s.cv[k], d); if (d && v != null && out.length < 4) out.push(cvFmt(d, v)); });
+    return out.join(" · ") || "—";
+  }
   if (type === "time") return num(s.sec) != null ? fmtHold(s.sec) : "—";
   if (type === "dist") return num(s.sec) != null ? fmtClock(s.sec) + (num(s.kg) != null ? " · " + fmtNum(num(s.kg)) + " kg" : "") : "—";
   const kg = num(s.kg), r = num(s.reps);
@@ -583,16 +627,26 @@ function renderNow() {
 let exoMod = null, exoReturn = null, stretchSeq = null; // stretchSeq : suite d'étirements proposée après une séance
 function mountExercises(id, arg) {
   const root = document.getElementById("exo-root"); if (!root) return;
-  if (!id || id === "etirements") { exoReturn = null; stretchSeq = null; } // liste ouverte directement : retour normal
+  if (!id || id === "etirements" || id === "cardio") { exoReturn = null; stretchSeq = null; } // liste ouverte directement : retour normal
   const back = id && exoReturn ? { href: exoReturn, label: /^#\/session/.test(exoReturn) ? "Retour à la séance" : /^#\/(home)?$/.test(exoReturn) ? "Accueil" : "Retour au programme" } : null;
   const ready = exoMod ? Promise.resolve(exoMod) : import("./exercices.js?v=" + encodeURIComponent(window.APP_BUILD || "")).then(m => (exoMod = m));
-  ready.then(m => { if (root.isConnected) m.mount(root, id && /^[a-z0-9-]{1,60}$/.test(id) ? id : null, { add: addLibraryExercise, back, seq: stretchSeq }, /^[a-z]{1,12}$/.test(arg || "") ? arg : null); })
+  ready.then(m => { if (root.isConnected) m.mount(root, id && /^[a-z0-9-]{1,60}$/.test(id) ? id : null, { add: addLibraryExercise, back, seq: stretchSeq, cardioStart, cardioInfo }, /^[a-z]{1,12}$/.test(arg || "") ? arg : null); })
     .catch(err => { console.error(err); if (root.isConnected) root.innerHTML = '<div class="page-head"><h1>Exercices</h1></div><div class="card empty">Impossible de charger les exercices' + (navigator.onLine === false ? " sans connexion la première fois" : "") + '. Réessaie dans un instant.</div>'; });
 }
 // « Ajouter à une séance » depuis la fiche d'un exercice
 async function addLibraryExercise(x) {
   const opts = [];
+  const cm = x.cardio && CARDIO_MACH[x.cardio] ? x.cardio : "", act = activeWorkout();
+  if (cm) opts.push(act ? ["act", "La séance en cours", act.templateName + " · " + vLabel(act.variantName)] : ["now", "Une séance cardio maintenant", "Lance le chrono tout de suite"]);
   templates().forEach(t => t.variants.forEach(v => opts.push(["t:" + t.id + ":" + v.id, t.name + " · " + vLabel(v.name), v.exercises.length + " exercice" + (v.exercises.length > 1 ? "s" : "")])));
+  if (cm) {
+    const lib = EXO_LIB.find(y => y.id === cm), te = Object.assign(newExercise(), { name: String(x.name).slice(0, 80) }, libDefaults(Object.assign({}, lib, { cardioOf: cm })));
+    const c = await choose("Ajouter « " + x.name + " » à…", opts); if (!c) return;
+    if (c === "now") { cardioNow([cardioWEx(te)]); return; }
+    if (c === "act") { const w = activeWorkout(); if (!w) return; w.exercises.push(cardioWEx(te)); put("workout", w); toast("Ajouté à la séance en cours"); go("session/" + w.id); return; }
+    const [, tid, vid] = c.split(":"); const t = getItem(tid); const v = t && t.variants.find(y => y.id === vid); if (!v) return;
+    v.exercises.push(te); put("template", t); toast("Ajouté à « " + t.name + " · " + vLabel(v.name) + " »"); return;
+  }
   if (!opts.length) { toast(templates().length ? "Crée d'abord une séance dans un de tes programmes (Accueil › + Nouvelle séance)" : "Crée d'abord un programme depuis l'accueil"); return; }
   const c = await choose("Ajouter « " + x.name + " » à…", opts); if (!c) return;
   const [, tid, vid] = c.split(":"); const t = getItem(tid); const v = t && t.variants.find(y => y.id === vid); if (!v) return;
@@ -848,7 +902,7 @@ function viewHome() {
       }).join("") + '<button class="variant add" data-act="homeaddvar" data-t="' + t.id + '" aria-label="Nouvelle séance dans ' + esc(t.name) + '"><b>+ Nouvelle séance</b><span>Ajouter une séance à ce programme</span></button></div></div>';
   }
   h += "</div>";
-  h += '<div class="section-title">Découvrir</div><div class="home-more"><a class="card" href="#/exercices/etirements"><b>Étirements</b><span class="muted small">Haut, milieu et bas du corps, avec les conseils</span></a>' +
+  h += '<div class="section-title">Découvrir</div><div class="home-more"><button type="button" class="card" data-act="cardiohome"><b>Séance cardio</b><span class="muted small">Tapis, vélo, elliptique, rameur… avec tes indicateurs</span></button>' +
     '<a class="card" href="#/programs"><b>Programmes Fiitday</b><span class="muted small">' + (isFree() ? '<span class="tag">Premium</span> ' : "") + 'Programmes prêts à l\'emploi et circuit training</span></a></div>';
   const recent = finished().slice(0, 3);
   if (recent.length) {
@@ -889,13 +943,88 @@ async function startWorkout(tid, vid, direct) {
   }
   const w = {
     id: "w-" + uid(), templateId: t.id, variantId: v.id, templateName: t.name, variantName: v.name, startedAt: Date.now(), endedAt: null,
-    exercises: v.exercises.map(e => ({ exId: e.id, name: e.name, note: e.note || "", type: e.type, target: e.target, rest: e.rest, load: !!e.load, restNext: restNextOf(e, v), drops: dropsOf(e), groupId: e.groupId || null, groupKind: e.groupKind || null,
+    exercises: v.exercises.map(e => ({ exId: e.id, name: e.name, note: e.note || "", type: e.type, machine: e.type === "cardio" ? e.machine || "" : undefined, target: e.target, rest: e.rest, load: !!e.load, restNext: restNextOf(e, v), drops: dropsOf(e), groupId: e.groupId || null, groupKind: e.groupKind || null,
       dropScope: e.dropScope === "last" ? "last" : "all",
-      sets: (n => Array.from({ length: n }, (_, k) => blankSet(dropsFor(e, k, n))))(Math.max(1, num(e.sets) || 1)) })),
+      sets: (n => Array.from({ length: n }, (_, k) => blankSet(dropsFor(e, k, n))))(e.type === "cardio" ? 1 : Math.max(1, num(e.sets) || 1)) })),
   };
   put("workout", w);
   db.live = {}; save();
   go("session/" + w.id);
+}
+
+/* ================= Séance cardio (accueil, onglet Cardio des exercices) ================= */
+async function cardioStart() {
+  const act = activeWorkout();
+  const c = await choose("Séance cardio", [["now", act ? "Ajouter à la séance en cours" : "Lancer maintenant", act ? act.templateName + " · " + vLabel(act.variantName) + " : ajoute tes machines à la suite" : "Choisis tes machines, lance le chrono, puis note tes indicateurs à la fin"],
+    ["past", "Ajouter une séance faite", "Indique le jour, puis la durée et les indicateurs de chaque machine"]]);
+  if (c === "now") cardioNow(); else if (c === "past") cardioPast();
+}
+const cardioWEx = te => ({ exId: te.id, name: te.name, note: "", type: "cardio", machine: te.machine || "", target: te.target || "", rest: 0, load: false, drops: 0, groupId: null, groupKind: null, dropScope: "all", restNext: 0, sets: [blankSet(0)] });
+async function cardioPick(title) {
+  const picks = await pickExercises("cardio", title); if (!picks) return null;
+  return picks.map(p => cardioWEx(p.lib ? libExercise(p) : Object.assign(newExercise(), { name: String(p.name).slice(0, 80), type: "cardio", machine: cardioMachineOf(p.name), sets: 1, target: "", rest: 0 })));
+}
+const cardioWorkout = (start, exercises, manual) => Object.assign({ id: "w-" + uid(), templateId: "cardio", variantId: "cardio", templateName: "Cardio", variantName: "Séance cardio", cardio: true, startedAt: start, endedAt: manual ? start : null, exercises }, manual ? { manual: true } : {});
+// séance ajoutée après coup : elle dure le total des durées notées
+function syncManual(w) { const tot = w.exercises.reduce((a, e) => a + e.sets.reduce((b, st) => b + Math.max(0, num(st.sec) || 0), 0), 0); w.endedAt = w.startedAt + Math.min(tot, 12 * 3600) * 1000 || w.startedAt; }
+async function cardioNow(exs) {
+  const act = activeWorkout();
+  exs = exs || await cardioPick(act ? "Ajouter à la séance en cours" : "Lancer une séance cardio"); if (!exs || !exs.length) return;
+  if (act) { act.exercises.push(...exs); put("workout", act); toast(exs.length > 1 ? "Machines ajoutées à la séance en cours" : "Ajouté à la séance en cours"); go("session/" + act.id); return; }
+  const w = cardioWorkout(Date.now(), exs, false);
+  put("workout", w); db.live = {}; save(); go("session/" + w.id);
+}
+async function cardioPast() {
+  const at = await askWhen(); if (!at) return;
+  const exs = await cardioPick("Machines de ta séance"); if (!exs || !exs.length) return;
+  const w = cardioWorkout(at, exs, true);
+  put("workout", w); save(); go("session/" + w.id);
+  toast("Note maintenant la durée et les indicateurs de chaque machine");
+}
+// jour et heure d'une séance déjà faite (pas dans le futur)
+function askWhen() {
+  return new Promise(res => {
+    const now = new Date(), d0 = new Date(now.getTime() - 3600e3), day = x => x.getFullYear() + "-" + pad(x.getMonth() + 1) + "-" + pad(x.getDate());
+    const d = document.createElement("div"); d.className = "modal";
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="Séance cardio faite"><h3>Séance cardio faite</h3><p>Quand l\'as-tu faite ? Tu choisis ensuite les machines, puis tu notes la durée et les indicateurs.</p>' +
+      '<div class="row duo when-row"><label class="fl">Jour<input class="f" type="date" data-wd max="' + day(now) + '" value="' + day(d0) + '" required></label>' +
+      '<label class="fl">Heure de début<input class="f" type="time" data-wt value="' + pad(d0.getHours()) + ":" + pad(Math.floor(d0.getMinutes() / 5) * 5) + '" required></label></div>' +
+      '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">Continuer</button></div></div>';
+    document.body.appendChild(d);
+    const ok = () => {
+      const a = (d.querySelector("[data-wd]").value || "").split("-").map(Number), b = (d.querySelector("[data-wt]").value || "").split(":").map(Number), m = d.querySelector("[data-m]");
+      const t = a.length === 3 && b.length >= 2 ? new Date(a[0], a[1] - 1, a[2], b[0], b[1]).getTime() : NaN;
+      if (isNaN(t)) { m.textContent = "Choisis le jour et l'heure."; return; }
+      if (t > Date.now()) { m.textContent = "Choisis un moment déjà passé."; return; }
+      if (t < Date.now() - 5 * 366 * DAY) { m.textContent = "Choisis une date de moins de 5 ans."; return; }
+      d.remove(); res(t);
+    };
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const r = e.target.closest("[data-r]"); if (!r) return;
+      if (r.dataset.r === "1") ok(); else { d.remove(); res(null); }
+    });
+  });
+}
+// nouvel indicateur de cardio : nom et unité, gardés pour cette machine
+function askIndicator(name) {
+  return new Promise(res => {
+    const d = document.createElement("div"); d.className = "modal";
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="Nouvel indicateur"><h3>Nouvel indicateur</h3><p>Pour « ' + esc(name) + ' ». Il te sera proposé à chaque fois que tu feras cette machine.</p>' +
+      '<label class="fl">Nom<input class="f" data-in maxlength="30" placeholder="Ex. Pente moyenne, Watts max" autocomplete="off"></label>' +
+      '<label class="fl">Unité (facultatif)<input class="f" data-iu maxlength="12" placeholder="Ex. %, W, tours" autocomplete="off"></label>' +
+      '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">Ajouter</button></div></div>';
+    document.body.appendChild(d);
+    const n = d.querySelector("[data-in]"), u = d.querySelector("[data-iu]"); n.focus();
+    const ok = () => { const v = n.value.replace(/\s+/g, " ").trim(); if (!v) { d.querySelector("[data-m]").textContent = "Donne un nom à l'indicateur."; return; } d.remove(); res({ n: v.slice(0, 30), u: u.value.replace(/\s+/g, " ").trim().slice(0, 12) }); };
+    n.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); u.focus(); } });
+    u.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); ok(); } });
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const r = e.target.closest("[data-r]"); if (!r) return;
+      if (r.dataset.r === "1") ok(); else { d.remove(); res(null); }
+    });
+  });
 }
 
 /* ================= Écran : séance ================= */
@@ -911,6 +1040,7 @@ function phOf(w, e, s, d) {
 function inputsHtml(w, e, i, k, d, label) {
   const s = e.sets[k], v = d == null ? s : ((s.drops || [])[d] || {}), ph = phOf(w, e, k, d);
   const a = ' data-i="' + i + '" data-s="' + k + '"' + (d == null ? "" : ' data-d="' + d + '"');
+  if (e.type === "cardio") return '<input inputmode="numeric" aria-label="Durée ' + label + ' (minutes:secondes)" data-f="clock"' + a + ' value="' + (num(v.sec) != null ? fmtClock(v.sec) : "") + '" placeholder="' + esc(ph.clock) + '">';
   if (e.type === "time") return '<input class="ro" readonly tabindex="-1" aria-readonly="true" aria-label="Temps ' + label + ' (rempli par le chrono)" data-f="sec"' + a + ' value="' + esc(fmtHold(v.sec)) + '" placeholder="' + esc(ph.sec) + '">';
   if (e.type === "rep") return '<input inputmode="numeric" aria-label="Répétitions ' + label + '" data-f="reps"' + a + ' value="' + esc(v.reps) + '" placeholder="' + esc(ph.reps) + '">';
   if (e.type === "dist") return (e.load ? '<input inputmode="decimal" aria-label="Kilos ' + label + '" data-f="kg"' + a + ' value="' + esc(v.kg) + '" placeholder="' + esc(ph.kg) + '">' : "") +
@@ -929,13 +1059,14 @@ function okBtn(s, i, k) {
 // une série (et ses baisses) dans la grille des cartes
 function setRows(w, e, i, k, label) {
   const s = e.sets[k], d = s.done ? " done-row" : "";
-  let h = '<div class="n">' + label + '</div><div class="set' + d + '">' + inputsHtml(w, e, i, k, null, "série " + (k + 1)) + (e.type === "time" || e.type === "dist" ? chronoBtn(w, i, k) : "") + "</div>" + okBtn(s, i, k);
+  let h = '<div class="n">' + label + '</div><div class="set' + d + '">' + inputsHtml(w, e, i, k, null, "série " + (k + 1)) + (e.type === "time" || e.type === "dist" || e.type === "cardio" ? chronoBtn(w, i, k) : "") + "</div>" + okBtn(s, i, k);
   (s.drops || []).forEach((x, n) => {
     h += '<div class="n drop" title="Baisse ' + (n + 1) + '">↘</div><div class="set' + d + '">' + inputsHtml(w, e, i, k, n, "série " + (k + 1) + " baisse " + (n + 1)) + "</div><div></div>";
   });
   return h;
 }
 function metaText(e, inGroup, live) {
+  if (e.type === "cardio") return "Cardio" + (num(e.target) ? " · objectif " + fmtNum(num(e.target)) + " min" : "") + (live ? " · lance le chrono, puis note tes indicateurs" : "");
   const time = e.type === "time";
   const tg = e.type === "dist" ? esc(fmtNum(num(e.target) || 0)) + " m" : time ? esc(fmtHold(e.target) || "—") : esc(e.target || "—");
   let t = inGroup ? "Cible " + tg + (time || e.type === "dist" ? "" : " reps") : e.sets.length + " × " + tg + (live ? "" : " · repos " + esc(fmtRest(e.rest)));
@@ -946,8 +1077,9 @@ function metaText(e, inGroup, live) {
 }
 function exHead(w, e, i, letter) {
   const lib = libFor(e.name), live = !w.endedAt, time = e.type === "time";
-  const chips = (lib ? '<button class="chip-mini" data-act="exoview" data-id="' + lib.id + '">' + ICON.play + "Voir le mouvement</button>" : "") +
-    (live && !letter ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
+  const cd = e.type === "cardio", mid = cd && e.machine && CARDIO_MACH[e.machine] ? e.machine : lib && lib.id;
+  const chips = (mid ? '<button class="chip-mini" data-act="exoview" data-id="' + mid + '"' + (cd ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cd ? "Voir la machine" : "Voir le mouvement") + "</button>" : "") +
+    (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
     (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
   const nm = (letter ? '<span class="letter">' + letter + "</span>" : "") + esc(e.name), fk = letter ? null : "w:" + w.id + ":" + (e.exId || i);
   return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div>' +
@@ -962,7 +1094,29 @@ function noteBox(w, e, i, letter) {
   const te = e.note == null ? tplExercise(w, e.exId) : null, note = e.note != null ? e.note : (te && te.note) || ""; // la note de CETTE séance
   return '<textarea class="f" data-f="note" data-i="' + i + '" placeholder="Notes' + (letter ? " " + letter + " · " + esc(e.name) : " (réglages, sensations…)") + '" aria-label="Notes ' + esc(e.name) + '">' + esc(note) + "</textarea>";
 }
+// machine de cardio en séance : durée (chrono ou saisie), indicateurs de la machine et les tiens, validation
+function cardioBody(w, e, i) {
+  const defs = cardioDefs(e), lp = lastPerf(w, e), many = e.sets.length > 1;
+  return e.sets.map((s, k) => {
+    const src = lp && lp.e.sets[k], a = ' data-i="' + i + '" data-s="' + k + '"', lab = many ? " bloc " + (k + 1) : "";
+    return '<div class="cardio-set' + (s.done ? " done-row" : "") + '">' + (many ? '<div class="cv-bloc">Bloc ' + (k + 1) + "</div>" : "") +
+      '<div class="cv-dur"><div class="cv"><span class="cv-n">Durée</span><span class="cv-in"><input inputmode="numeric" data-f="clock"' + a + ' aria-label="Durée' + lab + ' (minutes:secondes)" value="' + (num(s.sec) != null ? fmtClock(s.sec) : "") + '" placeholder="' + (src && num(src.sec) != null ? fmtClock(src.sec) : "m:ss") + '"></span></div>' + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
+      '<div class="cv-grid">' + defs.map(d => {
+        const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
+        return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
+          '<span class="cv-in"><input inputmode="' + (d.clock ? "numeric" : "decimal") + '" data-f="cv" data-k="' + d.k + '"' + (d.clock ? ' data-clock="1"' : "") + a + ' aria-label="' + esc(d.n + lab + (d.u ? " en " + d.u : "")) + '" value="' +
+          esc(v == null || v === "" ? "" : d.clock ? fmtClock(v) : String(v).replace(".", ",")) + '" placeholder="' + esc(pv != null ? (d.clock ? fmtClock(pv) : fmtNum(pv)) : d.clock ? "m:ss" : "") + '">' + (d.u ? "<em>" + esc(d.u) + "</em>" : "") + "</span></div>";
+      }).join("") + "</div>" +
+      '<div class="cv-foot"><button type="button" class="link small" data-act="cvadd" data-i="' + i + '">+ Ajouter un indicateur</button><span class="cv-ok">' + (s.done ? "Validé" : "Valider") + okBtn(s, i, k) + "</span></div></div>";
+  }).join("");
+}
+function cardioCard(w, e, i) {
+  const fk = "w:" + w.id + ":" + (e.exId || i), f = folded.has(fk);
+  return '<section class="card ex cardio-ex' + (f ? " folded" : "") + '">' + exHead(w, e, i, "") + (f ? '<div class="fold-sum muted small">' + esc(exSummary(e) || "À remplir") + "</div>" :
+    '<div class="blk-body">' + cardioBody(w, e, i) + noteBox(w, e, i, "") + "</div>") + "</section>";
+}
 function exCard(w, e, i) {
+  if (e.type === "cardio") return cardioCard(w, e, i);
   let rows = '<div class="h">Série</div><div class="h hdr">' + (e.type === "time" ? "<span>Temps</span>" : e.type === "rep" ? "<span>Reps</span>" : e.type === "dist" ? (e.load ? "<span>Kg</span>" : "") + "<span>Temps</span>" : "<span>Kg</span><span>Reps</span>") + '</div><div class="h"></div>';
   e.sets.forEach((s, k) => { rows += setRows(w, e, i, k, k + 1); });
   const f = folded.has("w:" + w.id + ":" + (e.exId || i)), dn = e.sets.filter(x => x.done).length;
@@ -998,10 +1152,12 @@ function viewSession(id) {
     '<div class="page-head"><div><div class="muted small">' + esc(vLabel(w.variantName)) + " · " + esc(fmtDateLong(w.startedAt)) + "</div><h1>" + esc(w.templateName) + "</h1></div>" +
     '<div class="row"><span class="num" style="font-size:18px;font-weight:700" data-tick="elapsed" data-id="' + w.id + '"></span>' +
     (active ? '<button class="btn sm" data-act="cancel">Annuler</button>' : "") + "</div></div>";
-  if (!active) { const tn = workoutTon(w); h += '<div class="sess-sum"><div class="card stat"><div class="muted small">Durée</div><div class="v num">' + fmtDurH(workoutDur(w)) + '</div></div><div class="card stat"><div class="muted small">Tonnage</div><div class="v num">' + (tn ? fmtTon(tn) : "—") + "</div></div></div>" +
-    '<div class="banner">Séance terminée. Tu peux encore corriger les valeurs.</div>'; }
+  if (!active) { const tn = workoutTon(w), kc = workoutKcal(w);
+    h += '<div class="sess-sum"><div class="card stat"><div class="muted small">Durée</div><div class="v num">' + fmtDurH(workoutDur(w)) + "</div></div>" +
+      (w.cardio || (!tn && kc) ? '<div class="card stat"><div class="muted small">Calories</div><div class="v num">' + (kc ? fmtNum(Math.round(kc)) + " kcal" : "—") + "</div></div>" : '<div class="card stat"><div class="muted small">Tonnage</div><div class="v num">' + (tn ? fmtTon(tn) : "—") + "</div></div>") + "</div>" +
+      '<div class="banner">' + (w.manual ? "Séance ajoutée après coup : note la durée et les indicateurs de chaque machine. La durée de la séance se calcule toute seule." : "Séance terminée. Tu peux encore corriger les valeurs.") + "</div>"; }
   h += wide ? sessionTable(w) : sessionCards(w);
-  h += '<div class="add-row" style="margin-top:16px"><button class="btn" data-act="addex">+ Ajouter un exercice</button><button class="btn" data-act="sessstretch">+ Ajouter un étirement</button></div>';
+  h += '<div class="add-row" style="margin-top:16px">' + (w.cardio ? '<button class="btn" data-act="addcardio">+ Ajouter une machine</button>' : '<button class="btn" data-act="addex">+ Ajouter un exercice</button>') + '<button class="btn" data-act="sessstretch">+ Ajouter un étirement</button></div>';
   if (active) h += '<div class="restpop" data-restpop hidden><div class="rp-box" role="timer" aria-label="Minuteur de repos"><div class="rp-label">Repos</div>' +
     '<div class="rp-time num" data-rptime>0:00</div><div class="rp-bar"><span data-rpbar></span></div>' +
     '<div class="rp-btns"><button class="rp-b" data-act="restadd" data-v="-15">−15 s</button><button class="rp-b rp-go" data-act="skiprest">Passer</button><button class="rp-b" data-act="restadd" data-v="15">+15 s</button></div>' +
@@ -1027,6 +1183,12 @@ function sessionTable(w) {
     const idx = b.items.map(x => x.i);
     b.items.forEach((x, n) => {
       const e = x.e, i = x.i, time = e.type === "time", isDist = e.type === "dist", grouped = !!b.groupId, lastOfGroup = n === b.items.length - 1;
+      if (e.type === "cardio" && !grouped) {
+        h += '<tr><td><div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div><div class="muted small">' + esc(metaText(e, false, false)) + "</div>" +
+          (e.machine && CARDIO_MACH[e.machine] ? '<button class="chip-mini" data-act="exoview" data-id="' + e.machine + '" data-arg="cardio">' + ICON.play + "Voir la machine</button>" : "") + "</td>" +
+          '<td colspan="' + (3 + max) + '">' + cardioBody(w, e, i) + "</td><td>" + noteBox(w, e, i, "") + "</td></tr>";
+        return;
+      }
       h += '<tr class="' + (grouped && !lastOfGroup ? "chained" : "") + '"><td>' +
         (grouped ? '<div class="gtag">' + esc(GROUP_LABEL[e.groupKind] || "Enchaînement") + " · " + LETTERS[n] + "</div>" : "") +
         '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div>' +
@@ -1050,7 +1212,7 @@ function sessionTable(w) {
 function currentWorkout() { const r = route(); return r.name === "session" ? getItem(r.args[0]) : null; }
 function fillFrom(set, src, type) {
   if (!src) return;
-  for (const f of type === "time" ? ["sec"] : type === "dist" ? ["sec", "kg"] : type === "rep" ? ["reps"] : ["kg", "reps"]) if ((set[f] === "" || set[f] == null) && src[f] !== "" && src[f] != null) set[f] = src[f];
+  for (const f of type === "cardio" ? [] : type === "time" ? ["sec"] : type === "dist" ? ["sec", "kg"] : type === "rep" ? ["reps"] : ["kg", "reps"]) if ((set[f] === "" || set[f] == null) && src[f] !== "" && src[f] != null) set[f] = src[f];
 }
 function markDone(w, i, s) {
   const e = w.exercises[i], set = e.sets[s];
@@ -1120,7 +1282,13 @@ function stopChrono(w, at) {
   db.live.chrono = null;
   if (!set) return;
   if (t < c.start) return; // arrêté pendant la préparation : rien n'est noté
-  set.sec = String(Math.round((t - c.start) / 1000)); set.done = true;
+  set.sec = String(Math.round((t - c.start) / 1000));
+  if (w.exercises[c.i].type === "cardio") { // cardio : la durée est notée, la machine sera validée une fois les indicateurs remplis
+    put("workout", w); toast("Durée notée : remplis maintenant tes indicateurs, puis valide");
+    const i = c.i, k = c.s; setTimeout(() => { const el = $app.querySelector('input[data-f="cv"][data-i="' + i + '"][data-s="' + k + '"]'); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); try { el.focus({ preventScroll: true }); } catch (e) { } } }, 80);
+    return;
+  }
+  set.done = true;
   afterSet(w, c.i, c.s);
   put("workout", w);
   const rec = checkRecord(w, c.i, c.s);
@@ -1145,19 +1313,23 @@ function viewPrograms() {
     '<p class="muted small" style="margin-top:14px">Tes propres programmes se créent et se modifient depuis l\'<a href="#/home">Accueil</a>.</p>';
 }
 function exFields(e, k, letter, inGroup) {
-  const time = e.type === "time", dist = e.type === "dist", rep = e.type === "rep", d = dropsOf(e);
+  const time = e.type === "time", dist = e.type === "dist", rep = e.type === "rep", cardio = e.type === "cardio", d = dropsOf(e);
   return (inGroup ? '<div class="spread"><b><span class="letter">' + letter + '</span><span data-title="' + k + '">' + esc(e.name) + '</span></b><button class="btn sm danger" data-act="delex" data-e="' + k + '">Retirer</button></div>' : "") +
     '<div class="ed-grid"><label class="fl full">Nom<input class="f" data-suggest autocomplete="off" maxlength="80" data-p="name" data-e="' + k + '" value="' + esc(e.name) + '"><div class="sugg" hidden></div></label>' +
     (libFor(e.name) ? '<div class="full" data-exolink="' + k + '"><button type="button" class="chip-mini" data-act="exoview" data-id="' + libFor(e.name).id + '">' + ICON.play + "Voir le mouvement</button></div>" : '<div class="full" data-exolink="' + k + '" hidden></div>') +
-    '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + ">Distance (course, Hyrox)</option></select></label>" +
-    (inGroup ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
-    (dist ? '<label class="fl">Distance (m)<input class="f" type="number" min="1" max="100000" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="1000"></label>' +
+    '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
+    (cardio ? '<label class="fl">Machine<select class="f" data-p="machine" data-e="' + k + '">' + cardioMachines().map(m => '<option value="' + m.id + '"' + (e.machine === m.id ? " selected" : "") + ">" + esc(m.n) + "</option>").join("") +
+      '<option value=""' + (CARDIO_MACH[e.machine] ? "" : " selected") + ">Autre activité</option></select></label>" +
+      '<label class="fl">Durée cible (min)<input class="f" type="number" min="1" max="600" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="Facultatif"></label>' +
+      '<div class="fl full cv-info"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
+    (inGroup || cardio ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
+    (cardio ? "" : dist ? '<label class="fl">Distance (m)<input class="f" type="number" min="1" max="100000" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="1000"></label>' +
       '<label class="fl">Charge<select class="f" data-p="load" data-e="' + k + '"><option value="0"' + (!e.load ? " selected" : "") + '>Sans charge</option><option value="1"' + (e.load ? " selected" : "") + ">Avec charge (kg)</option></select></label>"
     : time ? '<div class="fl"><span>Temps cible</span><button type="button" class="f pick" data-act="picksec" data-sf="target" data-e="' + k + '">' + fmtSecs(num(e.target) || 0) + "</button></div>"
       : '<label class="fl">Reps cible<input class="f" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="8-10"></label>') +
-    (inGroup ? "" : '<div class="fl"><span>Repos</span><button type="button" class="f pick" data-act="picksec" data-sf="rest" data-e="' + k + '">' + fmtSecs(num(e.rest) || 0) + "</button></div>") +
-    (time || dist || rep ? "" : '<label class="fl">Dégressif<select class="f" data-p="drops" data-e="' + k + '">' + [0, 1, 2, 3].map(n => '<option value="' + n + '"' + (d === n ? " selected" : "") + ">" + (n ? "Oui · " + n + " baisse" + (n > 1 ? "s" : "") : "Non") + "</option>").join("") + "</select></label>") +
-    (time || dist || rep || !d ? "" : '<label class="fl">Dégressif sur<select class="f" data-p="dscope" data-e="' + k + '"><option value="all"' + (e.dropScope !== "last" ? " selected" : "") + '>Toutes les séries</option><option value="last"' + (e.dropScope === "last" ? " selected" : "") + ">La dernière série</option></select></label>") +
+    (inGroup || cardio ? "" : '<div class="fl"><span>Repos</span><button type="button" class="f pick" data-act="picksec" data-sf="rest" data-e="' + k + '">' + fmtSecs(num(e.rest) || 0) + "</button></div>") +
+    (time || dist || rep || cardio ? "" : '<label class="fl">Dégressif<select class="f" data-p="drops" data-e="' + k + '">' + [0, 1, 2, 3].map(n => '<option value="' + n + '"' + (d === n ? " selected" : "") + ">" + (n ? "Oui · " + n + " baisse" + (n > 1 ? "s" : "") : "Non") + "</option>").join("") + "</select></label>") +
+    (time || dist || rep || cardio || !d ? "" : '<label class="fl">Dégressif sur<select class="f" data-p="dscope" data-e="' + k + '"><option value="all"' + (e.dropScope !== "last" ? " selected" : "") + '>Toutes les séries</option><option value="last"' + (e.dropScope === "last" ? " selected" : "") + ">La dernière série</option></select></label>") +
     '<label class="fl full">Notes<textarea class="f" data-p="note" data-e="' + k + '" placeholder="Réglages de la machine, consignes…">' + esc(e.note) + "</textarea></label></div>";
 }
 function viewProgram(tid, vid) {
@@ -1247,47 +1419,48 @@ function choose(title, opts) {
 }
 // choix d'un ou plusieurs exercices (ou étirements) de la bibliothèque : recherche, filtres, cases à cocher ;
 // en musculation, aussi tes propres exercices et un exercice à créer avec le nom tapé
-const PK_GROUPS = [["", "Tous"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"], ["maison", "Sans matériel"], ["own", "Tes exercices"]];
-const TYPE_CHOICES = [["reps", "Poids × reps", "Charge et nombre de répétitions"], ["rep", "Reps uniquement", "Pompes, tractions… sans charge"], ["time", "Temps", "Gainage, chaise… avec chrono"], ["dist", "Distance", "Course, rameur, Hyrox… avec chrono"]];
+const PK_GROUPS = [["", "Tous"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["machines", "Cardio"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"], ["maison", "Sans matériel"], ["own", "Tes exercices"]];
+const TYPE_CHOICES = [["reps", "Poids × reps", "Charge et nombre de répétitions"], ["rep", "Reps uniquement", "Pompes, tractions… sans charge"], ["time", "Temps", "Gainage, chaise… avec chrono"], ["dist", "Distance", "Course, rameur, Hyrox… avec chrono"], ["cardio", "Cardio", "Machine ou activité cardio : durée et indicateurs (distance, calories…)"]];
+const cardioPickLib = () => cardioMachines().map(x => x.cat === "cardio" ? x : Object.assign({}, x, { id: "c:" + x.id, g: "machines", cardioOf: x.id }));
 function pickExercises(mode, title) {
-  const etir = mode === "etir";
+  const etir = mode === "etir", cdo = mode === "cardio";
   return new Promise(res => {
-    const lib = EXO_LIB.filter(x => etir ? x.cat === "etirement" : x.cat !== "etirement");
-    const own = etir ? [] : knownNames().filter(n => !libFor(n)).map(n => ({ id: "own:" + n, n, own: true, nn: norm(n) }));
+    const lib = cdo ? cardioPickLib() : EXO_LIB.filter(x => etir ? x.cat === "etirement" : x.cat !== "etirement").concat(etir ? [] : cardioPickLib().filter(x => x.cardioOf));
+    const own = etir || cdo ? [] : knownNames().filter(n => !libFor(n)).map(n => ({ id: "own:" + n, n, own: true, nn: norm(n) }));
     const byKey = new Map(); lib.forEach(x => byKey.set(x.id, x)); own.forEach(x => byKey.set(x.id, x));
-    const stretchKey = new Map(); if (!etir) EXO_LIB.filter(x => x.cat === "etirement").forEach(x => stretchKey.set(x.id, x)); // trouvés aussi par la recherche
+    const stretchKey = new Map(); if (!etir && !cdo) EXO_LIB.filter(x => x.cat === "etirement").forEach(x => stretchKey.set(x.id, x)); // trouvés aussi par la recherche
     const picked = [], created = new Map(); // clés dans l'ordre où elles sont cochées ; exercices créés (nom tapé)
     let filt = "", q = "";
-    const chips = etir ? [["", "Tous"], ["haut", "Haut"], ["milieu", "Milieu"], ["bas", "Bas"]] : PK_GROUPS.filter(g => g[0] !== "own" || own.length);
+    const chips = cdo ? [] : etir ? [["", "Tous"], ["haut", "Haut"], ["milieu", "Milieu"], ["bas", "Bas"]] : PK_GROUPS.filter(g => g[0] !== "own" || own.length);
     const inFilt = x => !filt || (etir ? x.zone === filt : filt === "own" ? !!x.own : filt === "maison" ? /^Poids du corps/.test(x.gear || "") : !x.own && x.g === filt);
-    const sub = x => x.own ? "Tes exercices" : etir || x.cat === "etirement" ? (etir ? "" : "Étirement · ") + x.mus + " · " + x.hold + " s" + (x.side ? " de chaque côté" : "") : x.mus + " · " + x.gear;
+    const sub = x => x.own ? "Tes exercices" : x.g === "machines" ? "Cardio · " + cardioInfo(x.cardioOf || x.id).slice(0, 3).map(t => t.replace(/ \(.*\)$/, "").toLowerCase()).join(", ") + "…" : etir || x.cat === "etirement" ? (etir ? "" : "Étirement · ") + x.mus + " · " + x.hold + " s" + (x.side ? " de chaque côté" : "") : x.mus + " · " + x.gear;
     const row = (key, name, s, cls) => '<label class="pk-row' + (cls || "") + '"><input type="checkbox" data-pk="' + esc(key) + '"' + (picked.includes(key) ? " checked" : "") + "><span><b>" + esc(name) + '</b><span class="muted small">' + esc(s) + "</span></span></label>";
-    const what = etir ? "étirement" : "exercice";
+    const what = etir ? "étirement" : cdo ? "machine" : "exercice";
     const listHtml = () => {
       let h = "";
       created.forEach((c, key) => { h += row(key, c.n, "Ton exercice (réglages modifiables ensuite)", " pk-new"); });
       const qt = q.trim();
       if (qt) {
         const exists = libFor(qt) || own.some(o => o.nn === norm(qt)) || created.has("new:" + qt.slice(0, 80));
-        const found = searchExercises(qt), v = found.map(c => byKey.get(c.own ? "own:" + c.n : c.id)).filter(x => x && inFilt(x));
+        const found = searchExercises(qt), v = found.map(c => byKey.get(c.own ? "own:" + c.n : c.id) || (cdo ? byKey.get("c:" + c.id) : null)).filter(x => x && inFilt(x));
         if (!filt) found.forEach(c => { const x = !c.own && stretchKey.get(c.id); if (x) v.push(x); }); // étirements : après les exercices
         // « Créer » : en premier si rien ne correspond, sinon après les exercices trouvés
         const full = !etir && !exists && isFree() && ownCount() + created.size >= FREE_OWN; // version gratuite : 5 exercices perso au plus
-        const mk = !etir && !exists && !full ? row("new:" + qt.slice(0, 80), "+ Créer « " + qt.slice(0, 80) + " »", "Ton propre exercice, s'il n'est pas dans la liste", " pk-new")
+        const mk = !etir && !exists && !full ? row("new:" + qt.slice(0, 80), "+ Créer « " + qt.slice(0, 80) + " »", cdo ? "Ton activité cardio, si elle n'est pas dans la liste" : "Ton propre exercice, s'il n'est pas dans la liste", " pk-new")
           : full ? '<div class="pk-row pk-lock">' + LOCK + "<span><b>" + FREE_OWN + ' exercices perso au plus en version gratuite</b><span class="muted small">Avec Premium, tu peux créer « ' + esc(qt.slice(0, 80)) + " » et tous les exercices que tu veux.</span></span></div>" : "";
         return h + (v.length ? v.map(x => row(x.id, x.n, sub(x))).join("") + mk : mk + '<p class="muted small" style="margin:8px 2px">Aucun ' + what + " de la liste ne correspond." + (mk && !full ? " Coche « Créer » pour ajouter le tien." : "") + "</p>");
       }
       const v = lib.concat(own).filter(inFilt);
-      const secs = etir ? ["haut", "milieu", "bas"].map(z => [ZONE_NAMES[z], v.filter(x => x.zone === z)])
+      const secs = cdo ? [["Machines de cardio", v]] : etir ? ["haut", "milieu", "bas"].map(z => [ZONE_NAMES[z], v.filter(x => x.zone === z)])
         : PK_GROUPS.filter(g => g[0] && g[0] !== "maison").map(([g, n]) => [n, v.filter(x => g === "own" ? x.own : !x.own && x.g === g)]);
       return h + secs.filter(s => s[1].length).map(([n, it]) => '<div class="pk-h">' + esc(n) + "</div>" + it.map(x => row(x.id, x.n, sub(x))).join("")).join("");
     };
     const okLabel = () => picked.length ? "Ajouter (" + picked.length + ")" : "Ajouter";
     const d = document.createElement("div"); d.className = "modal sheet";
     d.innerHTML = '<div class="modal-box pk" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + "</h3>" +
-      '<p class="muted small" style="margin:0 0 8px">' + (etir ? "Chaque étirement est ajouté en mode temps : 2 séries de 30 s. " : "") + "Coche-les, puis choisis leur ordre dans la séance.</p>" +
-      '<input class="f" type="search" data-pkq placeholder="' + (etir ? "Rechercher un étirement, un muscle" : "Rechercher (ex. dev, pec, rowing)") + '" autocomplete="off" aria-label="Rechercher un ' + what + '">' +
-      '<div class="pk-zones" role="group" aria-label="Filtrer">' + chips.map(z => '<button type="button" class="chip-btn" data-pkz="' + z[0] + '" aria-pressed="' + (z[0] === filt) + '">' + z[1] + "</button>").join("") + "</div>" +
+      '<p class="muted small" style="margin:0 0 8px">' + (cdo ? "Coche une ou plusieurs machines, dans l'ordre où tu les fais. Pas dans la liste ? Tape son nom pour la créer." : (etir ? "Chaque étirement est ajouté en mode temps : 2 séries de 30 s. " : "") + "Coche-les, puis choisis leur ordre dans la séance.") + "</p>" +
+      '<input class="f" type="search" data-pkq placeholder="' + (etir ? "Rechercher un étirement, un muscle" : cdo ? "Rechercher (ex. vélo, tapis, rameur)" : "Rechercher (ex. dev, pec, rowing)") + '" autocomplete="off" aria-label="Rechercher un ' + what + '">' +
+      (chips.length ? '<div class="pk-zones" role="group" aria-label="Filtrer">' + chips.map(z => '<button type="button" class="chip-btn" data-pkz="' + z[0] + '" aria-pressed="' + (z[0] === filt) + '">' + z[1] + "</button>").join("") + "</div>" : "") +
       '<div class="pk-list">' + listHtml() + '</div><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">' + okLabel() + "</button></div></div>";
     document.body.appendChild(d);
     const box = d.querySelector(".pk-list"), ok = d.querySelector('[data-r="1"]'), qin = d.querySelector("[data-pkq]");
@@ -1320,6 +1493,7 @@ function ownDefaults(name) {
   return null;
 }
 function libExercise(p) {
+  if (p.lib && (p.lib.cardioOf || p.lib.cat === "cardio")) return Object.assign(newExercise(), { name: p.lib.n }, libDefaults(p.lib));
   if (p.lib) return p.lib.cat === "etirement" ? stretchExercise(p.lib) : Object.assign(newExercise(), { name: p.lib.n }, libDefaults(p.lib));
   return Object.assign(newExercise(), { name: String(p.name).slice(0, 80) }, ownDefaults(p.name) || {});
 }
@@ -1499,7 +1673,7 @@ function historyRow(w) {
   // glisser la ligne de droite à gauche fait apparaître « Supprimer »
   return '<div class="swipe"><button type="button" class="swipe-del" data-act="swipedel" data-id="' + esc(w.id) + '" tabindex="-1">Supprimer</button>' +
     '<a class="swipe-row" draggable="false" href="#/session/' + w.id + '"><div><b>' + esc(w.templateName) + '</b> <span class="muted">· ' + esc(vLabel(w.variantName)) + '</span><div class="muted small">' +
-    esc(fmtDate(w.startedAt)) + " · " + w.exercises.length + " exercices · " + done + " séries" + (workoutTon(w) ? " · " + fmtTon(workoutTon(w)) : "") + '</div></div><span class="muted small num">' + fmtDur((w.endedAt || Date.now()) - w.startedAt) + "</span></a></div>";
+    esc(fmtDate(w.startedAt)) + " · " + (w.cardio ? w.exercises.length + " machine" + (w.exercises.length > 1 ? "s" : "") + (workoutKcal(w) ? " · " + fmtNum(Math.round(workoutKcal(w))) + " kcal" : "") : w.exercises.length + " exercices · " + done + " séries" + (workoutTon(w) ? " · " + fmtTon(workoutTon(w)) : "")) + '</div></div><span class="muted small num">' + fmtDur((w.endedAt || Date.now()) - w.startedAt) + "</span></a></div>";
 }
 // glisser pour supprimer : la ligne suit le doigt (ou la souris) horizontalement ; le défilement vertical reste normal
 const SW_W = 104;
@@ -1562,6 +1736,7 @@ let histLimit = 100;
 const setTon = st => { let t = 0; const k = num(st.kg), r = num(st.reps); if (k > 0 && r > 0) t += k * r; (st.drops || []).forEach(d => { const dk = num(d.kg), dr = num(d.reps); if (dk > 0 && dr > 0) t += dk * dr; }); return t; };
 const exTon = e => (!e.type || e.type === "reps") ? e.sets.reduce((a, st) => a + setTon(st), 0) : 0;
 const workoutTon = w => w.exercises.reduce((a, e) => a + exTon(e), 0);
+const workoutKcal = w => w.exercises.reduce((a, e) => a + (e.type === "cardio" ? e.sets.reduce((b, st) => b + (st.cv && num(st.cv.cal) > 0 ? num(st.cv.cal) : 0), 0) : 0), 0);
 const workoutDur = w => { const d = (w.endedAt || 0) - (w.startedAt || 0); return d > 60000 ? Math.min(d, 5 * 3600e3) : 0; }; // une séance oubliée ouverte compte 5 h au plus
 const fmtDurH = ms => { const m = Math.round(ms / 60000), hh = Math.floor(m / 60); return hh ? hh + " h " + pad(m % 60) : m + " min"; };
 const fmtTon = v => v >= 10000 ? (v / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " t" : Math.round(v).toLocaleString("fr-FR") + " kg";
@@ -1570,6 +1745,18 @@ function progressData() {
   for (const w of finished().slice().reverse()) {
     for (const e of w.exercises) {
       if (!exHasData(e)) continue;
+      if (e.type === "cardio") { // cardio : une courbe par machine, avec la durée et chaque indicateur noté
+        const key = (e.machine && CARDIO_MACH[e.machine] ? "lib:" + e.machine : norm(e.name)) + "|cardio", cv = {};
+        let dur = 0, hasDur = false;
+        e.sets.forEach(st => {
+          if (num(st.sec) > 0) { dur += num(st.sec); hasDur = true; }
+          Object.keys(st.cv || {}).forEach(k => { const v = cvNum(st.cv[k]), d = cvDef(k); if (v == null || !d) return;
+            cv[k] = cv[k] == null ? v : d.add ? cv[k] + v : d.low ? Math.min(cv[k], v) : Math.max(cv[k], v); });
+        });
+        (map[key] = map[key] || { key, name: e.name, type: "cardio", machine: e.machine || "", entries: [] }).entries.push({ w, e, dur: hasDur ? dur : null, cv });
+        map[key].name = e.name;
+        continue;
+      }
       const lb = libFor(e.name), key = (lb ? "lib:" + lb.id : norm(e.name)) + "|" + e.type; // ancien et nouveau nom d'un même exercice de la bibliothèque : une seule courbe
       const D = e.type === "dist", T = e.type === "time" || D, RO = e.type === "rep", vs = e.sets.map(s => num(T ? s.sec : RO ? s.reps : s.kg)).filter(x => x != null && (!D || x > 0));
       const best = vs.length ? (D ? Math.min(...vs) : Math.max(...vs)) : -Infinity;
@@ -1651,23 +1838,37 @@ const EVO_M = {
   sec: { label: "Temps max", short: "Temps", unit: " s" },
   run: { label: "Meilleur temps", short: "Temps", unit: "", low: true, clock: true }
 };
+// courbe d'un indicateur de cardio (« cv:dist ») ou de la durée (« dur »)
+function evoDef(m) {
+  if (EVO_M[m]) return EVO_M[m];
+  if (m === "dur") return { label: "Durée", short: "Durée", unit: "", clock: true };
+  const d = /^cv:/.test(m) && cvDef(m.slice(3));
+  return d ? { label: d.n, short: d.s || d.n, unit: d.u && !d.clock ? " " + d.u : "", clock: !!d.clock, low: !!d.low, cv: d } : { label: m, short: m, unit: "" };
+}
 const EVO_P = [["1m", "1 mois", 31], ["3m", "3 mois", 92], ["6m", "6 mois", 183], ["1a", "1 an", 366], ["all", "Tout", 0]];
 const evo = { q: "", m: {}, per: "all" };
-const evoVal = (x, m) => (m === "run" ? x.sec : x[m]);
+const evoVal = (x, m) => { const v = m === "run" ? x.sec : /^cv:/.test(m) ? (x.cv ? x.cv[m.slice(3)] : null) : x[m]; return v == null ? null : v; };
 function evoMetrics(p) {
   const has = f => p.entries.some(x => evoVal(x, f) != null);
+  if (p.type === "cardio") { // les indicateurs de la machine d'abord, puis les autres notés
+    const keys = cardioDefs({ machine: p.machine, name: p.name }).map(d => d.k);
+    p.entries.forEach(x => Object.keys(x.cv || {}).forEach(k => { if (!keys.includes(k) && cvDef(k)) keys.push(k); }));
+    const out = (has("dur") ? ["dur"] : []).concat(keys.map(k => "cv:" + k).filter(has));
+    return out.length ? out : ["dur"];
+  }
   if (p.type === "time") return ["sec"];
   if (p.type === "dist") return ["run"].concat(has("kg") ? ["kg"] : []);
   if (p.type === "rep") return ["reps"];
   const out = []; if (has("kg")) out.push("kg", "orm"); if (has("reps")) out.push("reps"); if (has("ton")) out.push("ton");
   return out.length ? out : ["reps"];
 }
-const evoFmt = (m, v) => (v == null ? "—" : EVO_M[m].clock ? fmtClock(v) : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : v) + EVO_M[m].unit);
+const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
 function evoDiff(m, d) {
   if (d == null) return "—";
   const r = Math.round(Math.abs(d) * (m === "orm" ? 2 : 100)) / (m === "orm" ? 2 : 100);
   if (!r) return "Stable";
-  return (d > 0 ? "+" : "−") + (EVO_M[m].clock ? fmtClock(r) : m === "sec" ? fmtHold(r) : m === "ton" ? fmtTon(r) : fmtNum(r) + EVO_M[m].unit);
+  const M = evoDef(m);
+  return (d > 0 ? "+" : "−") + (M.clock ? fmtClock(r) : m === "sec" ? fmtHold(r) : m === "ton" ? fmtTon(r) : fmtNum(r) + M.unit);
 }
 // recherche parmi les exercices déjà faits (mêmes règles que la recherche d'exercices : fautes, synonymes, muscles)
 function evoCands() {
@@ -1676,7 +1877,7 @@ function evoCands() {
   return ps.map(p => {
     const lib = libFor(p.name), last = p.entries[p.entries.length - 1].w.startedAt;
     return { p, n: p.name, nn: norm(p.name), w: words(p.name), a: lib ? words(lib.n + " " + lib.al.join(" ")) : [], o: lib ? lib.o : [], last,
-      dup: seen[p.name] > 1 ? ({ time: "temps", dist: "distance" }[p.type] || "poids × reps") : "" };
+      dup: seen[p.name] > 1 ? ({ time: "temps", dist: "distance", cardio: "cardio", rep: "reps" }[p.type] || "poids × reps") : "" };
   });
 }
 function evoSearch(q) {
@@ -1701,15 +1902,15 @@ function evoListHtml() {
   }
   return '<div class="list">' + hits.map(c => {
     const p = c.p, m = evoMetrics(p)[0], vs = p.entries.map(x => evoVal(x, m)).filter(v => v != null);
-    const rec = vs.length ? (EVO_M[m].low ? Math.min(...vs) : Math.max(...vs)) : null;
+    const M = evoDef(m), rec = vs.length ? (M.low ? Math.min(...vs) : Math.max(...vs)) : null;
     return '<a href="#/evolution/' + encodeURIComponent(p.key) + '"><div><b>' + esc(p.name) + "</b>" + (c.dup ? ' <span class="muted small">· ' + c.dup + "</span>" : "") +
       '<div class="muted small">' + p.entries.length + " séance" + (p.entries.length > 1 ? "s" : "") + " · " + esc(dfDay.format(c.last)) + "</div></div>" +
-      '<span class="evo-r">' + sparkline(vs.slice(-12), EVO_M[m].low) + '<span class="small"><b>' + evoFmt(m, rec) + '</b> <span class="muted">record</span></span></span></a>';
+      '<span class="evo-r">' + sparkline(vs.slice(-12), M.low) + '<span class="small"><b>' + evoFmt(m, rec) + '</b> <span class="muted">' + (p.type === "cardio" && m === "dur" ? "plus longue" : "record") + "</span></span></span></a>";
   }).join("") + "</div>";
 }
 function viewEvolution() {
   let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution");
-  if (isFree()) return h + planCard("La courbe de chaque exercice (charge, répétitions, tonnage, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.");
+  if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.");
   if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>';
   return h + '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
     '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe dans le temps. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>";
@@ -1727,7 +1928,7 @@ function niceStep(raw, clock) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p10;
 }
 function evoChart(p, m, pts, W) {
-  W = W || 360; const H = W > 520 ? 250 : 210, L = 44, R = 16, T = 26, B = 28, pw = W - L - R, ph = H - T - B, M = EVO_M[m];
+  W = W || 360; const H = W > 520 ? 250 : 210, L = 44, R = 16, T = 26, B = 28, pw = W - L - R, ph = H - T - B, M = evoDef(m);
   const vs = pts.map(x => x.v), mn = Math.min(...vs), mx = Math.max(...vs);
   let step = niceStep(((mx - mn) || Math.max(1, mx * 0.1)) / 3, M.clock || m === "sec"); // temps tenu : graduations en secondes rondes (5 s, 10 s, 15 s…)
   if (!M.clock && m !== "orm" && step < 1 && (m === "reps" || m === "sec")) step = 1;
@@ -1801,18 +2002,18 @@ function viewEvolutionDetail(key) {
   const back = '<a class="back" href="#/evolution">‹ Évolution</a>';
   if (isFree()) return back + planCard("La courbe de chaque exercice est réservée à Premium.");
   if (!p) return back + '<div class="card empty">Pas encore de données pour cet exercice.</div>';
-  const ms = evoMetrics(p), m = ms.includes(evo.m[key]) ? evo.m[key] : ms[0], M = EVO_M[m];
+  const ms = evoMetrics(p), m = ms.includes(evo.m[key]) ? evo.m[key] : ms[0], M = evoDef(m);
   const allT = p.entries.map(x => x.w.startedAt), fullSpan = allT[allT.length - 1] - allT[0];
   const pers = EVO_P.filter(x => !x[2] || fullSpan > x[2] * 86400000 * 0.9);
   const per = pers.some(x => x[0] === evo.per) ? evo.per : "all", days = (EVO_P.find(x => x[0] === per) || [0, 0, 0])[2];
   const from = days ? Date.now() - days * 86400000 : -Infinity;
   const ent = p.entries.filter(x => x.w.startedAt >= from);
   const pts = ent.filter(x => evoVal(x, m) != null).map(x => ({ t: x.w.startedAt, v: evoVal(x, m), ses: x.w.templateName + " · " + vLabel(x.w.variantName), sum: exSummary(x.e) }));
-  const lib = libFor(p.name);
+  const lib = libFor(p.name), cdm = p.type === "cardio" && CARDIO_MACH[p.machine] ? p.machine : "", lid = cdm || (lib && lib.id);
   let h = back + '<div class="page-head"><h1>' + esc(p.name) + "</h1></div>" +
-    (lib ? '<div class="ex-chips" style="margin:-4px 0 12px"><button type="button" class="chip-mini" data-act="exoview" data-id="' + esc(lib.id) + '">' + ICON.play + "Voir le mouvement</button></div>" : "");
+    (lid ? '<div class="ex-chips" style="margin:-4px 0 12px"><button type="button" class="chip-mini" data-act="exoview" data-id="' + esc(lid) + '"' + (cdm ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cdm ? "Voir la machine" : "Voir le mouvement") + "</button></div>" : "");
   const seg = (list, on, act) => '<div class="seg evo-seg" role="group">' + list.map(x => '<button type="button" data-act="' + act + '" data-k="' + esc(key) + '" data-v="' + x[0] + '"' + (x[0] === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div>";
-  if (ms.length > 1 || pers.length > 1) h += '<div class="evo-filters">' + (ms.length > 1 ? seg(ms.map(x => [x, EVO_M[x].short]), m, "evometric") : "") + (pers.length > 1 ? seg(pers, per, "evoper") : "") + "</div>";
+  if (ms.length > 1 || pers.length > 1) h += '<div class="evo-filters">' + (ms.length > 1 ? seg(ms.map(x => [x, evoDef(x).short]), m, "evometric") : "") + (pers.length > 1 ? seg(pers, per, "evoper") : "") + "</div>";
   if (!pts.length) return h + '<div class="card empty">Aucune séance avec cet exercice sur cette période.</div>';
   const vs = pts.map(x => x.v), best = M.low ? Math.min(...vs) : Math.max(...vs), first = pts[0].v, last = pts[pts.length - 1].v;
   const dlt = pts.length > 1 ? last - first : null, good = dlt == null || !dlt ? "" : (M.low ? dlt < 0 : dlt > 0) ? " up" : " down";
@@ -1841,7 +2042,7 @@ const TROPHY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strok
 // record = la série qu'on vient de valider donne le meilleur 1RM estimé jamais atteint sur cet exercice
 function checkRecord(w, i, s) {
   const e = w.exercises[i], set = e.sets[s], n = norm(e.name);
-  if (e.type === "time" || e.type === "dist" || e.type === "rep") return null;
+  if (e.type !== "reps" && e.type) return null;
   const cur = e1rm(num(set.kg), num(set.reps));
   if (cur == null) return null;
   let best = null;
@@ -1918,7 +2119,7 @@ async function fetchShare(code) {
 }
 async function shareVariant(t, v) {
   const data = { app: "muscuapp-share", v: 1, prog: t.name, name: vLabel(v.name),
-    ex: v.exercises.map(e => ({ n: e.name, t: e.type, l: e.load ? 1 : undefined, s: e.sets, c: e.target, r: e.rest, rn: restNextOf(e, v), no: e.note || "", d: dropsOf(e), ds: dropsOf(e) && e.dropScope === "last" ? "last" : undefined, g: e.groupId || null, k: e.groupKind || null })) };
+    ex: v.exercises.map(e => ({ n: e.name, t: e.type, m: e.type === "cardio" && e.machine ? e.machine : undefined, l: e.load ? 1 : undefined, s: e.sets, c: e.target, r: e.rest, rn: restNextOf(e, v), no: e.note || "", d: dropsOf(e), ds: dropsOf(e) && e.dropScope === "last" ? "last" : undefined, g: e.groupId || null, k: e.groupKind || null })) };
   // lien court (séance enregistrée dans Supabase avec un code) ; lien long en secours (sans compte, hors ligne…)
   let url = null;
   if (db.auth) {
@@ -1955,7 +2156,7 @@ async function importShared(code) {
   if (!dest) return;
   const gmap = {};
   const exercises = data.ex.map(x => {
-    const e = { id: "e-" + uid(), name: String(x.n || "Exercice").slice(0, 80), type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : "reps", load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: String(x.c == null ? "" : x.c).slice(0, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(600, num(x.rn) || num(data.rb) || 0)), note: String(x.no || "").slice(0, 500), drops: x.t === "time" || x.t === "dist" ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
+    const e = { id: "e-" + uid(), name: String(x.n || "Exercice").slice(0, 80), type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: String(x.c == null ? "" : x.c).slice(0, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(600, num(x.rn) || num(data.rb) || 0)), note: String(x.no || "").slice(0, 500), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
     if (x.g && GROUP_LABEL[x.k]) { gmap[x.g] = gmap[x.g] || "g-" + uid(); e.groupId = gmap[x.g]; e.groupKind = x.k; }
     return e;
   });
@@ -2302,7 +2503,8 @@ const FAQ = [
   ["Démarrer", [
     ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer »."],
     ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Sur l'accueil, la séance marquée « Suggérée » est celle que tu n'as jamais faite, sinon celle faite il y a le plus longtemps. Un appui prolongé sur une séance affiche la liste de ses exercices."],
-    ["types", "Quels types d'exercices puis-je créer ?", "Quatre types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono) et <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge). Le type se choisit dans la configuration de l'exercice."],
+    ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice."],
+    ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur ? « + Ajouter un indicateur » sous la machine : il sera proposé à chaque fois."],
     ["superset", "Comment faire un superset ou un dégressif ?", "Ajoute d'abord tes exercices, puis dans la configuration de la séance : « Enchaîner avec l'exercice suivant » relie deux exercices en superset ou biset (un 3e exercice ajouté au groupe en fait un triset), et le réglage « Dégressif » d'un exercice ajoute les baisses de charge. Dans un superset, le repos démarre seulement quand tout le tour est fini."]]],
   ["Pendant la séance", [
     ["repos", "Comment fonctionne le repos ?", "Quand tu valides une série (✓), le repos démarre tout seul avec la durée réglée pour l'exercice. Tu peux ajouter ou enlever 15 s, le passer ou le réduire. Après la dernière série d'un exercice, c'est le « Repos avant l'exercice suivant » qui démarre : il se règle dans la configuration de la séance."],
@@ -2806,7 +3008,7 @@ function viewSettings() {
 
 /* ================= Minuteurs ================= */
 // titre du chrono : étirement, gainage ou course (distance)
-function chronoKind(w, c) { const ex = w && w.exercises[c.i], lb = ex && libFor(ex.name); return lb && lb.cat === "etirement" ? "Étirement" : c.dist || (ex && ex.type === "dist") ? "Chrono" : "Gainage"; }
+function chronoKind(w, c) { const ex = w && w.exercises[c.i], lb = ex && libFor(ex.name); return c.cardio || (ex && ex.type === "cardio") ? "Cardio" : lb && lb.cat === "etirement" ? "Étirement" : c.dist || (ex && ex.type === "dist") ? "Chrono" : "Gainage"; }
 function tick() {
   const now = Date.now(), L = db.live || {};
   document.querySelectorAll('[data-tick="elapsed"]').forEach(el => { const w = getItem(el.dataset.id); if (w) el.textContent = fmtDur((w.endedAt || now) - w.startedAt, "down"); });
@@ -2853,11 +3055,11 @@ function tick() {
       cpop.hidden = !here || !!c.min;
       if (here) {
         const ex = w.exercises[c.i];
-        cpop.querySelector("[data-cpname]").textContent = ex && norm(ex.name) !== "gainage" ? ex.name + " · série " + (c.s + 1) : "Série " + (c.s + 1);
+        cpop.querySelector("[data-cpname]").textContent = ex && ex.type === "cardio" ? ex.name : ex && norm(ex.name) !== "gainage" ? ex.name + " · série " + (c.s + 1) : "Série " + (c.s + 1);
         const lab = cpop.querySelector(".rp-label"), kind = chronoKind(w, c); if (lab.textContent !== kind) lab.textContent = kind;
         cpop.querySelector("[data-cptime]").textContent = prep ? String(left) : fmtDur(ms, "down");
         cpop.querySelector("[data-cpbar]").style.width = (c.target && !prep ? Math.min(100, 100 * ms / (c.target * 1000)) : 0) + "%";
-        cpop.querySelector("[data-cpgoal]").textContent = prep ? "Mets-toi en position…" : c.target ? (c.alerted ? "Objectif atteint !" : "Objectif " + fmtHold(c.target)) : c.dist ? "Distance : " + fmtNum(c.dist) + " m · touche Terminer à l'arrivée" : "";
+        cpop.querySelector("[data-cpgoal]").textContent = prep ? "Mets-toi en position…" : c.target ? (c.alerted ? "Objectif atteint !" + (c.cardio ? " Continue ou touche Terminer" : "") : "Objectif " + fmtHold(c.target)) : c.dist ? "Distance : " + fmtNum(c.dist) + " m · touche Terminer à l'arrivée" : c.cardio ? "Touche Terminer à la fin, puis note tes indicateurs" : "";
         cpop.querySelector(".gain-box").classList.toggle("prep", prep);
         cpop.querySelector(".gain-box").classList.toggle("reached", !!c.alerted);
       }
@@ -2926,7 +3128,22 @@ $app.addEventListener("click", async e => {
     case "stretchok": try { localStorage.setItem("fiitday-stretch-ok", b.dataset.id); } catch (err) { } render(); break;
     case "evometric": evo.m[b.dataset.k] = b.dataset.v; render(); break;
     case "evoper": evo.per = b.dataset.v; render(); break;
-    case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id); break;
+    case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
+    case "cardiohome": cardioStart(); break;
+    case "addcardio": if (w) { const exs = await cardioPick("Ajouter une machine"); if (!exs) return; w.exercises.push(...exs); if (w.manual) syncManual(w); put("workout", w); render(); } break;
+    case "cvadd": if (w && w.exercises[i]) {
+      const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key);
+      if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
+      const r = await askIndicator(e.name); if (!r) return;
+      if (cardioDefs(e).some(d => norm(d.n) === norm(r.n) && norm(d.u) === norm(r.u))) { toast("Cet indicateur existe déjà pour « " + e.name + " »"); return; }
+      const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.concat([{ k: "c" + uid(), n: r.n, u: r.u }]); st.cardioCustom = cc; put("settings", st);
+      render(); toast("« " + r.n + " » ajouté pour " + e.name);
+    } break;
+    case "cvdel": if (w && w.exercises[i]) {
+      const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key), d = list.find(x => x.k === b.dataset.k); if (!d) return;
+      if (!await ask({ title: "Retirer « " + d.n + " » ?", text: "Il ne sera plus proposé pour « " + e.name + " ». Les valeurs déjà notées restent dans tes séances.", ok: "Retirer", danger: true })) return;
+      const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.filter(x => x.k !== d.k); st.cardioCustom = cc; put("settings", st); render();
+    } break;
     case "sesspick": if (w) {
       const e = w.exercises[i]; if (!e) return;
       const sf = b.dataset.sf, isT = sf === "target";
@@ -3018,14 +3235,14 @@ $app.addEventListener("click", async e => {
         const te = libExercise(p);
         if (!p.lib && !ownDefaults(p.name)) { // exercice nouveau : son type, pour savoir quoi noter
           const type = await choose("Type de « " + te.name + " »", TYPE_CHOICES); if (!type) return;
-          Object.assign(te, { type }, type === "time" ? { target: "45", rest: 60 } : type === "dist" ? { target: "1000", rest: 120 } : {});
+          Object.assign(te, { type }, type === "time" ? { target: "45", rest: 60 } : type === "dist" ? { target: "1000", rest: 120 } : type === "cardio" ? { target: "", rest: 0, sets: 1, machine: "" } : {});
         }
         tes.push(te);
       }
-      const wnew = tes.map(te => ({ exId: te.id, name: te.name, type: te.type, target: te.target, rest: te.rest, load: !!te.load, drops: 0, groupId: null, groupKind: null, sets: Array.from({ length: Math.max(1, num(te.sets) || 1) }, () => blankSet(0)) }));
+      const wnew = tes.map(te => ({ exId: te.id, name: te.name, type: te.type, machine: te.type === "cardio" ? te.machine || "" : undefined, target: te.target, rest: te.rest, load: !!te.load, drops: 0, groupId: null, groupKind: null, sets: Array.from({ length: Math.max(1, num(te.sets) || 1) }, () => blankSet(0)) }));
       const c = db.live.chrono, chronoEx = c && c.wid === w.id ? w.exercises[c.i] : null;
       const out = await orderNew(w.exercises, wnew, what); if (!out) return;
-      const add = await ask({ title: tes.length > 1 ? "Les ajouter au programme ?" : "L'ajouter au programme ?", text: (tes.length > 1 ? "Les ajouter" : "L'ajouter") + " aussi à « " + w.templateName + " · " + vLabel(w.variantName) + " », au même endroit, pour les prochaines fois ?", ok: "Oui", cancel: "Juste aujourd'hui" });
+      const add = getItem(w.templateId) && await ask({ title: tes.length > 1 ? "Les ajouter au programme ?" : "L'ajouter au programme ?", text: (tes.length > 1 ? "Les ajouter" : "L'ajouter") + " aussi à « " + w.templateName + " · " + vLabel(w.variantName) + " », au même endroit, pour les prochaines fois ?", ok: "Oui", cancel: "Juste aujourd'hui" });
       w.exercises = out;
       if (chronoEx && db.live.chrono) db.live.chrono.i = out.indexOf(chronoEx); // le chrono en cours suit son exercice
       if (add) {
@@ -3054,8 +3271,8 @@ $app.addEventListener("click", async e => {
         stopChrono(w);
       } else {
         // 5 s de préparation avant que le chrono de gainage ne démarre (pas pour le repos)
-        const cx = w.exercises[i], isD = cx.type === "dist";
-        db.live.chrono = { wid: w.id, i, s, start: Date.now() + CHRONO_PREP * 1000, target: isD ? 0 : num(cx.target), dist: isD ? num(cx.target) : 0, alerted: false, count: CHRONO_PREP + 1, go: false };
+        const cx = w.exercises[i], isD = cx.type === "dist", isC = cx.type === "cardio";
+        db.live.chrono = { wid: w.id, i, s, start: Date.now() + CHRONO_PREP * 1000, target: isC ? Math.round((num(cx.target) || 0) * 60) : isD ? 0 : num(cx.target), dist: isD ? num(cx.target) : 0, cardio: isC || undefined, alerted: false, count: CHRONO_PREP + 1, go: false };
         db.live.restEnd = null; setTimeout(armEdge, 0);
       }
       save(); render();
@@ -3292,7 +3509,14 @@ $app.addEventListener("input", e => {
     const set = ex.sets[+el.dataset.s]; if (!set) return;
     let tgt = set;
     if ("d" in el.dataset) { set.drops = set.drops || []; tgt = set.drops[+el.dataset.d] = set.drops[+el.dataset.d] || { kg: "", reps: "" }; }
-    if (el.dataset.f === "clock") { const clean = el.value.replace(/[^\d:]/g, ""); if (clean !== el.value) el.value = clean; const sec = parseClock(clean); tgt.sec = sec == null ? "" : String(sec); putLater("workout", w); return; }
+    if (el.dataset.f === "clock") { const clean = el.value.replace(/[^\d:]/g, ""); if (clean !== el.value) el.value = clean; const sec = parseClock(clean); tgt.sec = sec == null ? "" : String(sec); if (w.manual) syncManual(w); putLater("workout", w); return; }
+    if (el.dataset.f === "cv") { // indicateur de cardio : nombre, ou temps « m:ss » enregistré en secondes
+      const k = el.dataset.k; if (!/^[a-z0-9]{1,17}$/.test(k || "")) return;
+      set.cv = Object.assign({}, set.cv);
+      if (el.dataset.clock) { const clean = el.value.replace(/[^\d:]/g, ""); if (clean !== el.value) el.value = clean; const sec = parseClock(clean); if (sec == null) delete set.cv[k]; else set.cv[k] = String(sec); }
+      else { const v = el.value.replace(/[^\d.,]/g, "").slice(0, 9); if (v !== el.value) el.value = v; if (v) set.cv[k] = v; else delete set.cv[k]; }
+      putLater("workout", w); return;
+    }
     tgt[el.dataset.f] = el.value.replace(/[^\d.,]/g, "");
     if (el.value !== tgt[el.dataset.f]) el.value = tgt[el.dataset.f];
     putLater("workout", w);
@@ -3304,7 +3528,7 @@ $app.addEventListener("input", e => {
     if (p === "tname") { t.name = el.value; putLater("template", t); return; }
     if (p === "vname") { v.name = el.value; putLater("template", t); const tab = $app.querySelector("[data-vtab]"); if (tab) tab.textContent = el.value; return; }
     const ex = v.exercises[+el.dataset.e]; if (!ex) return;
-    if (p === "type" || p === "drops" || p === "gkind" || p === "dscope") return; // géré par « change »
+    if (p === "type" || p === "drops" || p === "gkind" || p === "dscope" || p === "machine") return; // géré par « change »
     if (p === "gsets" || p === "grest") {
       const val = num(el.value) == null ? "" : Math.max(0, Math.round(num(el.value)));
       v.exercises.forEach(e => { if (e.groupId && e.groupId === ex.groupId) e[p === "gsets" ? "sets" : "rest"] = val; });
@@ -3327,12 +3551,18 @@ $app.addEventListener("change", e => {
   }
   if (el.dataset.p === "type") {
     const { t, v } = currentProgram(); if (!t) return;
-    const ex = v.exercises[+el.dataset.e]; ex.type = el.value;
+    const ex = v.exercises[+el.dataset.e], was = ex.type; ex.type = el.value;
+    if (ex.type === "cardio") Object.assign(ex, { machine: ex.machine || cardioMachineOf(ex.name), target: "", sets: 1, rest: 0, drops: 0 });
+    else if (was === "cardio") Object.assign(ex, { sets: 3, rest: ex.type === "time" ? 60 : 90 });
     if (ex.type === "time" && !/^\d+$/.test(String(ex.target))) ex.target = "45";
     if (ex.type === "dist" && !(num(ex.target) >= 10)) ex.target = "1000";
     if ((ex.type === "reps" || ex.type === "rep") && !/^\d+(-\d+)?$/.test(String(ex.target))) ex.target = "8-10";
     if (ex.type !== "reps") ex.drops = 0;
     put("template", t); render();
+  } else if (el.dataset.p === "machine") {
+    const { t, v } = currentProgram(); if (!t) return;
+    const ex = v.exercises[+el.dataset.e]; if (!ex) return;
+    ex.machine = CARDIO_MACH[el.value] ? el.value : ""; put("template", t); render();
   } else if (el.dataset.p === "load") {
     const { t, v } = currentProgram(); if (!t) return;
     const ex = v.exercises[+el.dataset.e]; if (!ex) return;
@@ -3345,7 +3575,7 @@ $app.addEventListener("change", e => {
     else v.exercises.forEach(e => { if (e.groupId && e.groupId === ex.groupId) e.groupKind = el.value; });
     put("template", t); render();
   } else if (el.dataset.p || el.dataset.f) {
-    if (el.dataset.f === "clock") { const sec = parseClock(el.value); if (sec != null) el.value = fmtClock(sec); } // « 405 » s'affiche « 4:05 »
+    if (el.dataset.f === "clock" || el.dataset.clock) { const sec = parseClock(el.value); if (sec != null) el.value = fmtClock(sec); } // « 405 » s'affiche « 4:05 »
     flushPending(); // enregistre tout de suite quand on quitte un champ (sans redessiner l'écran)
   }
 });
@@ -3360,6 +3590,7 @@ $app.addEventListener("keydown", e => {
 
 /* ================= Accueil : appui prolongé sur une séance = aperçu de ses exercices ================= */
 function tplLine(e) {
+  if (e.type === "cardio") return "Cardio" + (num(e.target) ? " · " + fmtNum(num(e.target)) + " min" : "");
   const n = Math.max(1, num(e.sets) || 1), tg = e.type === "dist" ? fmtNum(num(e.target) || 0) + " m" : e.type === "time" ? fmtHold(e.target) || "—" : (e.target || "—") + " reps";
   return n + " × " + tg + (e.type === "reps" && dropsOf(e) ? " · dégressif" : "") + " · repos " + fmtRest(e.rest);
 }

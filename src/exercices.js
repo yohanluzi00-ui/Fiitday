@@ -40,6 +40,42 @@ const PUSHUP_A = { pc: [-0.458, 0.403], th: 70.7, foot: [-1.32, 0.205, 0.10], fd
 const PUSHUP_B = { pc: [-0.398, 0.166], th: 85.9 };
 const m = (o, p) => Object.assign({}, o, p);
 
+// course (tapis de course, tapis incurvé, atelier Hyrox) : foulée en boucle
+const RUN_A = { pc: [-0.02, 1.1], th: 6, hand: [{ c: { el: [-0.42, -0.9, 0.05] }, r: L.fa, d: [0.95, 0.3, -0.1] }, { c: { el: [0.38, -0.92, 0.05] }, r: L.fa, d: [0.55, 0.83, -0.12] }], elbow: [-1, 0, 0.1], palm: [0, 0, -1],
+      foot: [{ c: { kn: [0.3, -0.95, 0.02] }, r: L.sh, d: [0.05, -1, 0] }, { c: { kn: [-0.35, -0.94, 0.02] }, r: L.sh, d: [-0.85, -0.5, 0] }], knee: [1, 0, 0], fdir: [[1, 0.05, 0.1], [0.4, -0.9, 0.05]] };
+const RUN_KEYS = [{ at: 0, lab: "Foulée" },
+      { at: 0.25, pc: [-0.02, 1.12], foot: [{ c: { kn: [0.02, -1, 0.02] }, r: L.sh, d: [-0.25, -0.97, 0] }, { c: { kn: [0.62, -0.78, 0.02] }, r: L.sh, d: [-0.35, -0.94, 0] }], fdir: [[1, 0, 0.1], [0.8, -0.5, 0.05]],
+        hand: [{ c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }, { c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }] },
+      { at: 0.5, pc: [-0.02, 1.1], foot: [{ c: { kn: [-0.35, -0.94, 0.02] }, r: L.sh, d: [-0.85, -0.5, 0] }, { c: { kn: [0.3, -0.95, 0.02] }, r: L.sh, d: [0.05, -1, 0] }], fdir: [[0.4, -0.9, 0.05], [1, 0.05, 0.1]],
+        hand: [{ c: { el: [0.38, -0.92, 0.05] }, r: L.fa, d: [0.55, 0.83, -0.12] }, { c: { el: [-0.42, -0.9, 0.05] }, r: L.fa, d: [0.95, 0.3, -0.1] }] },
+      { at: 0.75, pc: [-0.02, 1.12], foot: [{ c: { kn: [0.62, -0.78, 0.02] }, r: L.sh, d: [-0.35, -0.94, 0] }, { c: { kn: [0.02, -1, 0.02] }, r: L.sh, d: [-0.25, -0.97, 0] }], fdir: [[0.8, -0.5, 0.05], [1, 0, 0.1]],
+        hand: [{ c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }, { c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }] }, { at: 1, back: true }];
+// pédalage : pied gauche à l'angle θ, pied droit à θ + 180°, n images clés autour du pédalier (c = axe, r = rayon, w = écart des pieds) ;
+// more(θ, k) ajoute d'autres positions à chaque image (mains des poignées mobiles…)
+function pedaling(c, r, w, n, more) {
+  const pt = (th, i) => { const a = th + (i ? Math.PI : 0); return [c[0] + r * Math.cos(a) - 0.055, c[1] + r * Math.sin(a) + 0.075, w]; };
+  const fd = (th, i) => { const a = th + (i ? Math.PI : 0); return [1, -0.2 - 0.25 * Math.sin(a), 0.08]; };
+  const keys = [];
+  for (let k = 0; k < n; k++) { const th = -2 * Math.PI * k / n; keys.push(Object.assign({ at: k / n, foot: [pt(th, 0), pt(th, 1)], fdir: [fd(th, 0), fd(th, 1)] }, more ? more(th, k) : {})); }
+  keys.push({ at: 1, back: true });
+  return { foot: keys[0].foot, fdir: keys[0].fdir, keys };
+}
+// elliptique / arc trainer / escalier : chaque pied suit une boucle (ellipse de centre c, demi-axes rx, ry), les pieds en opposition
+function striding(c, rx, ry, w, n, tilt, more) {
+  const pt = (th, i) => { const a = th + (i ? Math.PI : 0), x = rx * Math.cos(a), y = ry * Math.sin(a); return [c[0] + x * Math.cos(tilt) - y * Math.sin(tilt), c[1] + x * Math.sin(tilt) + y * Math.cos(tilt), w]; };
+  const keys = [];
+  for (let k = 0; k < n; k++) { const th = -2 * Math.PI * k / n; keys.push(Object.assign({ at: k / n, foot: [pt(th, 0), pt(th, 1)] }, more ? more(th, k) : {})); }
+  keys.push({ at: 1, back: true });
+  return { foot: keys[0].foot, keys };
+}
+// machines de cardio : pédaliers et foulées
+const PED_UP = pedaling([0.33, 0.36], 0.17, 0.12, 12);
+const PED_SPIN = pedaling([0.36, 0.36], 0.17, 0.12, 12);
+const PED_REC = pedaling([0.74, 0.4], 0.16, 0.12, 12);
+const PED_AIR = pedaling([0.33, 0.36], 0.17, 0.12, 12, (th, k) => ({ hand: [0, 1].map(i => [0.6 + 0.13 * Math.cos(th + (i ? 0 : Math.PI)), 1.2, 0.24]) }));
+const ELL = striding([0.0, 0.38], 0.22, 0.06, 0.12, 12, 0.08, th => ({ hand: [0, 1].map(i => [0.5 - 0.12 * Math.cos(th + (i ? Math.PI : 0)), 1.3, 0.26]) }));
+const ARC = striding([0.06, 0.42], 0.2, 0.09, 0.12, 12, 0.5, th => ({ hand: [0, 1].map(i => [0.5 - 0.1 * Math.cos(th + (i ? Math.PI : 0)), 1.3, 0.26]) }));
+
 // Étirements : mise en place → étirement tenu en respirant → relâche.
 // side : true = un côté puis l'autre (pose miroir), "one" = un seul côté montré, false = les deux côtés en même temps
 const MIR = { cl: 1, hl: 1, cy: 1, roll: 1 };
@@ -702,17 +738,9 @@ export const EXOS = [
     tips: ["Buste droit, légèrement penché vers l'avant", "Pose le pied sous le corps, pas loin devant", "Bras pliés à 90°, ils balancent d'avant en arrière", "Respiration régulière : garde un rythme que tu peux tenir"],
     err: ["Attaquer fort par le talon loin devant", "Bras qui croisent devant le corps", "Partir trop vite sur le premier kilomètre"],
     vars: ["Montées de genoux", "Talons-fesses"], order: "loop", dur: 0.72, lin: true, ph: { loop: "Foulée" },
-    a: { pc: [-0.02, 1.1], th: 6, hand: [{ c: { el: [-0.42, -0.9, 0.05] }, r: L.fa, d: [0.95, 0.3, -0.1] }, { c: { el: [0.38, -0.92, 0.05] }, r: L.fa, d: [0.55, 0.83, -0.12] }], elbow: [-1, 0, 0.1], palm: [0, 0, -1],
-      foot: [{ c: { kn: [0.3, -0.95, 0.02] }, r: L.sh, d: [0.05, -1, 0] }, { c: { kn: [-0.35, -0.94, 0.02] }, r: L.sh, d: [-0.85, -0.5, 0] }], knee: [1, 0, 0], fdir: [[1, 0.05, 0.1], [0.4, -0.9, 0.05]] },
-    keys: [{ at: 0, lab: "Foulée" },
-      { at: 0.25, pc: [-0.02, 1.12], foot: [{ c: { kn: [0.02, -1, 0.02] }, r: L.sh, d: [-0.25, -0.97, 0] }, { c: { kn: [0.62, -0.78, 0.02] }, r: L.sh, d: [-0.35, -0.94, 0] }], fdir: [[1, 0, 0.1], [0.8, -0.5, 0.05]],
-        hand: [{ c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }, { c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }] },
-      { at: 0.5, pc: [-0.02, 1.1], foot: [{ c: { kn: [-0.35, -0.94, 0.02] }, r: L.sh, d: [-0.85, -0.5, 0] }, { c: { kn: [0.3, -0.95, 0.02] }, r: L.sh, d: [0.05, -1, 0] }], fdir: [[0.4, -0.9, 0.05], [1, 0.05, 0.1]],
-        hand: [{ c: { el: [0.38, -0.92, 0.05] }, r: L.fa, d: [0.55, 0.83, -0.12] }, { c: { el: [-0.42, -0.9, 0.05] }, r: L.fa, d: [0.95, 0.3, -0.1] }] },
-      { at: 0.75, pc: [-0.02, 1.12], foot: [{ c: { kn: [0.62, -0.78, 0.02] }, r: L.sh, d: [-0.35, -0.94, 0] }, { c: { kn: [0.02, -1, 0.02] }, r: L.sh, d: [-0.25, -0.97, 0] }], fdir: [[0.8, -0.5, 0.05], [1, 0, 0.1]],
-        hand: [{ c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }, { c: { el: [-0.02, -1, 0.05] }, r: L.fa, d: [0.8, 0.6, -0.1] }] }, { at: 1, back: true }],
+    a: RUN_A, keys: RUN_KEYS,
     props: P => P.treadmill() },
-  { id: "skierg", n: "SkiErg", gear: "SkiErg", lvl: "Intermédiaire", g: "hyrox", cat: "hyrox", p: ["dorsaux", "triceps"], s: ["abdos", "deltoides_post", "quadriceps"], dist: 1000, rest: 120,
+  { id: "skierg", n: "SkiErg", gear: "SkiErg", lvl: "Intermédiaire", g: "hyrox", cat: "hyrox", cardio: true, p: ["dorsaux", "triceps"], s: ["abdos", "deltoides_post", "quadriceps"], dist: 1000, rest: 120,
     tips: ["Bras tendus en haut, poignées en main", "Tire vers le bas en pliant légèrement les hanches et les genoux", "Finis les mains près des cuisses, bras tendus", "Remonte en grandissant le corps, rythme régulier"],
     err: ["Tirer seulement avec les bras", "Trop plier les genoux (ça devient un squat)", "Arrondir le dos"],
     vars: ["Rameur", "Tirage vertical"], order: "con", tempo: 1.4, ph: { con: "Tirage", exc: "Remontée" },
@@ -748,7 +776,7 @@ export const EXOS = [
       { at: 0.82, lab: "Réception", pc: [0.6, 0.62], th: 30, hp: -15, hand: [0.95, 0.75, 0.24], hdir: [0.5, -1, 0], foot: [0.62, 0.085, 0.13], fdir: [1, 0, 0.15] },
       { at: 0.92, lab: "Réception", pc: [0.6, 0.975], th: 0, hand: [0.6, 0.86, 0.24], hdir: null, knee: [1, 0, 0.15] }, { at: 1, back: true }],
     props: P => P.mat(-1.3, 1.3) },
-  { id: "rameur", n: "Rameur", gear: "Rameur", lvl: "Débutant", g: "hyrox", cat: "hyrox", p: ["dorsaux", "quadriceps"], s: ["ischios", "biceps", "fessiers", "lombaires"], dist: 1000, rest: 120,
+  { id: "rameur", n: "Rameur", gear: "Rameur", lvl: "Débutant", g: "hyrox", cat: "hyrox", cardio: true, p: ["dorsaux", "quadriceps"], s: ["ischios", "biceps", "fessiers", "lombaires"], dist: 1000, rest: 120,
     tips: ["Départ : genoux pliés, bras tendus, buste légèrement penché en avant", "Pousse d'abord avec les jambes, puis bascule le buste, puis tire les bras", "Ramène la poignée sous la poitrine, coudes près du corps", "Reviens dans l'ordre inverse : bras, buste, puis jambes"],
     err: ["Tirer avec les bras avant de pousser avec les jambes", "Arrondir le dos", "Lever les mains au-dessus des genoux au retour"],
     vars: ["SkiErg", "Tirage horizontal"], order: "loop", dur: 2.6, ph: { loop: "Coup de rame" },
@@ -783,6 +811,60 @@ export const EXOS = [
     keys: [{ at: 0, lab: "Squat" }, { at: 0.3, lab: "Lancer", pc: [-0.03, 0.985], th: 0, hp: 0, hand: { t: [0.28, 0.45, 0.13] }, elbow: { t: [0.3, -0.5, 1] } },
       { at: 0.5, ball: 1.05 }, { at: 0.72, lab: "Réception", ball: 0 }, { at: 1, back: true }],
     props: P => { P.box([0.08, 3.4, 1.0], [0.62, 1.7, 0], "wall"); P.target(0.57, 3.05); }, imp: [{ t: "ball" }], view: [0.08, 0.25, 1] },
+  /* ---------------- Machines de cardio (onglet Cardio) ---------------- */
+  { id: "tapis-course", n: "Tapis de course", gear: "Tapis de course", lvl: "Débutant", cat: "cardio", g: "machines", p: ["quadriceps", "ischios"], s: ["mollets", "fessiers", "abdos"], rest: 0, al: ["Tapis", "Treadmill", "Course sur tapis", "Marche inclinée"],
+    tips: ["Monte sur les côtés du tapis, démarre lentement puis augmente la vitesse", "Cours au milieu de la bande, regard devant, sans tenir les rampes", "Pose le pied sous le corps, foulée courte et légère", "Pour la marche inclinée : inclinaison de 8 à 15 %, sans te pencher sur les rampes"],
+    err: ["Se tenir aux rampes (le travail baisse beaucoup)", "Courir trop près de l'avant du tapis", "Descendre du tapis sans l'arrêter"],
+    vars: ["Tapis incurvé", "Vélo elliptique", "Course"], order: "loop", dur: 0.72, lin: true, ph: { loop: "Foulée" }, a: RUN_A, keys: RUN_KEYS, props: P => P.treadmill() },
+  { id: "tapis-incurve", n: "Tapis incurvé", gear: "Tapis incurvé (sans moteur)", lvl: "Intermédiaire", cat: "cardio", g: "machines", p: ["fessiers", "ischios"], s: ["quadriceps", "mollets", "abdos"], rest: 0, al: ["Curve", "Tapis sans moteur", "Assault runner", "Skillmill"],
+    tips: ["C'est toi qui fais tourner la bande : plus tu avances sur la courbe, plus tu accélères", "Pour ralentir, recule vers le bas de la courbe", "Reste sur l'avant du pied, buste légèrement penché", "Commence à vitesse modérée : l'effort monte vite"],
+    err: ["Attaquer par le talon", "Rester tout en haut de la courbe sans le vouloir (accélération)", "Se tenir aux rampes"],
+    vars: ["Tapis de course", "Course"], order: "loop", dur: 0.68, lin: true, ph: { loop: "Foulée" }, a: RUN_A, keys: RUN_KEYS, props: P => P.curveTread() },
+  { id: "velo-droit", n: "Vélo droit", gear: "Vélo d'appartement", lvl: "Débutant", cat: "cardio", g: "machines", p: ["quadriceps"], s: ["fessiers", "ischios", "mollets"], rest: 0, al: ["Vélo", "Vélo d'appartement", "Bike", "Upright bike"],
+    tips: ["Règle la selle : jambe presque tendue quand la pédale est tout en bas", "Dos droit, épaules relâchées, mains posées sur le guidon", "Pousse et tire sur les pédales en gardant les genoux dans l'axe", "Augmente la résistance plutôt que de pédaler très vite sans effort"],
+    err: ["Selle trop basse (genoux qui montent trop)", "Bassin qui se balance sur la selle", "S'appuyer de tout son poids sur le guidon"],
+    vars: ["Vélo de biking", "Vélo semi-allongé", "Air bike"], order: "loop", dur: 0.9, lin: true, ph: { loop: "Tour de pédalier" },
+    a: { pc: [0.0, 1.12], th: 18, hp: -8, hand: [0.64, 1.18, 0.22], palm: [0, -1, 0], elbow: [-0.3, -1, 0.5], knee: [1, 0.15, 0.05], foot: PED_UP.foot, fdir: PED_UP.fdir },
+    keys: PED_UP.keys, props: P => P.bike("droit"), imp: [{ t: "crank", c: [0.33, 0.36] }] },
+  { id: "velo-biking", n: "Vélo de biking", gear: "Vélo de biking (spinning)", lvl: "Intermédiaire", cat: "cardio", g: "machines", p: ["quadriceps", "fessiers"], s: ["ischios", "mollets", "abdos"], rest: 0, al: ["Biking", "Spinning", "RPM", "Indoor cycling", "Vélo de cours collectif"],
+    tips: ["Selle à hauteur de hanche, guidon à peu près à la même hauteur", "Buste penché vers l'avant, dos long, abdos gainés", "Tourne la molette pour ajouter de la résistance : tu dois sentir l'appui", "Pour te mettre en danseuse, augmente d'abord la résistance"],
+    err: ["Pédaler très vite sans résistance (les genoux tapent)", "Dos rond et épaules crispées", "Se lever en danseuse sans résistance"],
+    vars: ["Vélo droit", "Air bike"], order: "loop", dur: 0.75, lin: true, ph: { loop: "Tour de pédalier" },
+    a: { pc: [-0.02, 1.12], th: 40, hp: -18, hand: [0.7, 1.1, 0.22], palm: [0, -1, 0], elbow: [-0.2, -1, 0.6], knee: [1, 0.15, 0.05], foot: PED_SPIN.foot, fdir: PED_SPIN.fdir },
+    keys: PED_SPIN.keys, props: P => P.bike("biking"), imp: [{ t: "crank", c: [0.36, 0.36] }] },
+  { id: "velo-semi-allonge", n: "Vélo semi-allongé", gear: "Vélo semi-allongé", lvl: "Débutant", cat: "cardio", g: "machines", p: ["quadriceps"], s: ["fessiers", "ischios"], rest: 0, al: ["Vélo allongé", "Vélo couché", "Recumbent"],
+    tips: ["Avance ou recule le siège : jambe presque tendue quand la pédale est la plus loin", "Dos bien calé contre le dossier, mains sur les poignées", "Pédale de façon régulière, genoux dans l'axe des pieds", "Idéal pour reprendre en douceur ou si tu as mal au dos"],
+    err: ["Siège trop près (genoux qui remontent vers le buste)", "Décoller le dos du dossier", "Résistance trop faible pour progresser"],
+    vars: ["Vélo droit", "Vélo elliptique"], order: "loop", dur: 0.9, lin: true, ph: { loop: "Tour de pédalier" },
+    a: { pc: [0.02, 0.68], th: -24, hp: 14, hand: [0.2, 0.62, 0.3], palm: [0, 0, -1], hdir: [1, 0, 0], elbow: [-0.6, -1, 0.3], knee: [1, 0.6, 0.05], foot: PED_REC.foot, fdir: PED_REC.fdir },
+    keys: PED_REC.keys, props: P => P.recumbent(), imp: [{ t: "crank", c: [0.74, 0.4] }] },
+  { id: "velo-elliptique", n: "Vélo elliptique", gear: "Vélo elliptique", lvl: "Débutant", cat: "cardio", g: "machines", p: ["quadriceps", "fessiers"], s: ["ischios", "mollets", "pectoraux", "dorsaux"], rest: 0, al: ["Elliptique", "Cross trainer", "Orbitrek"],
+    tips: ["Pieds bien à plat sur les pédales, ils ne se décollent pas", "Pousse et tire les poignées : les bras travaillent aussi", "Buste droit, regard devant, abdos légèrement gainés", "Tu peux aussi pédaler en arrière pour solliciter davantage les ischios"],
+    err: ["Se pencher vers l'avant en s'appuyant sur les poignées", "Décoller les talons", "Résistance trop faible (mouvement qui s'emballe)"],
+    vars: ["Arc trainer", "Tapis de course", "Vélo droit"], order: "loop", dur: 1.1, lin: true, ph: { loop: "Foulée" },
+    a: { pc: [-0.05, 1.23], th: 6, hand: ELL.keys[0].hand, palm: [0, 0, -1], hdir: [0, 1, 0], elbow: [-1, -0.4, 0.3], knee: [1, 0, 0.08], foot: ELL.foot, fdir: [1, 0, 0.1] },
+    keys: ELL.keys, props: P => P.elliptical(false), imp: [{ t: "plates", rail: [-0.62, 0.3, 0.16] }, { t: "handles", piv: [0.62, 0.45, 0.28] }] },
+  { id: "arc-trainer", n: "Arc trainer", gear: "Arc trainer", lvl: "Intermédiaire", cat: "cardio", g: "machines", p: ["fessiers", "quadriceps"], s: ["ischios", "mollets", "dorsaux"], rest: 0, al: ["Arc", "Cybex Arc", "Arc trainer Cybex"],
+    tips: ["Les pieds montent et avancent en arc : pousse vers le bas et l'arrière", "Choisis l'inclinaison : plus elle est haute, plus les fessiers travaillent", "Garde le buste droit, mains sur les poignées mobiles", "Moins d'impact qu'en courant : bien pour les genoux"],
+    err: ["S'avachir sur les poignées", "Décoller les talons des pédales", "Mouvement trop court"],
+    vars: ["Vélo elliptique", "Escalier"], order: "loop", dur: 1.1, lin: true, ph: { loop: "Foulée" },
+    a: { pc: [-0.12, 1.26], th: 10, hand: ARC.keys[0].hand, palm: [0, 0, -1], hdir: [0, 1, 0], elbow: [-1, -0.4, 0.3], knee: [1, 0.1, 0.08], foot: ARC.foot, fdir: [1, 0.1, 0.1] },
+    keys: ARC.keys, props: P => P.elliptical(true), imp: [{ t: "plates", rail: [0.72, 0.95, 0.18] }, { t: "handles", piv: [0.72, 0.6, 0.28] }] },
+  { id: "escalier", n: "Escalier", gear: "Escalier (StairMaster)", lvl: "Intermédiaire", cat: "cardio", g: "machines", p: ["fessiers", "quadriceps"], s: ["ischios", "mollets"], rest: 0, al: ["StairMaster", "Stair climber", "Escalier mécanique", "Marches"],
+    tips: ["Pose tout le pied sur la marche et pousse sur le talon", "Buste presque droit, mains posées légèrement sur les rampes", "Commence à vitesse basse, puis augmente quand le rythme est régulier", "Monte les marches une par une, sans sauter"],
+    err: ["Se pendre aux rampes (le travail baisse)", "Monter seulement sur la pointe des pieds", "Se pencher très en avant"],
+    vars: ["Arc trainer", "Tapis de course"], order: "loop", dur: 1.1, lin: true, ph: { loop: "Marche" },
+    a: { pc: [-0.12, 1.18], th: 9, hand: [0.24, 1.12, 0.36], palm: [0, -1, 0], elbow: [-1, -0.5, 0.4], knee: [1, 0, 0.08], foot: [[0.24, 0.485, 0.11], [-0.03, 0.285, 0.11]], fdir: [[1, 0, 0.08], [1, 0, 0.08]] },
+    keys: [{ at: 0, lab: "Montée jambe gauche" }, { at: 0.25, pc: [-0.12, 1.21], foot: [[0.12, 0.39, 0.11], [0.08, 0.52, 0.11]], fdir: [[1, 0, 0.08], [1, -0.3, 0.08]] },
+      { at: 0.5, lab: "Montée jambe droite", pc: [-0.12, 1.18], foot: [[-0.03, 0.285, 0.11], [0.24, 0.485, 0.11]], fdir: [[1, 0, 0.08], [1, 0, 0.08]] },
+      { at: 0.75, pc: [-0.12, 1.21], foot: [[0.08, 0.52, 0.11], [0.12, 0.39, 0.11]], fdir: [[1, -0.3, 0.08], [1, 0, 0.08]] }, { at: 1, back: true }],
+    props: P => P.stairs() },
+  { id: "air-bike", n: "Air bike", gear: "Air bike (Assault, Echo)", lvl: "Avancé", cat: "cardio", g: "machines", p: ["quadriceps", "deltoides_ant"], s: ["fessiers", "pectoraux", "dorsaux", "triceps", "biceps"], rest: 0, al: ["Assault bike", "Echo bike", "Fan bike", "Vélo à air"],
+    tips: ["Pousse et tire les poignées en même temps que tu pédales : tout le corps travaille", "Plus tu vas vite, plus le ventilateur résiste", "Dos droit, abdos gainés, selle réglée comme un vélo droit", "Idéal en intervalles : 20 s à fond, 40 s tranquille"],
+    err: ["Pédaler seulement avec les jambes", "Partir à fond et s'épuiser en quelques secondes", "Dos rond en fin d'effort"],
+    vars: ["Vélo droit", "Rameur", "SkiErg"], order: "loop", dur: 0.85, lin: true, ph: { loop: "Tour de pédalier" },
+    a: { pc: [0.0, 1.12], th: 16, hp: -6, hand: PED_AIR.keys[0].hand, palm: [0, 0, -1], hdir: [0, 1, 0], elbow: [-1, -0.4, 0.3], knee: [1, 0.15, 0.05], foot: PED_AIR.foot, fdir: PED_AIR.fdir },
+    keys: PED_AIR.keys, props: P => P.bike("air"), imp: [{ t: "crank", c: [0.33, 0.36] }, { t: "handles", piv: [0.42, 0.45, 0.25] }] },
   /* ---------------- Étirements (haut, milieu et bas du corps) ---------------- */
   // Haut du corps
   { id: "etirement-cou", n: "Étirement du cou", gear: "Sans matériel", lvl: "Débutant", zone: "haut", cat: "etirement", p: ["trapezes"], s: [], time: true, hold: 30, side: true, rest: 15,
@@ -1301,6 +1383,46 @@ function kitBuilder(g) {
       box([0.36, 0.06, 0.44], [0.78, 0.12, 0], "frame"); box([0.05, 0.3, 0.38], [0.79, 0.27, 0], "dark", -0.45);
       cyl(0.24, 0.14, [1.05, 0.48, 0], [Math.PI / 2, 0, 0], "dark", 32); box([0.12, 0.42, 0.12], [1.02, 0.21, 0], "frame");
     },
+    // vélos : cadre au sol, selle, guidon, roue d'inertie ; kind « droit », « biking » (roue lourde devant) ou « air » (ventilateur devant)
+    bike(kind) {
+      const sx = kind === "biking" ? -0.02 : 0, sy = 0.95, hx = kind === "biking" ? 0.66 : 0.6, hy = kind === "biking" ? 1.1 : 1.18;
+      box([1.15, 0.05, 0.5], [0.28, 0.025, 0], "frame");
+      segment(cyl(0.035, 1, [0, 0, 0], null, "frame", 14), V(0.12, 0.05, 0), V(sx, sy - 0.04, 0)); box([0.26, 0.05, 0.17], [sx, sy, 0], "dark");
+      segment(cyl(0.035, 1, [0, 0, 0], null, "frame", 14), V(0.52, 0.05, 0), V(hx - 0.04, hy - 0.08, 0));
+      if (kind !== "air") { box([0.07, 0.04, 0.5], [hx, hy, 0], "frame"); [1, -1].forEach(z => cyl(0.02, 0.14, [hx + 0.04, hy, 0.22 * z], [0, 0, Math.PI / 2], "dark")); }
+      if (kind === "biking") { cyl(0.25, 0.06, [0.62, 0.42, 0], [Math.PI / 2, 0, 0], "plate", 36); box([0.1, 0.06, 0.12], [0.62, 0.42, 0.07], "pink"); }
+      else if (kind === "air") { const f = cyl(0.36, 0.2, [0.82, 0.5, 0], [0, 0, Math.PI / 2], "dark", 40); f.rotation.set(0, 0, Math.PI / 2); cyl(0.33, 0.21, [0.82, 0.5, 0], [0, 0, Math.PI / 2], "plate", 40); box([0.08, 0.5, 0.08], [0.82, 0.25, 0], "frame"); }
+      else { box([0.36, 0.46, 0.22], [0.34, 0.33, 0], "dark"); box([0.18, 0.12, 0.05], [hx - 0.02, hy + 0.12, 0], "dark", -0.4); }
+    },
+    // vélo semi-allongé : siège bas avec dossier, pédalier devant, poignées sur les côtés
+    recumbent() {
+      box([1.45, 0.05, 0.5], [0.22, 0.025, 0], "frame"); box([0.42, 0.07, 0.4], [-0.02, 0.5, 0], "dark"); box([0.08, 0.45, 0.08], [0, 0.25, 0]);
+      box([0.07, 0.62, 0.4], [-0.27, 0.8, 0], "dark", 0.32); box([0.06, 0.32, 0.06], [-0.2, 0.62, 0], "frame", 0.3);
+      [1, -1].forEach(z => { box([0.32, 0.04, 0.04], [0.06, 0.55, 0.3 * z], "frame"); cyl(0.02, 0.12, [0.2, 0.58, 0.3 * z], null, "dark"); });
+      box([0.26, 0.36, 0.1], [0.78, 0.2, 0], "dark"); segment(cyl(0.03, 1, [0, 0, 0], null, "frame", 14), V(0.9, 0.3, 0), V(0.72, 1.05, 0)); box([0.2, 0.13, 0.05], [0.72, 1.1, 0], "dark", 0.5);
+    },
+    // vélo elliptique / arc trainer : rails au sol, colonne et poignées mobiles devant
+    elliptical(arc) {
+      box([1.8, 0.06, 0.6], [0.05, 0.03, 0], "frame");
+      if (arc) { box([0.42, 1.2, 0.5], [0.78, 0.6, 0], "dark", -0.15); }
+      else { cyl(0.25, 0.1, [-0.62, 0.3, 0], [Math.PI / 2, 0, 0], "dark", 32); [1, -1].forEach(z => box([1.1, 0.04, 0.05], [-0.05, 0.12, 0.2 * z], "steel")); }
+      segment(cyl(0.04, 1, [0, 0, 0], null, "frame", 14), V(0.62, 0.06, 0), V(0.55, 1.15, 0)); box([0.22, 0.15, 0.06], [0.52, 1.28, 0], "dark", 0.4);
+    },
+    // escalier (StairMaster) : marches qui défilent, rampes de chaque côté
+    stairs() {
+      for (let k = 0; k < 4; k++) box([0.27, 0.2 * (k + 1), 0.62], [0.02 + k * 0.27, 0.1 * (k + 1), 0], "dark"); // marches (elles défilent vers le bas sur la vraie machine)
+      for (let k = 0; k < 4; k++) box([0.27, 0.012, 0.6], [0.02 + k * 0.27, 0.2 * (k + 1) + 0.006, 0], "belt");
+      box([1.5, 0.05, 0.8], [0.35, 0.025, 0], "frame"); box([0.12, 1.8, 0.8], [1.08, 0.9, 0], "frame");
+      [1, -1].forEach(z => { segment(cyl(0.022, 1, [0, 0, 0], null, "steel", 12), V(-0.15, 1.05, 0.36 * z), V(0.95, 1.25, 0.36 * z)); box([0.05, 1.05, 0.05], [-0.15, 0.525, 0.38 * z], "frame"); });
+      box([0.2, 0.16, 0.05], [1.0, 1.55, 0], "dark", 0.4);
+    },
+    // tapis incurvé (sans moteur) : bande en creux, rampes à l'avant
+    curveTread() {
+      box([1.9, 0.06, 0.7], [0.05, 0.03, 0], "frame");
+      for (let k = -6; k <= 6; k++) { const x = k * 0.13, y = 0.16 + 0.12 * (k / 6) * (k / 6); box([0.135, 0.03, 0.52], [x + 0.05, y, 0], "belt", Math.atan(0.24 * (k / 6) / 0.78) ); }
+      [1, -1].forEach(z => { box([0.06, 1.1, 0.06], [0.95, 0.6, 0.34 * z], "frame", -0.12); cyl(0.02, 0.6, [0.68, 1.02, 0.34 * z], [0, 0, Math.PI / 2], "steel"); });
+      box([0.12, 0.2, 0.6], [1.0, 1.2, 0], "dark", -0.5);
+    },
     target(x, y) { const r = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.03, 10, 40), MAT.pink); r.position.set(x - 0.06, y, 0); r.rotation.y = Math.PI / 2; g.add(r); },
     bench(x0, x1, h = 0.45, z = 0) {
       box([x1 - x0, 0.075, 0.29], [(x0 + x1) / 2, h - 0.0375, z], "dark");
@@ -1462,6 +1584,33 @@ function buildImplements(ex, g, stacks, o0, P) {
         if (im.to === "ankle1") orient(cuff, o.an[1].clone().addScaledVector(o.an[1].clone().sub(o.kn[1]).normalize(), -0.04), o.an[1].clone().sub(o.kn[1]), V(1, 0, 0));
         const L2 = lens(o); (im.stacks || []).forEach((si, k) => { if (stacks[si]) stacks[si].rise((L2[Math.min(k, L2.length - 1)] - base[Math.min(k, base.length - 1)]) * (im.k || 1)); });
       });
+    } else if (im.t === "crank") {
+      // pédalier : une manivelle par pied, de l'axe (im.c) jusqu'à la pédale sous le pied (vélos)
+      const arms = [0, 1].map(() => { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1, 10), MAT.steel); g.add(shadowy(a)); return a; });
+      const peds = [0, 1].map(() => { const pd = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.025, 0.09), MAT.dark); g.add(shadowy(pd)); return pd; });
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.16, 20), MAT.frame); hub.rotation.x = Math.PI / 2; hub.position.set(im.c[0], im.c[1], 0); g.add(shadowy(hub));
+      ups.push(o => [0, 1].forEach(i => {
+        const zs = o.an[i].z >= 0 ? 1 : -1, pp = o.an[i].clone().addScaledVector(o.fdir[i], 0.06).add(V(0, -0.075, 0));
+        segment(arms[i], V(im.c[0], im.c[1], zs * 0.09), V(pp.x, pp.y, zs * 0.09));
+        peds[i].position.set(pp.x, pp.y, zs * Math.max(0.1, Math.abs(o.an[i].z))); peds[i].rotation.set(0, 0, 0);
+      }));
+    } else if (im.t === "handles") {
+      // poignées mobiles : un bras par main, d'un pivot (x, y, ±w) jusqu'à la main (elliptique, air bike)
+      const arms = [0, 1].map(() => { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 10), MAT.frame); g.add(shadowy(a)); return a; });
+      const grips = [0, 1].map(() => { const t = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.019, 0.16, 12), MAT.dark); g.add(shadowy(t)); return t; });
+      ups.push(o => [0, 1].forEach(i => {
+        const zs = o.hand[i].z >= 0 ? 1 : -1, piv = V(im.piv[0], im.piv[1], zs * im.piv[2]), h = o.hand[i].clone();
+        segment(arms[i], piv, h.clone().addScaledVector(UP, -0.06)); grips[i].position.copy(h); grips[i].rotation.set(0, 0, 0);
+      }));
+    } else if (im.t === "plates") {
+      // pédales sous les pieds qui suivent le mouvement (elliptique, arc trainer, escalier)
+      const pl = [0, 1].map(() => { const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.15), MAT.dark); g.add(shadowy(b)); return b; });
+      const rods = im.rail ? [0, 1].map(() => { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 10), MAT.frame); g.add(shadowy(a)); return a; }) : null;
+      ups.push(o => [0, 1].forEach(i => {
+        const f = o.fdir[i].clone().setZ(0).normalize(), c = o.an[i].clone().addScaledVector(f, 0.06).add(V(0, -0.1, 0));
+        pl[i].position.copy(c); pl[i].rotation.set(0, 0, Math.atan2(f.y, f.x));
+        if (rods) { const zs = o.an[i].z >= 0 ? 1 : -1; segment(rods[i], V(im.rail[0], im.rail[1], zs * im.rail[2]), V(c.x - 0.08, c.y - 0.02, zs * im.rail[2])); }
+      }));
     } else if (im.t === "sledpull") {
       // le traîneau avance à chaque traction de corde (une main, puis l'autre), sur plusieurs boucles avant de repartir
       const N = im.loops || 3, step = im.step || 0.2, dur = ex.dur || 1.6;
@@ -1677,7 +1826,13 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;"
 const groupOf = ex => ex.g || MUSCLES[ex.p[0]][1];
 const byName = {}; EXOS.forEach(e => { byName[norm(e.n)] = e; (e.al || []).forEach(a => { byName[norm(a)] = byName[norm(a)] || e; }); });
 const isStretch = ex => ex.cat === "etirement";
-const STRETCHES = EXOS.filter(isStretch), MUSCU = EXOS.filter(ex => !isStretch(ex));
+const STRETCHES = EXOS.filter(isStretch), MUSCU = EXOS.filter(ex => !isStretch(ex) && ex.cat !== "cardio");
+// onglet Cardio : les machines des salles, plus le rameur et le SkiErg (aussi rangés dans Hyrox)
+const CARDIO_SECS = [["Course et marche", ["tapis-course", "tapis-incurve"]], ["Vélos", ["velo-droit", "velo-biking", "velo-semi-allonge", "air-bike"]],
+  ["Elliptiques et escalier", ["velo-elliptique", "arc-trainer", "escalier"]], ["Rameur et ski", ["rameur", "skierg"]]]
+  .map(([n, ids]) => [n, ids.map(id => EXOS.find(e => e.id === id)).filter(Boolean)]);
+const CARDIO = CARDIO_SECS.flatMap(x => x[1]);
+const isCardio = ex => CARDIO.includes(ex);
 const ZONES = [["tous", "Tous"], ["haut", "Haut du corps"], ["milieu", "Milieu du corps"], ["bas", "Bas du corps"]];
 const zoneName = z => (ZONES.find(x => x[0] === z) || ["", ""])[1];
 const holdTxt = ex => ex.hold + " s" + (ex.side ? " de chaque côté" : "");
@@ -1715,21 +1870,28 @@ function stretchListHtml() {
   }
   return h;
 }
+function cardioListHtml() {
+  return CARDIO_SECS.map(([n, items]) => '<div class="section-title">' + n + '</div><div class="list">' + items.map(e => '<a href="#/exercices/' + e.id + '"><div><b>' + esc(e.n) + '</b><div class="muted small">' +
+    esc(e.p.concat(e.s).slice(0, 3).map(mm => MUSCLES[mm][0]).join(", ")) + '</div></div><span class="exo-go" aria-hidden="true">›</span></a>').join("") + "</div>").join("");
+}
 function renderList(root) {
-  const et = ui.mode === "etir";
-  root.innerHTML = '<div class="page-head"><h1>Exercices</h1><span class="muted small">' + (et ? STRETCHES.length + " étirements" : MUSCU.length + " exercices") + "</span></div>" +
-    '<div class="exo-mode" role="group" aria-label="Type d\'exercices"><button type="button" data-exo-m="muscu" aria-pressed="' + !et + '">Musculation</button><button type="button" data-exo-m="etir" aria-pressed="' + et + '">Étirements</button></div>' +
-    (et ? '<a class="card exo-guide" href="#/exercices/conseils-etirements"><div><b>Bien s\'étirer : les conseils</b></div><span class="exo-go" aria-hidden="true">›</span></a>' +
+  const et = ui.mode === "etir", cd = ui.mode === "cardio";
+  root.innerHTML = '<div class="page-head"><h1>Exercices</h1><span class="muted small">' + (et ? STRETCHES.length + " étirements" : cd ? CARDIO.length + " machines" : MUSCU.length + " exercices") + "</span></div>" +
+    '<div class="exo-mode three" role="group" aria-label="Type d\'exercices"><button type="button" data-exo-m="muscu" aria-pressed="' + (!et && !cd) + '">Musculation</button><button type="button" data-exo-m="cardio" aria-pressed="' + cd + '">Cardio</button><button type="button" data-exo-m="etir" aria-pressed="' + et + '">Étirements</button></div>' +
+    (cd ? (api && api.cardioStart ? '<button type="button" class="card exo-guide" id="exo-cardio-go"><div><b>Lancer une séance cardio</b><div class="muted small">Lance le chrono maintenant, ou ajoute une séance déjà faite</div></div><span class="exo-go" aria-hidden="true">›</span></button>' : "") +
+      '<div id="exo-list">' + cardioListHtml() + "</div>"
+    : et ? '<a class="card exo-guide" href="#/exercices/conseils-etirements"><div><b>Bien s\'étirer : les conseils</b></div><span class="exo-go" aria-hidden="true">›</span></a>' +
       '<input class="f exo-q" id="exo-q" type="search" placeholder="Rechercher un étirement, un muscle" autocomplete="off" aria-label="Rechercher un étirement" value="' + esc(ui.qe) + '">' +
       '<div class="exo-chips" role="group" aria-label="Filtrer par zone">' + ZONES.map(([z, n]) => '<button class="chip-btn" data-exo-z="' + z + '" aria-pressed="' + (ui.zone === z) + '">' + n + "</button>").join("") + "</div>" +
       '<div id="exo-list">' + stretchListHtml() + "</div>"
     : '<input class="f exo-q" id="exo-q" type="search" placeholder="Rechercher un exercice, un muscle, une machine" autocomplete="off" aria-label="Rechercher un exercice" value="' + esc(ui.q) + '">' +
       '<div class="exo-chips" role="group" aria-label="Filtrer par muscle">' + GROUPS.map(([g, n]) => '<button class="chip-btn" data-exo-g="' + g + '" aria-pressed="' + (ui.group === g) + '">' + n + "</button>").join("") + "</div>" +
       '<div id="exo-list">' + listHtml() + "</div>");
+  root.querySelectorAll("[data-exo-m]").forEach(b => b.addEventListener("click", () => { if (ui.mode !== b.dataset.exoM) { ui.mode = b.dataset.exoM; renderList(root); } }));
+  if (cd) { const g = root.querySelector("#exo-cardio-go"); if (g) g.addEventListener("click", () => api.cardioStart()); return; }
   const list = () => { root.querySelector("#exo-list").innerHTML = et ? stretchListHtml() : listHtml(); };
   const q = root.querySelector("#exo-q");
   q.addEventListener("input", () => { if (et) ui.qe = q.value.trim(); else ui.q = q.value.trim(); list(); });
-  root.querySelectorAll("[data-exo-m]").forEach(b => b.addEventListener("click", () => { if (ui.mode !== b.dataset.exoM) { ui.mode = b.dataset.exoM; renderList(root); } }));
   root.querySelectorAll("[data-exo-g],[data-exo-z]").forEach(b => b.addEventListener("click", () => {
     if (b.dataset.exoZ) ui.zone = b.dataset.exoZ; else ui.group = b.dataset.exoG;
     root.querySelectorAll(et ? "[data-exo-z]" : "[data-exo-g]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); list();
@@ -1752,6 +1914,19 @@ function detailHtml(ex) {
     '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, seq.length, "exercice") + '<div><h1 class="exo-title">' + esc(ex.n) + '</h1><div class="exo-tags"><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span><span>" + (ex.time ? "Temps" : ex.dist ? esc(ex.dist >= 1000 ? (ex.dist / 1000).toString().replace(".", ",") + " km" : ex.dist + " m") + (ex.load ? " · charge" : "") : esc(ex.reps) + " reps") + "</span></div></div>" +
     '<div><h3>Muscles travaillés</h3><div class="exo-mus">' + ex.p.map(mm => chipM(mm, "p")).join("") + ex.s.map(mm => chipM(mm, "s")).join("") + "</div></div>" +
     '<div><h3>Bien l\'exécuter</h3><ul class="exo-tips">' + ex.tips.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
+    '<div><h3>Erreurs fréquentes</h3><ul class="exo-tips bad">' + ex.err.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
+    '<div><h3>Variantes</h3><div class="exo-vars">' + varsHtml(ex) + "</div></div>" +
+    '<button class="btn primary block big" id="exo-add">Ajouter à une séance</button></article></div>';
+}
+function cardioDetailHtml(ex) {
+  const back = api && api.back ? '<a class="back" href="' + esc(api.back.href) + '">‹ ' + esc(api.back.label) + "</a>" : '<a class="back" href="#/exercices/cardio">‹ Cardio</a>';
+  const k = CARDIO.indexOf(ex), info = api && api.cardioInfo ? api.cardioInfo(ex.id) : [];
+  return back +
+    '<div class="exo-main">' + stageHtml(false) +
+    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, CARDIO.length, "machine") + '<div><h1 class="exo-title">' + esc(ex.n) + '</h1><div class="exo-tags"><span>Cardio</span><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span></div></div>" +
+    '<div><h3>Muscles travaillés</h3><div class="exo-mus">' + ex.p.map(mm => chipM(mm, "p")).join("") + ex.s.map(mm => chipM(mm, "s")).join("") + "</div></div>" +
+    '<div><h3>Bien l\'utiliser</h3><ul class="exo-tips">' + ex.tips.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
+    (info.length ? '<div><h3>Ce que tu peux noter</h3><div class="exo-vars">' + info.map(t => '<span class="exo-var">' + esc(t) + "</span>").join("") + '</div><p class="exo-p muted small">Avec la durée de ta séance. Il manque un indicateur ? Ajoute le tien pendant la séance : il sera gardé pour cette machine.</p></div>' : "") +
     '<div><h3>Erreurs fréquentes</h3><ul class="exo-tips bad">' + ex.err.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
     '<div><h3>Variantes</h3><div class="exo-vars">' + varsHtml(ex) + "</div></div>" +
     '<button class="btn primary block big" id="exo-add">Ajouter à une séance</button></article></div>';
@@ -1824,13 +1999,14 @@ export function mount(root, id, appApi, arg) {
   api = appApi;
   const zoneArg = ZONES.some(z => z[0] === arg) ? arg : null;
   if (id === "etirements") { ui.mode = "etir"; if (zoneArg) { ui.zone = zoneArg; ui.qe = ""; } id = null; }
+  if (id === "cardio") { ui.mode = "cardio"; id = null; }
   if (id === "conseils-etirements") { ui.mode = "etir"; root.innerHTML = guideHtml(); return; } // position : gérée par l'appli (haut de page, ou même position au retour)
   const ex = id ? EXOS.find(e => e.id === id) : null;
   if (!ex) { renderList(root); return; }
-  const st = isStretch(ex);
-  ui.mode = st ? "etir" : "muscu";
+  const st = isStretch(ex), cd = isCardio(ex) && (ex.cat === "cardio" || arg === "cardio" || (ui.mode === "cardio" && arg !== "muscu"));
+  ui.mode = st ? "etir" : cd ? "cardio" : "muscu";
   if (st && zoneArg) { ui.zone = zoneArg; ui.qe = ""; }
-  root.innerHTML = st ? stretchDetailHtml(ex) : detailHtml(ex);
+  root.innerHTML = st ? stretchDetailHtml(ex) : cd ? cardioDetailHtml(ex) : detailHtml(ex);
   const stage = root.querySelector("#exo-stage"); view.stage = stage; view.pill = root.querySelector("#exo-pill"); view.phase = "";
   initScene();
   if (G.failed) { stage.insertAdjacentHTML("beforeend", '<div class="exo-fallback">L\'animation 3D n\'est pas disponible sur cet appareil.</div>'); }
@@ -1843,9 +2019,9 @@ export function mount(root, id, appApi, arg) {
   }
   root.querySelector("#exo-play").addEventListener("click", e => { view.playing = !view.playing; e.currentTarget.textContent = view.playing ? "Pause" : "Lecture"; e.currentTarget.setAttribute("aria-pressed", String(!view.playing)); });
   root.querySelector("#exo-slow").addEventListener("click", e => { view.speed = view.speed === 1 ? 0.4 : 1; e.currentTarget.setAttribute("aria-pressed", String(view.speed !== 1)); });
-  root.querySelector("#exo-add").addEventListener("click", () => api && api.add(st ? { name: ex.n, time: true, hold: ex.hold, sets: 2, rest: ex.rest } : { name: ex.n, time: !!ex.time, dist: ex.dist || 0, load: !!ex.load, reps: ex.reps, rest: ex.rest, bw: atHome(ex) }));
+  root.querySelector("#exo-add").addEventListener("click", () => api && api.add(cd ? { name: ex.n, cardio: ex.id } : st ? { name: ex.n, time: true, hold: ex.hold, sets: 2, rest: ex.rest } : { name: ex.n, time: !!ex.time, dist: ex.dist || 0, load: !!ex.load, reps: ex.reps, rest: ex.rest, bw: atHome(ex) }));
   // fiche suivante ou précédente sans repasser par la liste : glisser le doigt (hors de l'image 3D), flèches du clavier
-  const seq = st ? seqFor(ex) : seqForEx(ex), k = seq.indexOf(ex);
+  const seq = st ? seqFor(ex) : cd ? CARDIO : seqForEx(ex), k = seq.indexOf(ex);
   const step = d => { const t = seq[k + d]; if (!t) return; slideDir = d; (window.__navReplace || (h => location.replace(h)))("#/exercices/" + t.id); };
   let t0 = null;
   root.addEventListener("touchstart", e => { const t = e.touches[0]; t0 = e.touches.length === 1 && !e.target.closest("#exo-stage") ? { x: t.clientX, y: t.clientY } : null; }, { passive: true });

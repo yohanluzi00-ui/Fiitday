@@ -1044,7 +1044,7 @@ function inputsHtml(w, e, i, k, d, label) {
   if (e.type === "time") return '<input class="ro" readonly tabindex="-1" aria-readonly="true" aria-label="Temps ' + label + ' (rempli par le chrono)" data-f="sec"' + a + ' value="' + esc(fmtHold(v.sec)) + '" placeholder="' + esc(ph.sec) + '">';
   if (e.type === "rep") return '<input inputmode="numeric" aria-label="Répétitions ' + label + '" data-f="reps"' + a + ' value="' + esc(v.reps) + '" placeholder="' + esc(ph.reps) + '">';
   if (e.type === "dist") return (e.load ? '<input inputmode="decimal" aria-label="Kilos ' + label + '" data-f="kg"' + a + ' value="' + esc(v.kg) + '" placeholder="' + esc(ph.kg) + '">' : "") +
-    '<input inputmode="numeric" aria-label="Temps ' + label + ' (minutes:secondes)" data-f="clock"' + a + ' value="' + (num(v.sec) != null ? fmtClock(v.sec) : "") + '" placeholder="' + esc(ph.clock) + '">';
+    '<button type="button" class="f pick tpick' + (num(v.sec) != null ? "" : " empty") + '" data-act="distclock"' + a + ' aria-label="Temps ' + label + " : " + (num(v.sec) != null ? fmtClock(v.sec) : "à choisir") + '">' + (num(v.sec) != null ? fmtClock(v.sec) : ph.clock === "m:ss" ? "Temps" : ph.clock) + "</button>";
   return '<input inputmode="decimal" aria-label="Kilos ' + label + '" data-f="kg"' + a + ' value="' + esc(v.kg) + '" placeholder="' + esc(ph.kg) + '">' +
     '<input inputmode="numeric" aria-label="Répétitions ' + label + '" data-f="reps"' + a + ' value="' + esc(v.reps) + '" placeholder="' + esc(ph.reps) + '">';
 }
@@ -1105,7 +1105,9 @@ function cardioBody(w, e, i) {
       '<div class="cv-grid">' + defs.map(d => {
         const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
         return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
-          (d.clock ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvclock" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtClock(v) : "à choisir") + '">' +
+          (d.k === "dist" || d.k === "distm" ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvdist" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtNum(num(v)) + " " + d.u : "à choisir") + '">' +
+            (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? "Dernière fois " + fmtNum(pv) + " " + d.u : "Choisir") + "</button>" :
+          d.clock ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvclock" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtClock(v) : "à choisir") + '">' +
             (num(v) != null ? fmtClock(v) : pv != null ? "Dernière fois " + fmtClock(pv) : "Choisir") + "</button>" :
           '<span class="cv-in"><input inputmode="decimal" data-f="cv" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab + (d.u ? " en " + d.u : "")) + '" value="' +
           esc(v == null || v === "" ? "" : String(v).replace(".", ",")) + '" placeholder="' + esc(pv != null ? fmtNum(pv) : "") + '">' + (d.u ? "<em>" + esc(d.u) + "</em>" : "") + "</span>") + "</div>";
@@ -1326,7 +1328,7 @@ function exFields(e, k, letter, inGroup) {
       '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
       '<div class="fl full cv-info"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
     (inGroup || cardio ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
-    (cardio ? "" : dist ? '<label class="fl">Distance (m)<input class="f" type="number" min="1" max="100000" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="1000"></label>' +
+    (cardio ? "" : dist ? '<div class="fl"><span>Distance</span><button type="button" class="f pick" data-act="picksec" data-sf="dtarget" data-e="' + k + '">' + fmtDist(num(e.target) || 1000, "m") + "</button></div>" +
       '<label class="fl">Charge<select class="f" data-p="load" data-e="' + k + '"><option value="0"' + (!e.load ? " selected" : "") + '>Sans charge</option><option value="1"' + (e.load ? " selected" : "") + ">Avec charge (kg)</option></select></label>"
     : time ? '<div class="fl"><span>Temps cible</span><button type="button" class="f pick" data-act="picksec" data-sf="target" data-e="' + k + '">' + fmtSecs(num(e.target) || 0) + "</button></div>"
       : '<label class="fl">Reps cible<input class="f" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="8-10"></label>') +
@@ -2327,6 +2329,15 @@ function pickDuration(title, sec) {
   const mins = Array.from({ length: 301 }, (_, k) => k), secs = Array.from({ length: 60 }, (_, k) => k);
   return pickWheels(title, [{ vals: mins, fmt: x => x + " min", value: Math.min(300, Math.floor(sec / 60)) }, { vals: secs, fmt: x => pad(x) + " s", value: sec % 60 }]).then(r => (r ? r[0] * 60 + r[1] : null));
 }
+// distance avec des roues : en km (km entiers + centièmes) ou en mètres (km + mètres, par 10 m)
+const rng = (n, step) => Array.from({ length: n }, (_, k) => k * (step || 1));
+function pickDistance(title, value, unit) {
+  const v = Math.max(0, num(value) || 0);
+  if (unit === "km") { const c = Math.round(v * 100); return pickWheels(title, [{ vals: rng(201), fmt: x => String(x), value: Math.min(200, Math.floor(c / 100)) }, { vals: rng(100), fmt: x => "," + pad(x) + " km", value: c % 100 }]).then(r => (r ? Math.round(r[0] * 100 + r[1]) / 100 : null)); }
+  const m = Math.round(v / 10) * 10;
+  return pickWheels(title, [{ vals: rng(43), fmt: x => x + " km", value: Math.min(42, Math.floor(m / 1000)) }, { vals: rng(100, 10), fmt: x => String(x).padStart(3, "0") + " m", value: m % 1000 }]).then(r => (r ? r[0] * 1000 + r[1] : null));
+}
+const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fmtNum(v / 1000) + " km" : fmtNum(v) + " m");
 // fenêtre à une ou plusieurs roues à faire défiler ; renvoie les valeurs choisies (ou null)
 function pickWheels(title, cols) {
   return new Promise(res => {
@@ -3160,6 +3171,20 @@ $app.addEventListener("click", async e => {
       set.cv = Object.assign({}, set.cv); if (val > 0) set.cv[k] = String(val); else delete set.cv[k];
       put("workout", w); render();
     } break;
+    case "cvdist": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
+      const e = w.exercises[i], set = e.sets[s], k = b.dataset.k, d = cvDef(k); if (!d) return;
+      const lp = lastPerf(w, e), pv = lp && lp.e.sets[s] && lp.e.sets[s].cv ? num(lp.e.sets[s].cv[k]) : null, cur = set.cv ? num(set.cv[k]) : null;
+      const val = await pickDistance(d.n + " · " + e.name, cur != null ? cur : pv != null ? pv : 0, d.u); if (val == null) return;
+      set.cv = Object.assign({}, set.cv); if (val > 0) set.cv[k] = String(val); else delete set.cv[k];
+      put("workout", w); render();
+    } break;
+    case "distclock": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
+      const e = w.exercises[i], set = e.sets[s], c = db.live.chrono;
+      if (c && c.wid === w.id && c.i === i && c.s === s) { toast("Le chrono tourne : touche « Terminer » d'abord"); return; }
+      const lp = lastPerf(w, e), src = lp && lp.e.sets[s];
+      const val = await pickDuration("Temps · " + e.name + " · série " + (s + 1), num(set.sec) != null ? set.sec : src && num(src.sec) != null ? src.sec : 0); if (val == null) return;
+      set.sec = val > 0 ? String(val) : ""; put("workout", w); render();
+    } break;
     case "cvadd": if (w && w.exercises[i]) {
       const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key);
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
@@ -3340,6 +3365,10 @@ $app.addEventListener("click", async e => {
         if (val == null) return;
         v.exercises.forEach(x => { if (x === ex || (ex.groupId && x.groupId === ex.groupId)) x.restNext = val; });
         put("template", t); render(); return;
+      }
+      if (b.dataset.sf === "dtarget") {
+        const val = await pickDistance("Distance · " + ex.name, num(ex.target) || 1000, "m"); if (val == null) return;
+        if (val > 0) ex.target = String(val); put("template", t); render(); return;
       }
       if (b.dataset.sf === "ctarget") {
         const r = await pickWheels("Durée cible · " + ex.name, [{ vals: Array.from({ length: 181 }, (_, k) => k), fmt: x => (x ? x + " min" : "Aucune"), value: Math.min(180, Math.round(num(ex.target) || 0)) }]);

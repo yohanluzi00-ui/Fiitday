@@ -1100,7 +1100,8 @@ function cardioBody(w, e, i) {
   return e.sets.map((s, k) => {
     const src = lp && lp.e.sets[k], a = ' data-i="' + i + '" data-s="' + k + '"', lab = many ? " bloc " + (k + 1) : "";
     return '<div class="cardio-set' + (s.done ? " done-row" : "") + '">' + (many ? '<div class="cv-bloc">Bloc ' + (k + 1) + "</div>" : "") +
-      '<div class="cv-dur"><div class="cv"><span class="cv-n">Durée</span><span class="cv-in"><input inputmode="numeric" data-f="clock"' + a + ' aria-label="Durée' + lab + ' (minutes:secondes)" value="' + (num(s.sec) != null ? fmtClock(s.sec) : "") + '" placeholder="' + (src && num(src.sec) != null ? fmtClock(src.sec) : "m:ss") + '"></span></div>' + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
+      '<div class="cv-dur"><div class="cv"><span class="cv-n">Durée</span><button type="button" class="f pick cv-pick' + (num(s.sec) != null ? "" : " empty") + '" data-act="cvdur"' + a + ' aria-label="Durée' + lab + ' : ' + (num(s.sec) != null ? fmtClock(s.sec) : "à choisir") + '">' +
+        (num(s.sec) != null ? fmtClock(s.sec) : src && num(src.sec) != null ? "Dernière fois " + fmtClock(src.sec) : "Choisir") + "</button></div>" + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
       '<div class="cv-grid">' + defs.map(d => {
         const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
         return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
@@ -1320,7 +1321,7 @@ function exFields(e, k, letter, inGroup) {
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
     (cardio ? '<label class="fl">Machine<select class="f" data-p="machine" data-e="' + k + '">' + cardioMachines().map(m => '<option value="' + m.id + '"' + (e.machine === m.id ? " selected" : "") + ">" + esc(m.n) + "</option>").join("") +
       '<option value=""' + (CARDIO_MACH[e.machine] ? "" : " selected") + ">Autre activité</option></select></label>" +
-      '<label class="fl">Durée cible (min)<input class="f" type="number" min="1" max="600" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="Facultatif"></label>' +
+      '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
       '<div class="fl full cv-info"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
     (inGroup || cardio ? "" : '<label class="fl">Séries<input class="f" type="number" min="1" max="20" inputmode="numeric" data-p="sets" data-e="' + k + '" value="' + esc(e.sets) + '"></label>') +
     (cardio ? "" : dist ? '<label class="fl">Distance (m)<input class="f" type="number" min="1" max="100000" inputmode="numeric" data-p="target" data-e="' + k + '" value="' + esc(e.target) + '" placeholder="1000"></label>' +
@@ -2316,27 +2317,38 @@ function pickSeconds(title, value, min, max) {
   const vals = []; for (let x = min; x <= max; x += 5) vals.push(x);
   value = Math.round(num(value) || 0);
   if (value >= min && value <= max && !vals.includes(value)) { vals.push(value); vals.sort((a, b) => a - b); }
-  let idx = Math.max(0, vals.indexOf(Math.min(Math.max(value, min), max)));
-  if (vals.indexOf(value) >= 0) idx = vals.indexOf(value);
+  return pickWheels(title, [{ vals, fmt: fmtSecs, value: Math.min(Math.max(value, min), max) }]).then(r => (r ? r[0] : null));
+}
+// durée d'une machine de cardio : une roue pour les minutes, une pour les secondes (comme le temps de repos)
+function pickDuration(title, sec) {
+  sec = Math.max(0, Math.round(num(sec) || 0));
+  const mins = Array.from({ length: 301 }, (_, k) => k), secs = Array.from({ length: 60 }, (_, k) => k);
+  return pickWheels(title, [{ vals: mins, fmt: x => x + " min", value: Math.min(300, Math.floor(sec / 60)) }, { vals: secs, fmt: x => pad(x) + " s", value: sec % 60 }]).then(r => (r ? r[0] * 60 + r[1] : null));
+}
+// fenêtre à une ou plusieurs roues à faire défiler ; renvoie les valeurs choisies (ou null)
+function pickWheels(title, cols) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal sheet";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + "</h3>" +
-      '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" tabindex="0" role="listbox" aria-label="' + esc(title) + '">' +
-      vals.map((x, k) => '<div class="wv" role="option" data-k="' + k + '">' + fmtSecs(x) + "</div>").join("") + "</div></div>" +
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '">' +
+      cols.map((c, n) => '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" data-col="' + n + '" tabindex="0" role="listbox" aria-label="' + esc(title) + '">' +
+        c.vals.map((x, k) => '<div class="wv" role="option" data-k="' + k + '">' + esc(c.fmt(x)) + "</div>").join("") + "</div></div>").join("") + "</div>" +
       '<div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">OK</button></div></div>';
     document.body.appendChild(d);
-    const wheel = d.querySelector(".wheel"), H = 44;
-    const mark = () => { idx = Math.max(0, Math.min(vals.length - 1, Math.round(wheel.scrollTop / H))); wheel.querySelectorAll(".wv").forEach((el, k) => { el.classList.toggle("on", k === idx); el.setAttribute("aria-selected", String(k === idx)); }); };
-    requestAnimationFrame(() => { wheel.scrollTop = idx * H; mark(); wheel.focus(); });
-    wheel.addEventListener("scroll", mark, { passive: true });
-    wheel.addEventListener("keydown", e => {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); wheel.scrollTo({ top: (idx + (e.key === "ArrowDown" ? 1 : -1)) * H, behavior: "smooth" }); }
-      if (e.key === "Enter") done(true);
+    const H = 44, wheels = [...d.querySelectorAll(".wheel")];
+    const idx = cols.map(c => Math.max(0, c.vals.indexOf(c.value)));
+    const mark = n => { const w = wheels[n]; idx[n] = Math.max(0, Math.min(cols[n].vals.length - 1, Math.round(w.scrollTop / H))); w.querySelectorAll(".wv").forEach((el, k) => { el.classList.toggle("on", k === idx[n]); el.setAttribute("aria-selected", String(k === idx[n])); }); };
+    requestAnimationFrame(() => { wheels.forEach((w, n) => { w.scrollTop = idx[n] * H; mark(n); }); wheels[0].focus(); });
+    const done = ok => { d.remove(); res(ok ? cols.map((c, n) => c.vals[idx[n]]) : null); };
+    wheels.forEach((w, n) => {
+      w.addEventListener("scroll", () => mark(n), { passive: true });
+      w.addEventListener("keydown", e => {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); w.scrollTo({ top: (idx[n] + (e.key === "ArrowDown" ? 1 : -1)) * H, behavior: "smooth" }); }
+        if (e.key === "Enter") done(true);
+      });
     });
-    const done = ok => { d.remove(); res(ok ? vals[idx] : null); };
     d.addEventListener("click", e => {
       if (e.target === d) { done(false); return; }
-      const v = e.target.closest(".wv"); if (v) { wheel.scrollTo({ top: +v.dataset.k * H, behavior: "smooth" }); return; }
+      const v = e.target.closest(".wv"); if (v) { v.closest(".wheel").scrollTo({ top: +v.dataset.k * H, behavior: "smooth" }); return; }
       const b = e.target.closest("[data-r]"); if (b) done(b.dataset.r === "1");
     });
   });
@@ -3131,6 +3143,13 @@ $app.addEventListener("click", async e => {
     case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
     case "cardiohome": cardioStart(); break;
     case "addcardio": if (w) { const exs = await cardioPick("Ajouter une machine"); if (!exs) return; w.exercises.push(...exs); if (w.manual) syncManual(w); put("workout", w); render(); } break;
+    case "cvdur": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
+      const e = w.exercises[i], set = e.sets[s], c = db.live.chrono;
+      if (c && c.wid === w.id && c.i === i && c.s === s) { toast("Le chrono tourne : touche « Terminer » d'abord"); return; }
+      const val = await pickDuration("Durée · " + e.name, num(set.sec) != null ? set.sec : (num(e.target) || 0) * 60); if (val == null) return;
+      set.sec = val > 0 ? String(val) : ""; if (w.manual) syncManual(w);
+      put("workout", w); render();
+    } break;
     case "cvadd": if (w && w.exercises[i]) {
       const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key);
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
@@ -3311,6 +3330,10 @@ $app.addEventListener("click", async e => {
         if (val == null) return;
         v.exercises.forEach(x => { if (x === ex || (ex.groupId && x.groupId === ex.groupId)) x.restNext = val; });
         put("template", t); render(); return;
+      }
+      if (b.dataset.sf === "ctarget") {
+        const r = await pickWheels("Durée cible · " + ex.name, [{ vals: Array.from({ length: 181 }, (_, k) => k), fmt: x => (x ? x + " min" : "Aucune"), value: Math.min(180, Math.round(num(ex.target) || 0)) }]);
+        if (!r) return; ex.target = r[0] ? String(r[0]) : ""; put("template", t); render(); return;
       }
       const sf = b.dataset.sf, isTarget = sf === "target";
       const val = await pickSeconds(isTarget ? "Temps cible" : sf === "grest" ? "Repos" : "Temps de repos", isTarget ? ex.target : ex.rest, isTarget ? 5 : 0, 600);

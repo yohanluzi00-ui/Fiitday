@@ -741,3 +741,7 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .when-row .fl { flex: 1; min-width: 0; }
 .when-row input { width: 100%; }
 .grid td .cv-dur .cv { flex: 0 1 260px; }
+.wheels.multi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cv-pick { justify-content: center; font-size: 18px; font-variant-numeric: tabular-nums; font-weight: 700; min-height: 44px; text-align: center; }
+.cv-pick.empty { font-weight: 400; color: var(--muted); font-size: 15px; }
+.done-row .cv-pick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); }

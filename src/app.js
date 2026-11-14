@@ -244,11 +244,15 @@ function lastPerfCompute(w, ex) {
 
 /* ================= Thème, son, vibration ================= */
 const darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
+// couleurs de l'appli (Réglages › Apparence) : nom, libellé, les 3 teintes du dégradé
+const ACCENTS = [["rose", "Rose", "#FF8A32,#FF3D7F,#E0209A"], ["bleu", "Bleu", "#2EC5FF,#3D7BFF,#5B3DF5"], ["vert", "Vert", "#B8F03A,#2FD27A,#0FA89A"], ["jaune", "Jaune", "#FFE14D,#FFC21A,#FF9F0A"],
+  ["violet", "Violet", "#F25CFF,#A24DFF,#6A3DF5"], ["orange", "Orange", "#FFB23D,#FF7A1A,#F2492C"], ["marron", "Marron", "#B87A4B,#8E5530,#5E341C"]];
 function applyTheme() {
   if (flashTimer) return; // pendant le clignotement de fin de repos
   const t = settings().theme;
   const dark = t === "sombre" || (t === "auto" && darkQuery && darkQuery.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.accent = ACCENTS.some(x => x[0] === settings().accent) ? settings().accent : "rose";
   const m = document.querySelector('meta[name="theme-color"]');
   if (m) m.content = dark ? "#08080D" : "#F4F2F8";
 }
@@ -2775,7 +2779,9 @@ function viewSettings() {
   const fr = dataLocked(), lk = fr ? " locked-btn" : "", li = fr ? LOCK : "";
   const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Restaurer et le code de transfert sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
   return '<div class="page-head"><h1>Réglages</h1></div><div class="stack">' + planSettings() +
-    '<div class="card"><b>Apparence</b><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div></div>" +
+    '<div class="card"><b>Apparence</b><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
+    '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
+      return '<button class="swatch' + (on ? " on" : "") + '" aria-pressed="' + on + '" data-act="set" data-k="accent" data-val="' + k + '"><i style="background:linear-gradient(135deg,' + c + ')"></i>' + l + "</button>"; }).join("") + "</div></div>" +
     '<div class="card"><b>Alerte de fin de repos</b><div class="alert-row">' + alertSeg(sv("alert")) + '<button class="btn sm" data-act="testalert">Tester</button></div></div>' +
     '<div class="card"><b>Étirements après la séance</b><div class="small muted" style="margin-top:4px">À la fin d\'une séance, l\'accueil propose pendant 15 minutes des étirements adaptés aux muscles travaillés.</div><div style="margin-top:10px">' + seg("stretchTips", [["oui", "Activés"], ["non", "Désactivés"]]) + "</div></div>" +
     '<div class="card"><b>Objectif de séances par semaine</b><div style="margin-top:10px">' + seg("goal", [["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"]]) + "</div></div>" +

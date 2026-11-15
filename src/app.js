@@ -14,7 +14,7 @@ let flashTimer = null; // clignotement de fin de repos
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const num = v => { const n = parseFloat(String(v == null ? "" : v).replace(",", ".")); return isNaN(n) ? null : n; };
-const fmtNum = n => String(Math.round(n * 100) / 100).replace(".", ",");
+const fmtNum = n => String(Math.round(n * 100) / 100).replace(".", ",").replace("-", "−"); // vrai signe moins (poids avec assistance)
 const pad = n => String(n).padStart(2, "0");
 // rnd : "down" pour un chrono qui monte (0:01 affiché après 1 s pleine), "up" pour un compte à rebours (0:00 seulement à la fin)
 function fmtDur(ms, rnd) {
@@ -1794,7 +1794,7 @@ function progressData() {
       const best = vs.length ? (D ? Math.min(...vs) : Math.max(...vs)) : -Infinity;
       const reps = T ? null : Math.max(...e.sets.map(s => num(s.reps)).filter(x => x != null), -Infinity);
       const orm = T || RO ? null : Math.max(...e.sets.map(s => e1rm(num(s.kg), num(s.reps))).filter(x => x != null), -Infinity);
-      const kgs = e.sets.map(s => num(s.kg)).filter(x => x != null && x > 0), kg = kgs.length ? Math.max(...kgs) : null;
+      const kgs = e.sets.map(s => num(s.kg)).filter(x => x != null && x !== 0), kg = kgs.length ? Math.max(...kgs) : null; // avec assistance (négatif) : moins d'assistance = mieux
       const sec = T && vs.length ? (D ? Math.min(...vs) : Math.max(...vs)) : null, tn = exTon(e);
       (map[key] = map[key] || { key, name: e.name, type: e.type, entries: [] }).entries.push({ w, e, best: best === -Infinity ? null : best, reps: reps === -Infinity ? null : reps, orm: orm === -Infinity ? null : orm, kg, sec, ton: tn > 0 ? tn : null });
       map[key].name = e.name;
@@ -1891,7 +1891,7 @@ function evoMetrics(p) {
   if (p.type === "time") return ["sec"];
   if (p.type === "dist") return ["run"].concat(has("kg") ? ["kg"] : []);
   if (p.type === "rep") return ["reps"];
-  const out = []; if (has("kg")) out.push("kg", "orm"); if (has("reps")) out.push("reps"); if (has("ton")) out.push("ton");
+  const out = []; if (has("kg")) out.push("kg"); if (has("orm")) out.push("orm"); if (has("reps")) out.push("reps"); if (has("ton")) out.push("ton");
   return out.length ? out : ["reps"];
 }
 const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
@@ -2069,7 +2069,7 @@ function viewEvolutionDetail(key) {
 
 /* ================= Records et 1RM estimé ================= */
 // 1RM estimé (formule d'Epley), fiable jusqu'à une quinzaine de répétitions
-const e1rm = (kg, r) => (kg == null || r == null || r <= 0 || r > 20) ? null : (r === 1 ? kg : kg * (1 + r / 30));
+const e1rm = (kg, r) => (kg == null || kg <= 0 || r == null || r <= 0 || r > 20) ? null : (r === 1 ? kg : kg * (1 + r / 30));
 const TROPHY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0z"/><path d="M17 5h3v2a3 3 0 01-3 3M7 5H4v2a3 3 0 003 3"/></svg>';
 // record = la série qu'on vient de valider donne le meilleur 1RM estimé jamais atteint sur cet exercice
 function checkRecord(w, i, s) {
@@ -2377,9 +2377,13 @@ function pickNumber(title, value, spec, unit) {
 const KG_DEC = [0, 0.25, 0.5, 0.75];
 function pickSet(title, kg, reps) {
   const cols = [];
-  if (kg != null) { const q = Math.round(kg * 4) / 4; cols.push({ vals: rng(401), fmt: x => String(x), value: Math.min(400, Math.floor(q)) }, { vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: q - Math.floor(q) }); }
+  if (kg != null) { // poids négatif = assistance (machine à contrepoids, élastique) : −20 kg ; « −0 » permet −0,25 / −0,50 / −0,75 kg
+    const q = Math.max(-100, Math.min(400, Math.round(kg * 4) / 4)), a = Math.abs(q), i = Math.floor(a), fr = a - i;
+    const ints = rng(100).map(x => x - 100).concat(["m0"], rng(401));
+    cols.push({ vals: ints, fmt: x => (x === "m0" ? "−0" : x < 0 ? "−" + -x : String(x)), value: q < 0 ? (i ? -i : "m0") : i }, { vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: fr });
+  }
   if (reps != null) cols.push({ vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
-  return pickWheels(title, cols).then(r => r && { kg: kg != null ? r[0] + r[1] : null, reps: reps != null ? r[r.length - 1] : null });
+  return pickWheels(title, cols).then(r => r && { kg: kg != null ? (r[0] === "m0" ? -r[1] : r[0] < 0 ? r[0] - r[1] : r[0] + r[1]) : null, reps: reps != null ? r[r.length - 1] : null });
 }
 const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fmtNum(v / 1000) + " km" : fmtNum(v) + " m");
 // fenêtre à une ou plusieurs roues à faire défiler ; renvoie les valeurs choisies (ou null)
@@ -2574,7 +2578,7 @@ const FAQ = [
   ["Démarrer", [
     ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer »."],
     ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Sur l'accueil, la séance marquée « Suggérée » est celle que tu n'as jamais faite, sinon celle faite il y a le plus longtemps. Un appui prolongé sur une séance affiche la liste de ses exercices."],
-    ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice."],
+    ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice. Exercice avec assistance (tractions ou dips à la machine à contrepoids, élastique) : note un poids négatif, par exemple −20 kg ; moins d'assistance = progrès dans Stats › Évolution."],
     ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur ? « + Ajouter un indicateur » sous la machine : il sera proposé à chaque fois."],
     ["superset", "Comment faire un superset ou un dégressif ?", "Ajoute d'abord tes exercices, puis dans la configuration de la séance : « Enchaîner avec l'exercice suivant » relie deux exercices en superset ou biset (un 3e exercice ajouté au groupe en fait un triset), et le réglage « Dégressif » d'un exercice ajoute les baisses de charge. Dans un superset, le repos démarre seulement quand tout le tour est fini."]]],
   ["Pendant la séance", [
@@ -3225,15 +3229,15 @@ $app.addEventListener("click", async e => {
       // valeurs de départ des roues : cette série, la dernière fois, les séries d'avant ; une baisse part de la charge de la série moins 20 %
       const earlier = e.sets.slice(0, s).reverse(), lastSets = lp ? lp.e.sets.slice().reverse() : [];
       const cands = d == null ? [tgt, src].concat(earlier, lastSets) : [tgt, src, d ? set.drops[d - 1] : null];
-      const first = f => { for (const o of cands) { const x = o && num(o[f]); if (x != null && x > 0) return x; } return null; };
+      const first = f => { for (const o of cands) { const x = o && num(o[f]); if (x != null && (f === "kg" ? x !== 0 : x > 0)) return x; } return null; };
       let k0 = first("kg"), r0 = first("reps");
-      if (d != null) { const base = [set].concat(earlier).find(o => num(o.kg) > 0); if (k0 == null && base) k0 = num(base.kg) * 0.8; const rb = [set].concat(earlier).find(o => num(o.reps) > 0); if (r0 == null && rb) r0 = num(rb.reps); }
+      if (d != null) { const base = [set].concat(earlier).find(o => num(o.kg)); if (k0 == null && base) k0 = num(base.kg) > 0 ? num(base.kg) * 0.8 : num(base.kg) - 10; /* avec assistance, une baisse = plus d'assistance */ const rb = [set].concat(earlier).find(o => num(o.reps) > 0); if (r0 == null && rb) r0 = num(rb.reps); }
       // la case touchée seulement : les kilos (roues des kilos) ou les répétitions (roue des répétitions)
       const f = b.dataset.f === "kg" ? "kg" : "reps", withKg = f === "kg", withReps = f === "reps";
       const r = await pickSet((withKg ? "Kilos" : "Répétitions") + " · " + e.name + " · série " + (s + 1) + (d != null ? " · baisse " + (d + 1) : ""), withKg ? (k0 != null ? k0 : 20) : null,
         withReps ? (r0 != null ? r0 : num(String(e.target || "").split("-")[0]) || 10) : null);
       if (!r) return;
-      if (r.kg != null) tgt.kg = r.kg > 0 ? String(r.kg) : "";
+      if (r.kg != null) tgt.kg = r.kg !== 0 ? String(r.kg) : "";
       if (r.reps != null) tgt.reps = r.reps > 0 ? String(r.reps) : "";
       put("workout", w); render();
     } break;

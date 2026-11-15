@@ -901,7 +901,8 @@ function viewHome() {
   const act = activeWorkout();
   let h = '<div class="page-head"><div><div class="muted small">' + esc(fmtDateLong(Date.now())) + '</div><h1>Bonjour' + (firstName() ? " " + esc(firstName()) : "") + '</h1></div></div>' +
     homeStretch(act) + planBanner() +
-    '<div class="home-actions"><button class="btn primary" data-act="newtpl">+ Nouveau programme</button><button class="btn" data-act="importvar">Importer</button></div>';
+    '<div class="home-actions"><button class="btn primary" data-act="newtpl">+ Nouveau programme</button><button class="btn" data-act="importvar">Importer</button>' +
+      '<button class="btn free-go" data-act="freestart">' + ICON.play + "Séance libre, sans programme</button></div>";
   if (act) {
     h += '<div class="hero"><div class="small" style="opacity:.75">Séance en cours</div><div style="font-size:21px;font-weight:800;margin-top:2px">' + esc(act.templateName) + " · " + esc(vLabel(act.variantName)) + "</div>" +
       '<div class="small" style="opacity:.8;margin-top:4px">Commencée à ' + fmtTime(act.startedAt) + ' · <span class="num" data-tick="elapsed" data-id="' + act.id + '"></span></div>' +
@@ -979,6 +980,56 @@ async function startWorkout(tid, vid, direct) {
   put("workout", w);
   db.live = {}; save();
   go("session/" + w.id);
+}
+
+/* ================= Séance libre (accueil) : sans programme ================= */
+// exercices choisis dans la liste → exercices de la séance (un exercice nouveau demande son type)
+async function picksToSession(picks) {
+  const tes = [];
+  for (const p of picks) {
+    const te = libExercise(p);
+    if (!p.lib && !ownDefaults(p.name)) { // exercice nouveau : son type, pour savoir quoi noter
+      const type = await choose("Type de « " + te.name + " »", TYPE_CHOICES); if (!type) return null;
+      Object.assign(te, { type }, type === "time" ? { target: "45", rest: 60 } : type === "dist" ? { target: "1000", rest: 120 } : type === "cardio" ? { target: "", rest: 0, sets: 1, machine: "" } : {});
+    }
+    tes.push(te);
+  }
+  const wnew = tes.map(te => ({ exId: te.id, name: te.name, note: "", type: te.type, machine: te.type === "cardio" ? te.machine || "" : undefined, target: te.target, rest: te.rest, load: !!te.load, drops: 0, groupId: null, groupKind: null, dropScope: "all", restNext: 0,
+    sets: Array.from({ length: te.type === "cardio" ? 1 : Math.max(1, num(te.sets) || 1) }, () => blankSet(0)) }));
+  return { tes, wnew };
+}
+async function freeStart() {
+  const picks = await pickExercises("muscu", "Séance libre : tes exercices"); if (!picks) return;
+  const conv = await picksToSession(picks); if (!conv) return;
+  const exercises = await orderNew([], conv.wnew, "exercice"); if (!exercises) return;
+  const act = activeWorkout();
+  if (act) {
+    const ok = await ask({ title: "Une séance est déjà en cours", text: act.templateName + " · " + vLabel(act.variantName) + "\nLa terminer et commencer la séance libre ?", ok: "Oui, la terminer" });
+    if (!ok) return;
+    act.endedAt = Date.now(); put("workout", act);
+  }
+  const w = { id: "w-" + uid(), templateId: "libre", variantId: "libre", templateName: "Séance libre", variantName: "Sans programme", free: true, startedAt: Date.now(), endedAt: null, exercises };
+  put("workout", w); db.live = {}; save(); go("session/" + w.id);
+}
+// à la fin d'une séance libre : la garder comme séance d'un programme, pour la relancer plus tard
+async function keepFreeSession(w) {
+  if (!w || !w.free || !w.exercises.length) return;
+  const ts = templates().filter(t => !progLocked(t.id));
+  const opts = (isFree() && templates().length >= 1 ? [] : [["new", "Nouveau programme", "Crée un programme avec cette séance"]])
+    .concat(ts.filter(t => !(isFree() && t.variants.length >= FREE_VARIANTS)).map(t => ["t:" + t.id, "Ajouter à « " + t.name + " »", "Comme nouvelle séance de ce programme"]));
+  if (!opts.length) return;
+  if (!await ask({ title: "Garder cette séance ?", text: "Enregistre-la dans un programme pour la relancer plus tard en un appui.", ok: "La garder", cancel: "Non merci" })) return;
+  const dest = await choose("Où la ranger ?", opts); if (!dest) return;
+  const name = await ask({ title: "Nom de la séance", input: "Séance libre", ok: "Enregistrer" }); if (!name) return;
+  const exercises = w.exercises.map(e => ({ id: "e-" + uid(), name: e.name, type: e.type || "reps", machine: e.type === "cardio" ? e.machine || "" : undefined, sets: e.type === "cardio" ? 1 : Math.max(1, e.sets.length), target: e.target, rest: e.rest, load: !!e.load, note: e.note || "",
+    drops: dropsOf(e) || 0, dropScope: e.dropScope === "last" ? "last" : "all", groupId: e.groupId || undefined, groupKind: e.groupKind || undefined }));
+  let t;
+  if (dest === "new") {
+    const pn = await ask({ title: "Nom du programme", input: "", ok: "Créer" }); if (!pn) return;
+    t = { id: "tpl-" + uid(), name: pn.slice(0, 60), order: templates().length, variants: [] };
+  } else { t = getItem(dest.slice(2)); if (!t) return; }
+  const v = { id: "v" + uid(), name: name.slice(0, 60), exercises }; t.variants.push(v); put("template", t); render();
+  toast("Séance gardée dans « " + t.name + " »");
 }
 
 /* ================= Séance cardio (accueil, onglet Cardio des exercices) ================= */
@@ -1295,6 +1346,7 @@ function finishWorkout(w) {
   flushPending();
   w.endedAt = Date.now(); put("workout", w); db.live = {}; save(); sync();
   toast("Séance enregistrée"); go("home");
+  if (w.free) setTimeout(() => keepFreeSession(w), 500);
 }
 // arrête le chrono de gainage : le temps est noté dans la série, qui est validée, puis le repos démarre
 const CHRONO_PREP = 5;
@@ -3205,6 +3257,7 @@ $app.addEventListener("click", async e => {
     case "evoper": evo.per = b.dataset.v; render(); break;
     case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
     case "cardiohome": cardioStart(); break;
+    case "freestart": freeStart(); break;
     case "addcardio": if (w) { const exs = await cardioPick("Ajouter une machine"); if (!exs) return; w.exercises.push(...exs); if (w.manual) syncManual(w); put("workout", w); render(); } break;
     case "cvdur": if (w && w.exercises[i] && w.exercises[i].sets[s]) {
       const e = w.exercises[i], set = e.sets[s], c = db.live.chrono;
@@ -3361,16 +3414,8 @@ $app.addEventListener("click", async e => {
     case "addex": case "sessstretch": if (w) {
       const etir = a === "sessstretch", what = etir ? "étirement" : "exercice";
       const picks = await pickExercises(etir ? "etir" : "muscu", etir ? "Ajouter des étirements" : "Ajouter des exercices"); if (!picks) return;
-      const tes = [];
-      for (const p of picks) {
-        const te = libExercise(p);
-        if (!p.lib && !ownDefaults(p.name)) { // exercice nouveau : son type, pour savoir quoi noter
-          const type = await choose("Type de « " + te.name + " »", TYPE_CHOICES); if (!type) return;
-          Object.assign(te, { type }, type === "time" ? { target: "45", rest: 60 } : type === "dist" ? { target: "1000", rest: 120 } : type === "cardio" ? { target: "", rest: 0, sets: 1, machine: "" } : {});
-        }
-        tes.push(te);
-      }
-      const wnew = tes.map(te => ({ exId: te.id, name: te.name, type: te.type, machine: te.type === "cardio" ? te.machine || "" : undefined, target: te.target, rest: te.rest, load: !!te.load, drops: 0, groupId: null, groupKind: null, sets: Array.from({ length: Math.max(1, num(te.sets) || 1) }, () => blankSet(0)) }));
+      const conv = await picksToSession(picks); if (!conv) return;
+      const { tes, wnew } = conv;
       const c = db.live.chrono, chronoEx = c && c.wid === w.id ? w.exercises[c.i] : null;
       const out = await orderNew(w.exercises, wnew, what); if (!out) return;
       const add = getItem(w.templateId) && await ask({ title: tes.length > 1 ? "Les ajouter au programme ?" : "L'ajouter au programme ?", text: (tes.length > 1 ? "Les ajouter" : "L'ajouter") + " aussi à « " + w.templateName + " · " + vLabel(w.variantName) + " », au même endroit, pour les prochaines fois ?", ok: "Oui", cancel: "Juste aujourd'hui" });

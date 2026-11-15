@@ -763,3 +763,6 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .wheel-title .wt-ex { font-size: 15px; font-weight: 600; color: var(--ink); }
 .wheel-title .wt-sub { font-size: 14px; font-weight: 500; color: var(--muted); }
 .credit .credit-msg { margin-bottom: 18px; }
+.home-actions { flex-wrap: wrap; }
+.home-actions .free-go { flex: 1 1 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.home-actions .free-go svg { width: 12px; height: 12px; color: var(--accent); }

@@ -1115,7 +1115,7 @@ function phOf(w, e, s, d) {
   if (src && d != null) src = src.drops && src.drops[d];
   const has = src && setHasData(src, e.type);
   const f = k => (has && num(src[k]) != null ? fmtNum(num(src[k])) : null);
-  return { kg: f("kg") || "kg", reps: f("reps") || "reps", sec: has && num(src.sec) != null ? fmtHold(src.sec) : "—", clock: has && num(src.sec) != null ? fmtClock(src.sec) : "m:ss" };
+  return { kg: f("kg") || "0", reps: f("reps") || "reps", sec: has && num(src.sec) != null ? fmtHold(src.sec) : "—", clock: has && num(src.sec) != null ? fmtClock(src.sec) : "m:ss" };
 }
 function inputsHtml(w, e, i, k, d, label) {
   const s = e.sets[k], v = d == null ? s : ((s.drops || [])[d] || {}), ph = phOf(w, e, k, d);

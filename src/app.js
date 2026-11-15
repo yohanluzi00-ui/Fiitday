@@ -281,6 +281,16 @@ function lastPerfCompute(w, ex) {
     }
   }
   const n = norm(ex.name);
+  // séance d'un programme : seulement l'historique de CETTE séance (le même exercice dans une autre séance n'est pas repris)
+  if (getItem(w.templateId)) {
+    for (const x of before) {
+      if (x.templateId !== w.templateId || x.variantId !== w.variantId) continue;
+      const e = x.exercises.find(e => norm(e.name) === n && e.type === ex.type); // exercice ajouté pendant une séance d'avant
+      if (e && exHasData(e)) return { w: x, e, same: true };
+    }
+    return null;
+  }
+  // séance libre ou cardio (sans programme) : la dernière fois que l'exercice a été fait, où que ce soit
   for (const x of before) {
     const e = x.exercises.find(e => norm(e.name) === n && e.type === ex.type);
     if (e && exHasData(e)) return { w: x, e, same: false };

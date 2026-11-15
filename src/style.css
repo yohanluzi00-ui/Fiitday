@@ -766,3 +766,12 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .home-actions { flex-wrap: wrap; }
 .home-actions .free-go { flex: 1 1 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .home-actions .free-go svg { width: 12px; height: 12px; color: var(--accent); }
+/* cases de saisie de la séance : couleur du thème */
+.f.pick.npick, .f.pick.tpick, .f.pick.cv-pick { background: color-mix(in srgb, var(--accent) 10%, var(--in-bg)); border-color: color-mix(in srgb, var(--accent) 45%, var(--in-line)); }
+.f.pick.npick.empty, .f.pick.tpick.empty, .f.pick.cv-pick.empty { background: color-mix(in srgb, var(--accent) 6%, var(--in-bg)); }
+.done-row .f.pick.npick, .done-row .f.pick.tpick, .done-row .f.pick.cv-pick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); }
+.ex-links { display: inline-flex; gap: 14px; align-items: center; }
+.link.del { color: var(--danger); }
+.link-next { display: block; margin: 8px 0 2px; }
+.link-row { gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+.link-row .link-next { margin: 0; }

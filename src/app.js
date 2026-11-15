@@ -1162,7 +1162,7 @@ function exHead(w, e, i, letter) {
     (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
     (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
   const nm = (letter ? '<span class="letter">' + letter + "</span>" : "") + esc(e.name), fk = letter ? null : "w:" + w.id + ":" + (e.exId || i);
-  return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div>' +
+  return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + (live ? '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' : "") + "</span></div>" +
     '<div class="ex-meta">' + metaText(e, !!letter, live) + "</div>" + (chips ? '<div class="ex-chips">' + chips + "</div>" : "");
 }
 function setActions(idx, count, word) {
@@ -1181,16 +1181,16 @@ function cardioBody(w, e, i) {
     const src = lp && lp.e.sets[k], a = ' data-i="' + i + '" data-s="' + k + '"', lab = many ? " bloc " + (k + 1) : "";
     return '<div class="cardio-set' + (s.done ? " done-row" : "") + '">' + (many ? '<div class="cv-bloc">Bloc ' + (k + 1) + "</div>" : "") +
       '<div class="cv-dur"><div class="cv"><span class="cv-n">Durée</span><button type="button" class="f pick cv-pick' + (num(s.sec) != null ? "" : " empty") + '" data-act="cvdur"' + a + ' aria-label="Durée' + lab + ' : ' + (num(s.sec) != null ? fmtClock(s.sec) : "à choisir") + '">' +
-        (num(s.sec) != null ? fmtClock(s.sec) : src && num(src.sec) != null ? "Dernière fois " + fmtClock(src.sec) : "Choisir") + "</button></div>" + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
+        (num(s.sec) != null ? fmtClock(s.sec) : src && num(src.sec) != null ? fmtClock(src.sec) : "") + "</button></div>" + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
       '<div class="cv-grid">' + defs.map(d => {
         const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
         return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
           (d.k === "dist" || d.k === "distm" ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvdist" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtNum(num(v)) + " " + d.u : "à choisir") + '">' +
-            (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? fmtNum(pv) + " " + d.u : "Choisir") + "</button>" :
+            (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? fmtNum(pv) + " " + d.u : "") + "</button>" :
           d.clock ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvclock" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtClock(v) : "à choisir") + '">' +
-            (num(v) != null ? fmtClock(v) : pv != null ? fmtClock(pv) : "Choisir") + "</button>" :
+            (num(v) != null ? fmtClock(v) : pv != null ? fmtClock(pv) : "") + "</button>" :
           '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvnum" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? esc(cvFmt(d, num(v))) : "à choisir") + '">' +
-            (num(v) != null ? esc(cvFmt(d, num(v))) : pv != null ? esc(cvFmt(d, pv)) : "Choisir") + "</button>") + "</div>";
+            (num(v) != null ? esc(cvFmt(d, num(v))) : pv != null ? esc(cvFmt(d, pv)) : "") + "</button>") + "</div>";
       }).join("") + "</div>" +
       '<div class="cv-foot"><button type="button" class="link small" data-act="cvadd" data-i="' + i + '">+ Ajouter un indicateur</button><span class="cv-ok">' + (s.done ? "Validé" : "Valider") + okBtn(s, i, k) + "</span></div></div>";
   }).join("");
@@ -1206,7 +1206,14 @@ function exCard(w, e, i) {
   e.sets.forEach((s, k) => { rows += setRows(w, e, i, k, k + 1); });
   const f = folded.has("w:" + w.id + ":" + (e.exId || i)), dn = e.sets.filter(x => x.done).length;
   return '<section class="card ex' + (f ? " folded" : "") + '">' + exHead(w, e, i, "") + (f ? '<div class="fold-sum muted small">' + dn + " / " + e.sets.length + " série" + (e.sets.length > 1 ? "s" : "") + " validée" + (dn > 1 ? "s" : "") + "</div>" :
-    '<div class="blk-body"><div class="sets">' + rows + "</div>" + setActions([i], e.sets.length, "Série") + noteBox(w, e, i, "") + "</div>") + "</section>";
+    '<div class="blk-body"><div class="sets">' + rows + "</div>" + setActions([i], e.sets.length, "Série") + linkNext(w, i, false) + noteBox(w, e, i, "") + "</div>") + "</section>";
+}
+// séance en cours : enchaîner avec l'exercice suivant (superset, biset, puis triset) ; pas pour le cardio
+function linkNext(w, i, inGroup) {
+  const e = w.exercises[i], n = w.exercises[i + 1];
+  if (w.endedAt || !n || n.groupId || e.type === "cardio" || n.type === "cardio") return "";
+  if (inGroup && w.exercises.filter(x => x.groupId === e.groupId).length >= 3) return "";
+  return '<button type="button" class="link link-next" data-act="wlink" data-i="' + i + '">' + (inGroup ? "Ajouter « " + esc(n.name) + " » au groupe (triset)" : "Enchaîner avec « " + esc(n.name) + " » (superset / biset)") + "</button>";
 }
 function groupCard(w, blk) {
   const first = blk.items[0].e, rounds = Math.max(...blk.items.map(x => x.e.sets.length));
@@ -1224,6 +1231,7 @@ function groupCard(w, blk) {
     h += "</div>";
   }
   h += setActions(blk.items.map(x => x.i), rounds, "Tour");
+  if (live) h += '<div class="row link-row">' + linkNext(w, blk.items[blk.items.length - 1].i, true) + '<button type="button" class="link" data-act="wungroup" data-i="' + gi + '">Séparer</button></div>';
   blk.items.forEach((x, n) => { h += noteBox(w, x.e, x.i, LETTERS[n]); });
   return h + "</div></section>";
 }
@@ -1370,8 +1378,8 @@ function stopChrono(w, at) {
   if (t < c.start) return; // arrêté pendant la préparation : rien n'est noté
   set.sec = String(Math.round((t - c.start) / 1000));
   if (w.exercises[c.i].type === "cardio") { // cardio : la durée est notée, la machine sera validée une fois les indicateurs remplis
-    put("workout", w); toast("Durée notée : remplis maintenant tes indicateurs, puis valide");
-    const i = c.i, k = c.s; setTimeout(() => { const el = $app.querySelector('input[data-f="cv"][data-i="' + i + '"][data-s="' + k + '"]'); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); try { el.focus({ preventScroll: true }); } catch (e) { } } }, 80);
+    set.done = true; afterSet(w, c.i, c.s); put("workout", w);
+    toast("Machine validée : tu peux encore noter tes indicateurs");
     return;
   }
   set.done = true;
@@ -3290,7 +3298,7 @@ $app.addEventListener("click", async e => {
       const r = await pickSet((withKg ? "Kilos" : "Répétitions") + " · " + e.name + " · série " + (s + 1) + (d != null ? " · baisse " + (d + 1) : ""), withKg ? (k0 != null ? k0 : 20) : null,
         withReps ? (r0 != null ? r0 : num(String(e.target || "").split("-")[0]) || 10) : null);
       if (!r) return;
-      if (r.kg != null) tgt.kg = r.kg !== 0 ? String(r.kg) : "";
+      if (r.kg != null) tgt.kg = String(r.kg); // 0 kg reste noté « 0 »
       if (r.reps != null) tgt.reps = r.reps > 0 ? String(r.reps) : "";
       put("workout", w); render();
     } break;
@@ -3314,6 +3322,29 @@ $app.addEventListener("click", async e => {
       const lp = lastPerf(w, e), src = lp && lp.e.sets[s];
       const val = await pickDuration("Temps · " + e.name + " · série " + (s + 1), num(set.sec) != null ? set.sec : src && num(src.sec) != null ? src.sec : 0); if (val == null) return;
       set.sec = val > 0 ? String(val) : ""; put("workout", w); render();
+    } break;
+    case "wlink": if (w && w.exercises[i] && w.exercises[i + 1]) {
+      const e = w.exercises[i], n = w.exercises[i + 1];
+      let gid = e.groupId, kind = e.groupKind;
+      if (!gid) { kind = await choose("Enchaîner « " + e.name + " » et « " + n.name + " »", ADD_CHOICES.filter(c => c[0] === "superset" || c[0] === "biset")); if (!kind) return; gid = "g-" + uid(); }
+      const mem = (e.groupId ? w.exercises.filter(x => x.groupId === gid) : [e]).concat([n]);
+      if (mem.length >= 3) kind = "triset";
+      const rounds = Math.max(...mem.map(x => x.sets.length)), rest = num(mem[0].rest) || 0;
+      mem.forEach(x => { x.groupId = gid; x.groupKind = kind; x.rest = rest; while (x.sets.length < rounds) x.sets.push(blankSet(0)); });
+      put("workout", w); render(); toast((GROUP_LABEL[kind] || "Enchaînement") + " pour cette séance");
+    } break;
+    case "wungroup": if (w && w.exercises[i] && w.exercises[i].groupId) {
+      const gid = w.exercises[i].groupId; w.exercises.forEach(x => { if (x.groupId === gid) { x.groupId = null; x.groupKind = null; } });
+      put("workout", w); render();
+    } break;
+    case "wdelex": if (w && w.exercises[i]) {
+      const e = w.exercises[i], noted = e.sets.some(x => x.done || setHasData(x, e.type));
+      if (!await ask({ title: "Retirer « " + e.name + " » ?", text: "Il est retiré de cette séance seulement" + (noted ? ", avec les séries déjà notées." : ".") + (getItem(w.templateId) ? " Ton programme ne change pas." : ""), ok: "Retirer", danger: true })) return;
+      const c = db.live.chrono;
+      if (c && c.wid === w.id) { if (c.i === i) db.live.chrono = null; else if (c.i > i) c.i--; }
+      const gid = e.groupId; w.exercises.splice(i, 1);
+      if (gid) { const rest = w.exercises.filter(x => x.groupId === gid); if (rest.length < 2) rest.forEach(x => { x.groupId = null; x.groupKind = null; }); else if (rest.length === 2 && rest[0].groupKind === "triset") rest.forEach(x => { x.groupKind = "superset"; }); }
+      put("workout", w); save(); render();
     } break;
     case "cvadd": if (w && w.exercises[i]) {
       const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key);

@@ -1171,7 +1171,7 @@ function exHead(w, e, i, letter) {
     (live && !letter ? nextChip(w, [e], i) : "") +
     (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
   const nm = (letter ? '<span class="letter">' + letter + "</span>" : "") + esc(e.name), fk = letter ? null : "w:" + w.id + ":" + (e.exId || i);
-  return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + (live ? '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' : "") + "</span></div>" +
+  return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' + "</span></div>" +
     '<div class="ex-meta">' + metaText(e, !!letter, live) + "</div>" + (chips ? '<div class="ex-chips">' + chips + "</div>" : "");
 }
 function setActions(idx, count, word) {
@@ -1293,14 +1293,14 @@ function sessionTable(w) {
     b.items.forEach((x, n) => {
       const e = x.e, i = x.i, time = e.type === "time", isDist = e.type === "dist", grouped = !!b.groupId, lastOfGroup = n === b.items.length - 1;
       if (e.type === "cardio" && !grouped) {
-        h += '<tr><td><div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div><div class="muted small">' + esc(metaText(e, false, false)) + "</div>" +
+        h += '<tr><td><div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div><div class="muted small">' + esc(metaText(e, false, false)) + "</div>" +
           (e.machine && CARDIO_MACH[e.machine] ? '<button class="chip-mini" data-act="exoview" data-id="' + e.machine + '" data-arg="cardio">' + ICON.play + "Voir la machine</button>" : "") + "</td>" +
           '<td colspan="' + (3 + max) + '">' + cardioBody(w, e, i) + "</td><td>" + noteBox(w, e, i, "") + "</td></tr>";
         return;
       }
       h += '<tr class="' + (grouped && !lastOfGroup ? "chained" : "") + '"><td>' +
         (grouped ? '<div class="gtag">' + esc(GROUP_LABEL[e.groupKind] || "Enchaînement") + " · " + LETTERS[n] + "</div>" : "") +
-        '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><button class="link" data-act="rename" data-i="' + i + '">Renommer</button></div>' +
+        '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div>' +
         (exLib(e) ? '<button class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir le mouvement</button>" : "") +
         (dropsOf(e) ? '<div class="muted small">Dégressif · ' + dropsOf(e) + " baisse" + (dropsOf(e) > 1 ? "s" : "") + "</div>" : "") +
         (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série") : "") + "</td>" +
@@ -3378,6 +3378,7 @@ $app.addEventListener("click", async e => {
       if (c && c.wid === w.id) { if (c.i === i) db.live.chrono = null; else if (c.i > i) c.i--; }
       const gid = e.groupId; w.exercises.splice(i, 1);
       if (gid) { const rest = w.exercises.filter(x => x.groupId === gid); if (rest.length < 2) rest.forEach(x => { x.groupId = null; x.groupKind = null; }); else if (rest.length === 2 && rest[0].groupKind === "triset") rest.forEach(x => { x.groupKind = "superset"; }); }
+      if (w.manual) syncManual(w);
       put("workout", w); save(); render();
     } break;
     case "cvadd": if (w && w.exercises[i]) {

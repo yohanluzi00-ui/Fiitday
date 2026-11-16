@@ -1170,6 +1170,7 @@ function exHead(w, e, i, letter) {
   const cd = e.type === "cardio", mid = cd && e.machine && CARDIO_MACH[e.machine] ? e.machine : lib && lib.id;
   const chips = (mid ? '<button class="chip-mini" data-act="exoview" data-id="' + mid + '"' + (cd ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cd ? "Voir la machine" : "Voir le mouvement") + "</button>" : "") +
     (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
+    (live && !letter ? nextChip(w, [e], i) : "") +
     (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
   const nm = (letter ? '<span class="letter">' + letter + "</span>" : "") + esc(e.name), fk = letter ? null : "w:" + w.id + ":" + (e.exId || i);
   return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + (live ? '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' : "") + "</span></div>" +
@@ -1218,6 +1219,13 @@ function exCard(w, e, i) {
   return '<section class="card ex' + (f ? " folded" : "") + '">' + exHead(w, e, i, "") + (f ? '<div class="fold-sum muted small">' + dn + " / " + e.sets.length + " série" + (e.sets.length > 1 ? "s" : "") + " validée" + (dn > 1 ? "s" : "") + "</div>" :
     '<div class="blk-body"><div class="sets">' + rows + "</div>" + setActions([i], e.sets.length, "Série") + linkNext(w, i, false) + noteBox(w, e, i, "") + "</div>") + "</section>";
 }
+// séance en cours : repos avant l'exercice suivant (après la dernière série, ou le dernier tour d'un superset), s'il y a un exercice après
+const restNextVal = mem => num(mem[mem.length - 1].restNext) || num(mem[0].restNext) || 0;
+function nextChip(w, mem, i) {
+  const last = w.exercises.indexOf(mem[mem.length - 1]); if (last < 0 || last >= w.exercises.length - 1) return "";
+  const v = restNextVal(mem) || num(w.restBetween) || 0;
+  return '<button class="chip-mini" data-act="sesspick" data-sf="next" data-i="' + i + '">Avant l\'exercice suivant ' + (v ? esc(fmtSecs(v)) : "aucun") + " ✎</button>";
+}
 // séance en cours : enchaîner avec l'exercice suivant (superset, biset, puis triset) ; pas pour le cardio
 function linkNext(w, i, inGroup) {
   const e = w.exercises[i], n = w.exercises[i + 1];
@@ -1233,7 +1241,7 @@ function groupCard(w, blk) {
     (live ? "" : " · repos " + esc(fmtRest(first.rest)) + " après chaque tour") + "</span>", fo);
   if (fo) return h + '<div class="fold-sum muted small">' + blk.items.map((x, n) => LETTERS[n] + ". " + esc(x.e.name)).join(" · ") + "</div></section>";
   h += '<div class="blk-body">' +
-    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '">Repos après chaque tour ' + esc(fmtSecs(num(first.rest) || 0)) + " ✎</button></div>" : "");
+    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '">Repos après chaque tour ' + esc(fmtSecs(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
   blk.items.forEach((x, n) => { h += '<div class="member">' + exHead(w, x.e, x.i, LETTERS[n]) + "</div>"; });
   for (let k = 0; k < rounds; k++) {
     h += '<div class="round-title">Tour ' + (k + 1) + '</div><div class="sets">';
@@ -3340,7 +3348,8 @@ $app.addEventListener("click", async e => {
       const mem = (e.groupId ? w.exercises.filter(x => x.groupId === gid) : [e]).concat([n]);
       if (mem.length >= 3) kind = "triset";
       const rounds = Math.max(...mem.map(x => x.sets.length)), rest = num(mem[0].rest) || 0;
-      mem.forEach(x => { x.groupId = gid; x.groupKind = kind; x.rest = rest; while (x.sets.length < rounds) x.sets.push(blankSet(0)); });
+      const rn = num(n.restNext) || 0; // le repos avant l'exercice suivant : celui du dernier exercice du groupe
+      mem.forEach(x => { x.groupId = gid; x.groupKind = kind; x.rest = rest; x.restNext = rn; while (x.sets.length < rounds) x.sets.push(blankSet(0)); });
       put("workout", w); render(); toast((GROUP_LABEL[kind] || "Enchaînement") + " pour cette séance");
     } break;
     case "wungroup": if (w && w.exercises[i] && w.exercises[i].groupId) {
@@ -3371,18 +3380,23 @@ $app.addEventListener("click", async e => {
     } break;
     case "sesspick": if (w) {
       const e = w.exercises[i]; if (!e) return;
-      const sf = b.dataset.sf, isT = sf === "target";
-      const members = sf === "grest" ? w.exercises.filter(x => x.groupId && x.groupId === e.groupId) : [e];
-      const val = await pickSeconds(isT ? "Objectif de gainage" : sf === "grest" ? "Repos après chaque tour" : "Temps de repos", isT ? e.target : e.rest, isT ? 5 : 0, 600);
+      const sf = b.dataset.sf, isT = sf === "target", isN = sf === "next";
+      const members = sf === "grest" || (isN && e.groupId) ? w.exercises.filter(x => x.groupId && x.groupId === e.groupId) : [e];
+      const val = await pickSeconds(isT ? "Objectif de gainage" : isN ? "Repos avant l'exercice suivant · " + (e.groupId ? (GROUP_LABEL[e.groupKind] || "Enchaînement") : e.name) : sf === "grest" ? "Repos après chaque tour" : "Temps de repos",
+        isT ? e.target : isN ? (restNextVal(members) || num(w.restBetween) || 0) : e.rest, isT ? 5 : 0, 600);
       if (val == null) return;
       const t = getItem(w.templateId), v = t && t.variants.find(x => x.id === w.variantId);
       const inTpl = v && members.some(x => v.exercises.some(y => y.id === x.exId));
       let scope = "today";
       if (inTpl) { scope = await choose("Ce changement est pour…", [["today", "Seulement aujourd'hui", "Pour cette séance uniquement"], ["always", "Toutes les séances", "Enregistré aussi dans « " + w.templateName + " · " + vLabel(w.variantName) + " »"]]); if (!scope) return; }
-      members.forEach(x => { if (isT) x.target = String(val); else x.rest = val; });
+      const setF = x => { if (isT) x.target = String(val); else if (isN) x.restNext = val; else x.rest = val; };
+      members.forEach(setF);
       put("workout", w);
-      if (scope === "always") { members.forEach(x => { const te = v.exercises.find(y => y.id === x.exId); if (te) { if (isT) te.target = String(val); else te.rest = val; } }); put("template", t); }
-      render(); toast((isT ? "Objectif : " : "Repos : ") + fmtSecs(val) + (scope === "always" ? " · pour toutes les séances" : " · aujourd'hui"));
+      if (scope === "always") {
+        members.forEach(x => { const te = v.exercises.find(y => y.id === x.exId); if (te) { setF(te); if (isN && te.groupId) v.exercises.forEach(y => { if (y.groupId === te.groupId) y.restNext = val; }); } });
+        put("template", t);
+      }
+      render(); toast((isT ? "Objectif : " : isN ? "Avant l'exercice suivant : " : "Repos : ") + (val ? fmtSecs(val) : "aucun") + (scope === "always" ? " · pour toutes les séances" : " · aujourd'hui"));
     } break;
     /* connexion */
     case "local": db.mode = "local"; saveNow(); render(); break;
@@ -3600,7 +3614,8 @@ $app.addEventListener("click", async e => {
       const bl = blocks(v.exercises), bi = +b.dataset.b; if (!bl[bi] || !bl[bi + 1]) return;
       const kind = await choose("Enchaîner les deux exercices", ADD_CHOICES.filter(c => c[0] === "superset" || c[0] === "biset")); if (!kind) return;
       const a1 = bl[bi].items[0].e, a2 = bl[bi + 1].items[0].e, gid = "g-" + uid();
-      [a1, a2].forEach(e => { e.groupId = gid; e.groupKind = kind; e.sets = a1.sets; e.rest = a1.rest; });
+      const rn = a2.restNext; // repos avant l'exercice suivant : celui du 2e exercice (le dernier du groupe)
+      [a1, a2].forEach(e => { e.groupId = gid; e.groupKind = kind; e.sets = a1.sets; e.rest = a1.rest; if (rn != null) e.restNext = rn; else delete e.restNext; });
       put("template", t); render();
     } break;
     case "ungroup": {

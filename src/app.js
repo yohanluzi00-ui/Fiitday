@@ -606,9 +606,9 @@ function showWelcome() {
     const name = firstName(), d = document.createElement("div"); d.className = "modal";
     d.innerHTML = '<div class="modal-box welcome-box" role="dialog" aria-modal="true" aria-label="Bienvenue sur Fiitday"><img class="welcome-logo" src="icon-192.png" alt="" width="64" height="64">' +
       "<h3>Bienvenue sur Fiitday" + (name ? " " + esc(name) : "") + " !</h3>" +
-      "<p>Crée ton premier programme ou lance une séance libre depuis l'accueil.</p>" +
+      "<p>Crée ton premier programme, utilise un programme existant dans la page Programmes ou lance une séance libre depuis l'accueil.</p>" +
       '<p>Un mini guide est accessible depuis <b>Réglages › Aide › Guide</b> : il te montre ce que tu peux faire dans chaque page.</p>' +
-      '<p class="welcome-wish">L\'équipe Fiitday te souhaite de belles séances 💪</p>' +
+      '<p class="welcome-wish">L\'équipe Fiitday te souhaite de bonnes séances 💪</p>' +
       '<div class="modal-btns"><button class="btn" data-r="1">Voir le guide</button><button class="btn primary" data-r="0">C\'est parti</button></div></div>';
     document.body.appendChild(d);
     d.addEventListener("click", e => {

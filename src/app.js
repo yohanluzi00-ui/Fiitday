@@ -926,29 +926,26 @@ function viewHome() {
   for (const t of ts) {
     const st = variantStats(t);
     const lastAny = st.filter(x => x.last).sort((a, b) => b.last.startedAt - a.last.startedAt)[0];
-    // variante suggérée : jamais faite, sinon celle faite il y a le plus longtemps (en suivant l'ordre)
-    let sugg = null;
-    if (st.length > 1) {
-      const never = st.find(x => !x.last);
-      sugg = never ? never.v.id : st.slice().sort((a, b) => a.last.startedAt - b.last.startedAt)[0].v.id;
-    }
     const pl = progLocked(t.id);
-    h += '<div class="card tpl' + (pl ? " locked" : "") + '" data-sort-id="' + t.id + '"><div class="spread"><h2>' + (pl ? LOCK : "") + esc(t.name) + "</h2>" +
-      '<span class="tpl-side"><span class="muted small">' + (lastAny ? "Dernière : " + esc(fmtDate(lastAny.last.startedAt)) + " (" + esc(vLabel(lastAny.v.name)) + ")" : t.variants.length ? "Jamais faite" : "Aucune séance") + "</span>" +
+    // en-tête sur une ligne : nom du programme, puis la dernière séance (« mar 17 nov · Pull », sans points)
+    h += '<div class="card tpl' + (pl ? " locked" : "") + '" data-sort-id="' + t.id + '"><div class="tpl-head"><h2>' + (pl ? LOCK : "") + esc(t.name) + "</h2>" +
+      '<span class="tpl-side"><span class="muted small tpl-last">' + (lastAny ? "Dernière : " + esc(fmtDate(lastAny.last.startedAt).replace(/\./g, "")) + '<span class="tpl-lv"> · ' + esc(vLabel(lastAny.v.name)) + "</span>" : t.variants.length ? "Jamais faite" : "Aucune séance") + "</span>" +
       (ts.length > 1 ? '<span class="grip" data-drag title="Maintiens et fais glisser pour changer l\'ordre">' + GRIP + "</span>" : "") + "</span></div>" +
-      '<div class="variants">' + st.map(x => {
+      // une ligne par séance : nom, puis « 6 exos · il y a 3 j », et ›
+      '<div class="variants rows">' + st.map(x => {
         const n = x.v.exercises.length, lk = varLocked(t.id, x.v.id);
-        return '<button class="variant' + (x.v.id === sugg && !lk ? " sugg" : "") + (lk ? " locked" : "") + '" data-act="start" data-t="' + t.id + '" data-v="' + x.v.id + '"><b>' + (lk ? LOCK : "") + esc(vLabel(x.v.name)) + "</b>" +
-          "<span>" + (n ? n + " exercice" + (n > 1 ? "s" : "") : "vide — à remplir") + "</span>" +
-          "<span>" + (lk ? '<span class="tag">Premium</span> · ' : x.v.id === sugg ? '<span class="tag">Suggérée</span> · ' : "") + (x.last ? esc(ago(x.last.startedAt)) : "jamais faite") + "</span></button>";
-      }).join("") + '<button class="variant add" data-act="homeaddvar" data-t="' + t.id + '" aria-label="Nouvelle séance dans ' + esc(t.name) + '"><b>+ Nouvelle séance</b><span>Ajouter une séance à ce programme</span></button></div></div>';
+        return '<button class="variant' + (lk ? " locked" : "") + '" data-act="start" data-t="' + t.id + '" data-v="' + x.v.id + '"><b>' + (lk ? LOCK : "") + esc(vLabel(x.v.name)) + "</b>" +
+          '<span class="vmeta">' + (lk ? '<span class="tag">Premium</span> · ' : "") + (n ? n + " exo" + (n > 1 ? "s" : "") : "vide") + " · " + (x.last ? esc(ago(x.last.startedAt)) : "jamais faite") + "</span>" +
+          '<span class="vgo" aria-hidden="true">›</span></button>';
+      }).join("") + '<button class="variant add" data-act="homeaddvar" data-t="' + t.id + '" aria-label="Nouvelle séance dans ' + esc(t.name) + '"><b>+ Nouvelle séance</b></button></div></div>';
   }
   h += "</div>";
   h += '<div class="section-title">Découvrir</div><div class="home-more"><button type="button" class="card" data-act="cardiohome"><b>Séance cardio</b><span class="muted small">Tapis, vélo, elliptique, rameur… avec tes indicateurs</span></button>' +
     '<a class="card" href="#/programs"><b>Programmes Fiitday</b><span class="muted small">' + (isFree() ? '<span class="tag">Premium</span> ' : "") + 'Programmes prêts à l\'emploi et circuit training</span></a></div>';
   const recent = finished().slice(0, 3);
   if (recent.length) {
-    h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(historyRow).join("") + "</div>";
+    h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(historyRow).join("") + "</div>" +
+      '<a class="home-hist" href="#/history">Voir l\'historique ›</a>';
   }
   return h;
 }

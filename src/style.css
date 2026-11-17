@@ -794,3 +794,19 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 /* pastilles de la séance : toute la largeur, réparties (une pastille seule garde sa taille) */
 .card.ex .ex-chips .chip-mini { flex: 1 1 auto; justify-content: center; }
 .card.ex .ex-chips .chip-mini:only-child { flex: 0 0 auto; }
+/* accueil : en-tête du programme et séances sur une ligne */
+.tpl-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tpl-head h2 { flex: 0 1 auto; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tpl-head .tpl-side { margin-left: auto; flex: 0 1 auto; min-width: 0; }
+.tpl-head .tpl-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.variants.rows { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.variants.rows .variant { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 46px; padding: 9px 12px; }
+.variants.rows .variant b { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.variants.rows .variant .vmeta { flex: 0 0 auto; font-size: 12px; white-space: nowrap; }
+.variants.rows .variant .vgo { flex: none; font-size: 18px; color: var(--muted); line-height: 1; }
+.variants.rows .variant.add { min-height: 38px; padding: 7px 12px; }
+.variants.rows .variant.add b { font-size: 14px; }
+.home-hist { display: block; text-align: center; margin: 12px 0 4px; font-weight: 600; font-size: 14px; color: var(--accent); text-decoration: none; padding: 8px; }
+.tpl-head .tpl-side { flex: 0 0 auto; max-width: 62%; }
+.tpl-head .tpl-last { display: inline-flex; min-width: 0; }
+.tpl-head .tpl-lv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1171,12 +1171,12 @@ function exHead(w, e, i, letter) {
   const lib = exLib(e), live = !w.endedAt, time = e.type === "time";
   const cd = e.type === "cardio", mid = cd && e.machine && CARDIO_MACH[e.machine] ? e.machine : lib && lib.id;
   const chips = (mid ? '<button class="chip-mini" data-act="exoview" data-id="' + mid + '"' + (cd ? ' data-arg="cardio"' : "") + ">" + ICON.play + "Voir</button>" : "") +
-    (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
+    (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtShort(num(e.rest) || 0)) + " ✎</button>" : "") +
     (live && !letter ? nextChip(w, [e], i) : "") +
-    (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
+    (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtShort(num(e.target) || 0)) + " ✎</button>" : "");
   const nm = (letter ? '<span class="letter">' + letter + "</span>" : "") + esc(e.name), fk = letter ? null : "w:" + w.id + ":" + (e.exId || i);
   return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' + "</span></div>" +
-    '<div class="ex-meta">' + metaText(e, !!letter, live) + "</div>" + (chips ? '<div class="ex-chips">' + chips + "</div>" : "");
+    '<div class="ex-meta">' + metaText(e, !!letter, live) + "</div>" + (chips ? '<div class="ex-chips' + (live && time ? " wrap" : "") + '">' + chips + "</div>" : "");
 }
 function setActions(idx, count, word) {
   const g = idx.join(",");
@@ -1226,7 +1226,7 @@ const restNextVal = mem => num(mem[mem.length - 1].restNext) || num(mem[0].restN
 function nextChip(w, mem, i) {
   const last = w.exercises.indexOf(mem[mem.length - 1]); if (last < 0 || last >= w.exercises.length - 1) return "";
   const v = restNextVal(mem) || num(w.restBetween) || 0;
-  return '<button class="chip-mini" data-act="sesspick" data-sf="next" data-i="' + i + '" title="Repos avant l\'exercice suivant">Suivant ' + (v ? esc(fmtSecs(v)) : "aucun") + " ✎</button>";
+  return '<button class="chip-mini" data-act="sesspick" data-sf="next" data-i="' + i + '" title="Repos avant l\'exercice suivant">Suivant ' + esc(fmtShort(v)) + " ✎</button>";
 }
 // séance en cours : enchaîner avec l'exercice suivant (superset, biset, puis triset) ; pas pour le cardio
 function linkNext(w, i, inGroup) {
@@ -1243,7 +1243,7 @@ function groupCard(w, blk) {
     (live ? "" : " · repos " + esc(fmtRest(first.rest)) + " après chaque tour") + "</span>", fo);
   if (fo) return h + '<div class="fold-sum muted small">' + blk.items.map((x, n) => LETTERS[n] + ". " + esc(x.e.name)).join(" · ") + "</div></section>";
   h += '<div class="blk-body">' +
-    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '" title="Repos après chaque tour">Repos ' + esc(fmtSecs(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
+    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '" title="Repos après chaque tour">Repos ' + esc(fmtShort(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
   blk.items.forEach((x, n) => { h += '<div class="member">' + exHead(w, x.e, x.i, LETTERS[n]) + "</div>"; });
   for (let k = 0; k < rounds; k++) {
     h += '<div class="round-title">Tour ' + (k + 1) + '</div><div class="sets">';
@@ -2423,6 +2423,7 @@ document.addEventListener("pointerdown", e => {
 });
 
 /* ================= Roue de choix des temps (repos, gainage) ================= */
+const fmtShort = v => (!v ? "aucun" : v < 60 ? v + "s" : Math.floor(v / 60) + "min" + (v % 60 ? pad(v % 60) : ""));
 const fmtSecs = v => (v === 0 ? "Aucun" : v < 60 ? v + " s" : Math.floor(v / 60) + " min" + (v % 60 ? " " + pad(v % 60) : ""));
 function pickSeconds(title, value, min, max) {
   const vals = []; for (let x = min; x <= max; x += 5) vals.push(x);
@@ -2479,11 +2480,21 @@ function pickWheels(title, cols) {
     document.body.appendChild(d);
     const H = 44, wheels = [...d.querySelectorAll(".wheel")];
     const idx = cols.map(c => Math.max(0, c.vals.indexOf(c.value)));
-    const mark = n => { const w = wheels[n]; idx[n] = Math.max(0, Math.min(cols[n].vals.length - 1, Math.round(w.scrollTop / H))); w.querySelectorAll(".wv").forEach((el, k) => { el.classList.toggle("on", k === idx[n]); el.setAttribute("aria-selected", String(k === idx[n])); }); };
+    const items = wheels.map(w => w.children), shown = cols.map(() => -1), settleT = cols.map(() => 0);
+    const mark = n => {
+      const w = wheels[n]; idx[n] = Math.max(0, Math.min(cols[n].vals.length - 1, Math.round(w.scrollTop / H)));
+      if (shown[n] === idx[n]) return;
+      const old = items[n][shown[n]], cur = items[n][idx[n]];
+      if (old) { old.classList.remove("on"); old.setAttribute("aria-selected", "false"); }
+      if (cur) { cur.classList.add("on"); cur.setAttribute("aria-selected", "true"); }
+      shown[n] = idx[n];
+    };
+    const settle = n => { const w = wheels[n], t = idx[n] * H; if (Math.abs(w.scrollTop - t) > 1) w.scrollTo({ top: t, behavior: "smooth" }); };
     requestAnimationFrame(() => { wheels.forEach((w, n) => { w.scrollTop = idx[n] * H; mark(n); }); wheels[0].focus(); });
-    const done = ok => { d.remove(); res(ok ? cols.map((c, n) => c.vals[idx[n]]) : null); };
+    const done = ok => { settleT.forEach(clearTimeout); wheels.forEach((w, n) => mark(n)); d.remove(); res(ok ? cols.map((c, n) => c.vals[idx[n]]) : null); };
     wheels.forEach((w, n) => {
-      w.addEventListener("scroll", () => mark(n), { passive: true });
+      w.addEventListener("scroll", () => { mark(n); clearTimeout(settleT[n]); settleT[n] = setTimeout(() => settle(n), 110); }, { passive: true });
+      w.addEventListener("scrollend", () => { clearTimeout(settleT[n]); settle(n); });
       w.addEventListener("keydown", e => {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); w.scrollTo({ top: (idx[n] + (e.key === "ArrowDown" ? 1 : -1)) * H, behavior: "smooth" }); }
         if (e.key === "Enter") done(true);
@@ -3389,18 +3400,18 @@ $app.addEventListener("click", async e => {
       const back = cardioDefs(e).filter(d => hid.includes(d.k)); // indicateurs retirés : on peut les remettre
       if (back.length) {
         const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
-        if (c !== "new") { const k = c.slice(2); setCardioHidden(key, hid.filter(x => x !== k)); render(); toast("« " + (back.find(d => d.k === k) || {}).n + " » remis pour " + e.name); return; }
+        if (c !== "new") { const k = c.slice(2); setCardioHidden(key, hid.filter(x => x !== k)); render(); return; }
       }
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
       const r = await askIndicator(e.name); if (!r) return;
       if (cardioDefs(e).some(d => norm(d.n) === norm(r.n) && norm(d.u) === norm(r.u))) { toast("Cet indicateur existe déjà pour « " + e.name + " »"); return; }
       const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.concat([{ k: "c" + uid(), n: r.n, u: r.u }]); st.cardioCustom = cc; put("settings", st);
-      render(); toast("« " + r.n + " » ajouté pour " + e.name);
+      render();
     } break;
     case "cvdel": if (w && w.exercises[i]) { // retiré de la carte (pour cette machine) ; il reste dans « + Ajouter un indicateur » et ses valeurs restent dans tes séances
       const e = w.exercises[i], key = cardioKey(e), d = cardioDefs(e).find(x => x.k === b.dataset.k); if (!d) return;
       const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
-      render(); toast("« " + d.n + " » retiré (+ Ajouter un indicateur pour le remettre)");
+      render();
     } break;
     case "sesspick": if (w) {
       const e = w.exercises[i]; if (!e) return;

@@ -692,7 +692,7 @@ async function addLibraryExercise(x) {
   const c = await choose("Ajouter « " + x.name + " » à…", opts); if (!c) return;
   const [, tid, vid] = c.split(":"); const t = getItem(tid); const v = t && t.variants.find(y => y.id === vid); if (!v) return;
   const reps = (String(x.reps || "").match(/^\d+(-\d+)?/) || [""])[0];
-  const e = Object.assign(newExercise(), { name: String(x.name).slice(0, 80) }, libFor(x.name) ? { lib: libFor(x.name).id } : {}, x.time ? Object.assign({ type: "time", target: String(num(x.hold) || 45), rest: x.hold ? Math.max(0, Math.min(600, num(x.rest) || 15)) : 60 }, x.hold ? { sets: 2 } : {}) : x.dist ? { type: "dist", target: String(x.dist), rest: Math.max(0, Math.min(600, num(x.rest) || 120)), load: !!x.load } : Object.assign({ target: reps || "8-10", rest: Math.max(0, Math.min(600, num(x.rest) || 90)) }, x.bw ? { type: "rep" } : {}));
+  const e = Object.assign(newExercise(), { name: String(x.name).slice(0, 80) }, libFor(x.name) ? { lib: libFor(x.name).id } : {}, x.time ? Object.assign({ type: "time", target: String(num(x.hold) || 45), rest: x.hold ? Math.max(0, Math.min(1200, num(x.rest) || 15)) : 60 }, x.hold ? { sets: 2 } : {}) : x.dist ? { type: "dist", target: String(x.dist), rest: Math.max(0, Math.min(1200, num(x.rest) || 120)), load: !!x.load } : Object.assign({ target: reps || "8-10", rest: Math.max(0, Math.min(1200, num(x.rest) || 90)) }, x.bw ? { type: "rep" } : {}));
   v.exercises.push(e); put("template", t);
   toast("Ajouté à « " + t.name + " · " + vLabel(v.name) + " »");
 }
@@ -2268,7 +2268,7 @@ async function importShared(code) {
   if (!dest) return;
   const gmap = {};
   const exercises = data.ex.map(x => {
-    const e = { id: "e-" + uid(), name: String(x.n || "Exercice").slice(0, 80), lib: libById[x.li] ? x.li : undefined, type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: String(x.c == null ? "" : x.c).slice(0, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(600, num(x.rn) || num(data.rb) || 0)), note: String(x.no || "").slice(0, 500), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
+    const e = { id: "e-" + uid(), name: String(x.n || "Exercice").slice(0, 80), lib: libById[x.li] ? x.li : undefined, type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: String(x.c == null ? "" : x.c).slice(0, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(1200, num(x.rn) || num(data.rb) || 0)), note: String(x.no || "").slice(0, 500), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
     if (x.g && GROUP_LABEL[x.k]) { gmap[x.g] = gmap[x.g] || "g-" + uid(); e.groupId = gmap[x.g]; e.groupKind = x.k; }
     return e;
   });
@@ -3418,7 +3418,7 @@ $app.addEventListener("click", async e => {
       const sf = b.dataset.sf, isT = sf === "target", isN = sf === "next";
       const members = sf === "grest" || (isN && e.groupId) ? w.exercises.filter(x => x.groupId && x.groupId === e.groupId) : [e];
       const val = await pickSeconds(isT ? "Objectif de gainage" : isN ? "Repos avant l'exercice suivant · " + (e.groupId ? (GROUP_LABEL[e.groupKind] || "Enchaînement") : e.name) : sf === "grest" ? "Repos après chaque tour" : "Temps de repos",
-        isT ? e.target : isN ? (restNextVal(members) || num(w.restBetween) || 0) : e.rest, isT ? 5 : 0, 600);
+        isT ? e.target : isN ? (restNextVal(members) || num(w.restBetween) || 0) : e.rest, isT ? 5 : 0, isT ? 600 : 1200);
       if (val == null) return;
       const t = getItem(w.templateId), v = t && t.variants.find(x => x.id === w.variantId);
       const inTpl = v && members.some(x => v.exercises.some(y => y.id === x.exId));
@@ -3573,7 +3573,7 @@ $app.addEventListener("click", async e => {
       const { t, v } = currentProgram(); if (!v) return;
       const ex = v.exercises[+b.dataset.e]; if (!ex) return;
       if (b.dataset.sf === "next") {
-        const val = await pickSeconds("Repos avant l'exercice suivant", restNextOf(ex, v), 0, 600);
+        const val = await pickSeconds("Repos avant l'exercice suivant", restNextOf(ex, v), 0, 1200);
         if (val == null) return;
         v.exercises.forEach(x => { if (x === ex || (ex.groupId && x.groupId === ex.groupId)) x.restNext = val; });
         put("template", t); render(); return;
@@ -3599,7 +3599,7 @@ $app.addEventListener("click", async e => {
         if (!r) return; ex.target = r[0] ? String(r[0]) : ""; put("template", t); render(); return;
       }
       const sf = b.dataset.sf, isTarget = sf === "target";
-      const val = await pickSeconds(isTarget ? "Temps cible" : sf === "grest" ? "Repos" : "Temps de repos", isTarget ? ex.target : ex.rest, isTarget ? 5 : 0, 600);
+      const val = await pickSeconds(isTarget ? "Temps cible" : sf === "grest" ? "Repos" : "Temps de repos", isTarget ? ex.target : ex.rest, isTarget ? 5 : 0, isTarget ? 600 : 1200);
       if (val == null) return;
       if (isTarget) ex.target = String(val);
       else if (sf === "rest") ex.rest = val;

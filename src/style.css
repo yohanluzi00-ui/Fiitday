@@ -791,3 +791,6 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .card.ex .ex-chips.wrap { flex-wrap: wrap; }
 .card.ex .ex-chips.wrap .chip-mini { overflow: visible; }
 @media (max-width: 375px) { .card.ex .ex-chips .chip-mini { padding: 0 6px; font-size: 11.5px; } .card.ex .ex-chips { gap: 3px; } }
+/* pastilles de la séance : toute la largeur, réparties (une pastille seule garde sa taille) */
+.card.ex .ex-chips .chip-mini { flex: 1 1 auto; justify-content: center; }
+.card.ex .ex-chips .chip-mini:only-child { flex: 0 0 auto; }

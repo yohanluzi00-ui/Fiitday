@@ -650,11 +650,12 @@ function renderNow() {
     case "famille": history.replaceState(history.state, "", "#/settings"); body = viewSettings(); setTimeout(() => famJoin(r.args[0] || ""), 0); break;
     case "premium": body = viewPremium(); break;
     case "admin": body = viewAdmin(); break;
+    case "guide": body = viewGuide(); break;
     case "faq": body = viewFaq(r.args[0]); if (r.args[0]) setTimeout(() => { const d = document.getElementById("faq-" + r.args[0]); if (d) d.scrollIntoView({ block: "start" }); }, 60); break;
     case "exercices": body = '<div id="exo-root"><div class="page-head"><h1>Exercices</h1></div><div class="card empty">Chargement des exercices…</div></div>'; break;
     default: body = viewHome();
   }
-  const tab = { faq: "settings", premium: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
+  const tab = { guide: "settings", faq: "settings", premium: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
   $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand">Fiitday</div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
     '</nav><main class="main' + (wide ? " wide" : "") + '">' + body + "</main></div>";
@@ -2709,6 +2710,45 @@ const FAQ = [
 ];
 // espaces insécables de la typographie française : « ? », « : », « » » ne passent jamais seuls à la ligne
 const nbsp = t => t.replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0");
+// Guide : ce qu'on trouve et ce qu'on peut faire dans chaque page (sans le détail de chaque option)
+const GUIDE = [
+  ["Accueil", "#/home", "Ton point de départ pour t'entraîner.", [
+    "Tes programmes et leurs séances : touche une séance pour la lancer ou la modifier, reste appuyé pour voir ses exercices.",
+    "« + Nouveau programme » pour créer le tien, « Importer » pour récupérer une séance partagée par un ami.",
+    "« Séance libre » pour t'entraîner sans programme, et « Séance cardio » pour le tapis, le vélo, le rameur…",
+    "Tes dernières séances, avec un accès à tout l'historique."]],
+  ["Séance en cours", "", "Ce que tu as sous les yeux pendant l'entraînement.", [
+    "Pour chaque exercice : le poids et les répétitions avec les roues, ✓ pour valider une série.",
+    "Le repos démarre tout seul après chaque série ; le chrono sert au gainage, à la course et au cardio.",
+    "Tu peux ajouter, retirer, renommer ou enchaîner des exercices (superset) pour cette séance.",
+    "« Terminer la séance » l'enregistre dans ton historique et tes stats."]],
+  ["Configuration d'une séance", "", "Ce qui s'ouvre avec « Modifier » sur une séance.", [
+    "La liste des exercices, leur ordre (glisse la poignée ⠿) et leurs réglages : séries, répétitions, repos, dégressif.",
+    "Les supersets, bisets et trisets, et le repos avant l'exercice suivant.",
+    "Dupliquer ou partager la séance, et en ajouter d'autres au programme."]],
+  ["Exercices", "#/exercices", "La bibliothèque, avec le mannequin 3D.", [
+    "Musculation, Cardio et Étirements : chaque fiche montre le mouvement en 3D, les muscles travaillés et les conseils.",
+    "Recherche par nom, par muscle ou par matériel.",
+    "« Ajouter à une séance » pour le mettre directement dans un de tes programmes."]],
+  ["Stats", "#/progress", "Tes progrès, en quatre onglets.", [
+    "Séances : ta semaine par rapport à ton objectif, le temps de sport et les séances par semaine.",
+    "Évolution : la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records.",
+    "Calendrier : les jours où tu t'es entraîné.",
+    "Historique : toutes tes séances terminées, à revoir ou à corriger."]],
+  ["Programmes", "#/programs", "Les programmes Fiitday prêts à l'emploi.", [
+    "Des programmes de musculation et de circuit training à ajouter en un appui à tes programmes."]],
+  ["Réglages", "#/settings", "L'appli à ton goût, et ton compte.", [
+    "Apparence (clair, sombre, couleur), alerte de fin de repos, objectif de séances par semaine.",
+    "Ton compte et la synchronisation entre ton téléphone et fiitday.com.",
+    "Tes données : sauvegarde, restauration et transfert vers un autre compte.",
+    "L'aide : ce guide et les questions fréquentes."]]
+];
+function viewGuide() {
+  return '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>Guide de l\'appli</h1></div>' +
+    '<p class="muted guide-intro">Ce que tu trouves dans chaque page de Fiitday. Pour une question précise, va dans les <a href="#/faq">questions fréquentes</a>.</p>' +
+    GUIDE.map(([t, href, lead, pts]) => '<section class="card guide-p"><div class="spread"><h2>' + esc(t) + "</h2>" + (href ? '<a class="link small" href="' + href + '">Ouvrir ›</a>' : "") + "</div>" +
+      '<p class="muted small">' + esc(lead) + '</p><ul class="exo-tips">' + pts.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></section>").join("");
+}
 function viewFaq(open) {
   faqIdx = null;
   const n = FAQ.reduce((a, c) => a + c[1].length, 0);
@@ -3178,7 +3218,7 @@ function viewSettings() {
       '<button class="btn sm pw-btn" data-act="pwchange">Changer mon mot de passe</button><div class="row duo"><button class="btn sm" data-act="logout">Se déconnecter</button><button class="btn sm danger" data-act="delaccount">Supprimer mon compte</button></div>'
       : '<div class="small muted">Sans compte : tes données restent sur cet appareil.</div><button class="btn sm primary" style="margin-top:8px" data-act="tologin">Se connecter / créer un compte</button>') +
     "</div></div>" +
-    '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Les réponses aux questions les plus fréquentes : séances, repos, sauvegarde, montre…</div><a class="btn sm" style="margin-top:8px" href="#/faq">Questions fréquentes</a></div>' +
+    '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide de l\'appli</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
     '<div class="card"><b>Informations légales</b><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
     '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div></div>' +

@@ -810,3 +810,12 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .tpl-head .tpl-side { flex: 0 0 auto; max-width: 62%; }
 .tpl-head .tpl-last { display: inline-flex; min-width: 0; }
 .tpl-head .tpl-lv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* accueil : en-tête du programme plus petit pour tenir sur une ligne */
+.tpl-head h2 { font-size: 16px; }
+.tpl-head .tpl-last { font-size: 11.5px; }
+/* guide de l'appli */
+.guide-intro { margin: 0 2px 12px; }
+.guide-p { margin-bottom: 10px; }
+.guide-p h2 { font-size: 17px; margin: 0; }
+.guide-p p { margin: 4px 0 8px; }
+.guide-p .exo-tips { margin: 0; }

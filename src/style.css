@@ -819,3 +819,8 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .guide-p h2 { font-size: 17px; margin: 0; }
 .guide-p p { margin: 4px 0 8px; }
 .guide-p .exo-tips { margin: 0; }
+/* fenêtre de bienvenue */
+.welcome-box { text-align: center; }
+.welcome-box .welcome-logo { border-radius: 16px; margin: 4px auto 6px; display: block; }
+.welcome-box p { margin: 8px 0; line-height: 1.45; }
+.welcome-box .welcome-wish { font-weight: 700; color: var(--accent); margin-top: 12px; }

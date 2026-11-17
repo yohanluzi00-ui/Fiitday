@@ -591,6 +591,32 @@ let consentAsked = false, nameAsked = false;
 // un e-mail n'est jamais un prénom (le remplissage automatique du téléphone a pu en glisser un dans le champ Prénom)
 const cleanName = n => (n && !/@/.test(n) ? String(n) : "");
 const firstName = () => cleanName(settings().firstName) || cleanName(db.auth && db.auth.user && db.auth.user.name) || "";
+// bienvenue : la première fois qu'un nouveau compte ouvre l'appli (aucun programme ni séance), après le consentement et le prénom
+let welcomeAsked = false;
+async function welcomeIfNew() {
+  if (welcomeAsked || !db.auth || (!db.lastServerAt && !syncState.at) || !settings().consentAt || settings().welcomeAt) return;
+  if (templates().length || workouts().length) { const st = settings(); st.welcomeAt = Date.now(); put("settings", st); return; } // compte déjà utilisé : jamais de bienvenue
+  if (document.querySelector("body > .modal")) return; // une autre fenêtre est ouverte : on attendra le prochain affichage
+  welcomeAsked = true;
+  const st = settings(); st.welcomeAt = Date.now(); put("settings", st);
+  if (await showWelcome()) go("guide");
+}
+function showWelcome() {
+  return new Promise(res => {
+    const name = firstName(), d = document.createElement("div"); d.className = "modal";
+    d.innerHTML = '<div class="modal-box welcome-box" role="dialog" aria-modal="true" aria-label="Bienvenue sur Fiitday"><img class="welcome-logo" src="icon-192.png" alt="" width="64" height="64">' +
+      "<h3>Bienvenue sur Fiitday" + (name ? " " + esc(name) : "") + " !</h3>" +
+      "<p>Crée ton premier programme ou lance une séance libre depuis l'accueil.</p>" +
+      '<p>Un mini guide est accessible depuis <b>Réglages › Aide › Guide</b> : il te montre ce que tu peux faire dans chaque page.</p>' +
+      '<p class="welcome-wish">L\'équipe Fiitday te souhaite de belles séances 💪</p>' +
+      '<div class="modal-btns"><button class="btn" data-r="1">Voir le guide</button><button class="btn primary" data-r="0">C\'est parti</button></div></div>';
+    document.body.appendChild(d);
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(false); return; }
+      const b = e.target.closest("[data-r]"); if (b) { d.remove(); res(b.dataset.r === "1"); }
+    });
+  });
+}
 async function askNameIfNeeded() {
   if (nameAsked || !db.auth || (!db.lastServerAt && !syncState.at) || firstName() || !settings().consentAt) return;
   nameAsked = true;
@@ -662,7 +688,7 @@ function renderNow() {
   keepScreen(immersive);
   if (r.name === "exercices") mountExercises(r.args[0], r.args[1]);
   tick();
-  setTimeout(() => askConsentIfNeeded().then(askNameIfNeeded), 800);
+  setTimeout(() => askConsentIfNeeded().then(askNameIfNeeded).then(welcomeIfNew), 800);
 }
 
 /* ================= Écran : exercices (bibliothèque 3D, chargée à la demande) ================= */
@@ -930,7 +956,7 @@ function viewHome() {
     const pl = progLocked(t.id);
     // en-tête sur une ligne : nom du programme, puis la dernière séance (« mar 17 nov · Pull », sans points)
     h += '<div class="card tpl' + (pl ? " locked" : "") + '" data-sort-id="' + t.id + '"><div class="tpl-head"><h2>' + (pl ? LOCK : "") + esc(t.name) + "</h2>" +
-      '<span class="tpl-side"><span class="muted small tpl-last">' + (lastAny ? "Dernière : " + esc(fmtDate(lastAny.last.startedAt).replace(/\./g, "")) + '<span class="tpl-lv"> · ' + esc(vLabel(lastAny.v.name)) + "</span>" : t.variants.length ? "Jamais faite" : "Aucune séance") + "</span>" +
+      '<span class="tpl-side"><span class="muted small tpl-last">' + (lastAny ? "Dernière : " + esc(vLabel(lastAny.v.name)) : t.variants.length ? "Jamais faite" : "Aucune séance") + "</span>" +
       (ts.length > 1 ? '<span class="grip" data-drag title="Maintiens et fais glisser pour changer l\'ordre">' + GRIP + "</span>" : "") + "</span></div>" +
       // une ligne par séance : nom, puis « 6 exos · il y a 3 j », et ›
       '<div class="variants rows">' + st.map(x => {
@@ -2744,7 +2770,7 @@ const GUIDE = [
     "L'aide : ce guide et les questions fréquentes."]]
 ];
 function viewGuide() {
-  return '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>Guide de l\'appli</h1></div>' +
+  return '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>Guide</h1></div>' +
     '<p class="muted guide-intro">Ce que tu trouves dans chaque page de Fiitday. Pour une question précise, va dans les <a href="#/faq">questions fréquentes</a>.</p>' +
     GUIDE.map(([t, href, lead, pts]) => '<section class="card guide-p"><div class="spread"><h2>' + esc(t) + "</h2>" + (href ? '<a class="link small" href="' + href + '">Ouvrir ›</a>' : "") + "</div>" +
       '<p class="muted small">' + esc(lead) + '</p><ul class="exo-tips">' + pts.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></section>").join("");
@@ -3218,7 +3244,7 @@ function viewSettings() {
       '<button class="btn sm pw-btn" data-act="pwchange">Changer mon mot de passe</button><div class="row duo"><button class="btn sm" data-act="logout">Se déconnecter</button><button class="btn sm danger" data-act="delaccount">Supprimer mon compte</button></div>'
       : '<div class="small muted">Sans compte : tes données restent sur cet appareil.</div><button class="btn sm primary" style="margin-top:8px" data-act="tologin">Se connecter / créer un compte</button>') +
     "</div></div>" +
-    '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide de l\'appli</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
+    '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
     '<div class="card"><b>Informations légales</b><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
     '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div></div>' +

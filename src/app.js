@@ -168,6 +168,10 @@ const cvOwn = (k, d) => Object.assign({ k, n: String(d.n).slice(0, 30), s: Strin
 function cardioDefs(e) {
   return (CARDIO_MACH[e.machine] || CARDIO_BASE).map(k => Object.assign({ k }, CARDIO_M[k])).concat(cardioCustom(cardioKey(e)).map(x => cvOwn(x.k, x)));
 }
+// indicateurs retirés par l'utilisateur pour une machine (ils restent proposés dans « + Ajouter un indicateur »)
+function cardioHidden(key) { const h = settings().cardioHidden, l = h && typeof h === "object" ? h[key] : null; return Array.isArray(l) ? l.filter(k => typeof k === "string") : []; }
+const cardioShown = e => { const h = cardioHidden(cardioKey(e)); return cardioDefs(e).filter(d => !h.includes(d.k)); };
+function setCardioHidden(key, list) { const st = settings(), hh = Object.assign({}, st.cardioHidden); hh[key] = list; st.cardioHidden = hh; put("settings", st); }
 // définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
 function cvDef(k) {
   if (CARDIO_M[k]) return Object.assign({ k }, CARDIO_M[k]);
@@ -176,7 +180,7 @@ function cvDef(k) {
   return null;
 }
 const cvNum = v => num(v); // valeurs enregistrées : nombres (les temps « m:ss » en secondes)
-const cvFmt = (d, v) => (v == null ? "—" : d.clock ? fmtClock(v) + (d.u ? " " + d.u : "") : fmtNum(d.int ? Math.round(v) : Math.round(v * 100) / 100) + (d.u ? " " + d.u : ""));
+const cvFmt = (d, v) => (v == null ? "—" : d.u === "niveau" ? "Niveau " + fmtNum(Math.round(v * 10) / 10) : d.clock ? fmtClock(v) + (d.u ? " " + d.u : "") : fmtNum(d.int ? Math.round(v) : Math.round(v * 100) / 100) + (d.u ? " " + d.u : ""));
 const cardioMachineOf = name => { const l = libFor(name); return l && CARDIO_MACH[l.id] ? l.id : ""; };
 const cardioMachines = () => Object.keys(CARDIO_MACH).map(id => EXO_LIB.find(x => x.id === id)).filter(Boolean);
 const cardioInfo = id => cardioDefs({ machine: id, name: "" }).map(d => d.n + (d.u && !d.clock && !norm(d.n).includes(norm(d.u)) ? " (" + d.u + ")" : ""));
@@ -1166,7 +1170,7 @@ function metaText(e, inGroup, live) {
 function exHead(w, e, i, letter) {
   const lib = exLib(e), live = !w.endedAt, time = e.type === "time";
   const cd = e.type === "cardio", mid = cd && e.machine && CARDIO_MACH[e.machine] ? e.machine : lib && lib.id;
-  const chips = (mid ? '<button class="chip-mini" data-act="exoview" data-id="' + mid + '"' + (cd ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cd ? "Voir la machine" : "Voir le mouvement") + "</button>" : "") +
+  const chips = (mid ? '<button class="chip-mini" data-act="exoview" data-id="' + mid + '"' + (cd ? ' data-arg="cardio"' : "") + ">" + ICON.play + "Voir</button>" : "") +
     (live && !letter && !cd ? '<button class="chip-mini" data-act="sesspick" data-sf="rest" data-i="' + i + '">Repos ' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : "") +
     (live && !letter ? nextChip(w, [e], i) : "") +
     (live && time ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">Objectif ' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : "");
@@ -1185,7 +1189,7 @@ function noteBox(w, e, i, letter) {
 }
 // machine de cardio en séance : durée (chrono ou saisie), indicateurs de la machine et les tiens, validation
 function cardioBody(w, e, i) {
-  const defs = cardioDefs(e), lp = lastPerf(w, e), many = e.sets.length > 1;
+  const defs = cardioShown(e), lp = lastPerf(w, e), many = e.sets.length > 1;
   return e.sets.map((s, k) => {
     const src = lp && lp.e.sets[k], a = ' data-i="' + i + '" data-s="' + k + '"', lab = many ? " bloc " + (k + 1) : "";
     return '<div class="cardio-set' + (s.done ? " done-row" : "") + '">' + (many ? '<div class="cv-bloc">Bloc ' + (k + 1) + "</div>" : "") +
@@ -1193,7 +1197,7 @@ function cardioBody(w, e, i) {
         (num(s.sec) != null ? fmtClock(s.sec) : src && num(src.sec) != null ? fmtClock(src.sec) : "") + "</button></div>" + (w.endedAt ? "" : chronoBtn(w, i, k)) + "</div>" +
       '<div class="cv-grid">' + defs.map(d => {
         const v = s.cv ? s.cv[d.k] : null, pv = src && src.cv ? cvNum(src.cv[d.k]) : null;
-        return '<div class="cv"><span class="cv-n">' + esc(d.n) + (d.own ? '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' : "") + "</span>" +
+        return '<div class="cv"><span class="cv-n">' + esc(d.n) + '<button type="button" class="cv-del" data-act="cvdel" data-i="' + i + '" data-k="' + d.k + '" aria-label="Retirer l\'indicateur ' + esc(d.n) + '">×</button>' + "</span>" +
           (d.k === "dist" || d.k === "distm" ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvdist" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtNum(num(v)) + " " + d.u : "à choisir") + '">' +
             (num(v) != null ? fmtNum(num(v)) + " " + d.u : pv != null ? fmtNum(pv) + " " + d.u : "") + "</button>" :
           d.clock ? '<button type="button" class="f pick cv-pick' + (num(v) != null ? "" : " empty") + '" data-act="cvclock" data-k="' + d.k + '"' + a + ' aria-label="' + esc(d.n + lab) + " : " + (num(v) != null ? fmtClock(v) : "à choisir") + '">' +
@@ -1222,14 +1226,14 @@ const restNextVal = mem => num(mem[mem.length - 1].restNext) || num(mem[0].restN
 function nextChip(w, mem, i) {
   const last = w.exercises.indexOf(mem[mem.length - 1]); if (last < 0 || last >= w.exercises.length - 1) return "";
   const v = restNextVal(mem) || num(w.restBetween) || 0;
-  return '<button class="chip-mini" data-act="sesspick" data-sf="next" data-i="' + i + '">Avant l\'exercice suivant ' + (v ? esc(fmtSecs(v)) : "aucun") + " ✎</button>";
+  return '<button class="chip-mini" data-act="sesspick" data-sf="next" data-i="' + i + '" title="Repos avant l\'exercice suivant">Suivant ' + (v ? esc(fmtSecs(v)) : "aucun") + " ✎</button>";
 }
 // séance en cours : enchaîner avec l'exercice suivant (superset, biset, puis triset) ; pas pour le cardio
 function linkNext(w, i, inGroup) {
   const e = w.exercises[i], n = w.exercises[i + 1];
   if (w.endedAt || !n || n.groupId || e.type === "cardio" || n.type === "cardio") return "";
   if (inGroup && w.exercises.filter(x => x.groupId === e.groupId).length >= 3) return "";
-  return '<button type="button" class="link link-next" data-act="wlink" data-i="' + i + '">' + (inGroup ? "Ajouter « " + esc(n.name) + " » au groupe (triset)" : "Enchaîner avec « " + esc(n.name) + " » (superset / biset)") + "</button>";
+  return '<button type="button" class="link link-next" data-act="wlink" data-i="' + i + '">' + (inGroup ? "Ajouter « " + esc(n.name) + " » au groupe (triset)" : "Enchaîner avec « " + esc(n.name) + " »") + "</button>";
 }
 function groupCard(w, blk) {
   const first = blk.items[0].e, rounds = Math.max(...blk.items.map(x => x.e.sets.length));
@@ -1239,7 +1243,7 @@ function groupCard(w, blk) {
     (live ? "" : " · repos " + esc(fmtRest(first.rest)) + " après chaque tour") + "</span>", fo);
   if (fo) return h + '<div class="fold-sum muted small">' + blk.items.map((x, n) => LETTERS[n] + ". " + esc(x.e.name)).join(" · ") + "</div></section>";
   h += '<div class="blk-body">' +
-    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '">Repos après chaque tour ' + esc(fmtSecs(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
+    (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '" title="Repos après chaque tour">Repos ' + esc(fmtSecs(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
   blk.items.forEach((x, n) => { h += '<div class="member">' + exHead(w, x.e, x.i, LETTERS[n]) + "</div>"; });
   for (let k = 0; k < rounds; k++) {
     h += '<div class="round-title">Tour ' + (k + 1) + '</div><div class="sets">';
@@ -1294,14 +1298,14 @@ function sessionTable(w) {
       const e = x.e, i = x.i, time = e.type === "time", isDist = e.type === "dist", grouped = !!b.groupId, lastOfGroup = n === b.items.length - 1;
       if (e.type === "cardio" && !grouped) {
         h += '<tr><td><div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div><div class="muted small">' + esc(metaText(e, false, false)) + "</div>" +
-          (e.machine && CARDIO_MACH[e.machine] ? '<button class="chip-mini" data-act="exoview" data-id="' + e.machine + '" data-arg="cardio">' + ICON.play + "Voir la machine</button>" : "") + "</td>" +
+          (e.machine && CARDIO_MACH[e.machine] ? '<button class="chip-mini" data-act="exoview" data-id="' + e.machine + '" data-arg="cardio">' + ICON.play + "Voir</button>" : "") + "</td>" +
           '<td colspan="' + (3 + max) + '">' + cardioBody(w, e, i) + "</td><td>" + noteBox(w, e, i, "") + "</td></tr>";
         return;
       }
       h += '<tr class="' + (grouped && !lastOfGroup ? "chained" : "") + '"><td>' +
         (grouped ? '<div class="gtag">' + esc(GROUP_LABEL[e.groupKind] || "Enchaînement") + " · " + LETTERS[n] + "</div>" : "") +
         '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div>' +
-        (exLib(e) ? '<button class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir le mouvement</button>" : "") +
+        (exLib(e) ? '<button class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir</button>" : "") +
         (dropsOf(e) ? '<div class="muted small">Dégressif · ' + dropsOf(e) + " baisse" + (dropsOf(e) > 1 ? "s" : "") + "</div>" : "") +
         (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série") : "") + "</td>" +
         "<td>" + e.sets.length + "</td><td>" + (isDist ? esc(fmtNum(num(e.target) || 0)) + " m" : time && !w.endedAt ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : time ? esc(fmtHold(e.target) || "—") : esc(e.target || "—")) + "</td><td>" +
@@ -1393,9 +1397,8 @@ function stopChrono(w, at) {
   if (!set) return;
   if (t < c.start) return; // arrêté pendant la préparation : rien n'est noté
   set.sec = String(Math.round((t - c.start) / 1000));
-  if (w.exercises[c.i].type === "cardio") { // cardio : la durée est notée, la machine sera validée une fois les indicateurs remplis
-    set.done = true; afterSet(w, c.i, c.s); put("workout", w);
-    toast("Machine validée : tu peux encore noter tes indicateurs");
+  if (w.exercises[c.i].type === "cardio") { // cardio : la durée est notée ; la machine se valide avec ✓ (après les indicateurs)
+    put("workout", w); toast("Durée notée : note tes indicateurs, puis valide ✓");
     return;
   }
   set.done = true;
@@ -1429,7 +1432,7 @@ function exFields(e, k, letter, inGroup) {
     (exLib(e) ? '<div class="full" data-exolink="' + k + '"><button type="button" class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir le mouvement</button></div>" : '<div class="full" data-exolink="' + k + '" hidden></div>') +
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
     (cardio ? '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
-      '<div class="fl full cv-info" data-cvinfo="' + k + '"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioDefs(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
+      '<div class="fl full cv-info" data-cvinfo="' + k + '"><span>Indicateurs notés</span><span class="small muted">Durée, ' + esc(cardioShown(e).map(x => x.n.toLowerCase()).join(", ")) + ". Tu peux en ajouter pendant la séance.</span></div>" : "") +
     (inGroup || cardio ? "" : '<div class="fl"><span>Séries</span><button type="button" class="f pick" data-act="picksec" data-sf="sets" data-e="' + k + '">' + (num(e.sets) || 1) + "</button></div>") +
     (cardio ? "" : dist ? '<div class="fl"><span>Distance</span><button type="button" class="f pick" data-act="picksec" data-sf="dtarget" data-e="' + k + '">' + fmtDist(num(e.target) || 1000, "m") + "</button></div>" +
       '<label class="fl">Charge<select class="f" data-p="load" data-e="' + k + '"><option value="0"' + (!e.load ? " selected" : "") + '>Sans charge</option><option value="1"' + (e.load ? " selected" : "") + ">Avec charge (kg)</option></select></label>"
@@ -2446,7 +2449,7 @@ const CV_W = { vit: [30, 10, 10], incl: [40, 10, 1], res: [40, 0, 8], cad: [200,
   niv: [30, 0, 8], cpm: [60, 0, 25], cal: [2000, 0, 200], fc: [220, 0, 130] };
 function pickNumber(title, value, spec, unit) {
   const [max, dec, def] = spec, v = num(value) != null ? num(value) : def, u = unit ? " " + unit : "";
-  if (!dec) return pickWheels(title, [{ vals: rng(max + 1), fmt: x => x + u, value: Math.min(max, Math.round(v)) }]).then(r => (r ? r[0] : null));
+  if (!dec) return pickWheels(title, [{ vals: rng(max + 1), fmt: x => (unit === "niveau" ? "Niveau " + x : x + u), value: Math.min(max, Math.round(v)) }]).then(r => (r ? r[0] : null));
   const t = Math.round(v * dec);
   return pickWheels(title, [{ vals: rng(max + 1), fmt: x => String(x), value: Math.min(max, Math.floor(t / dec)) }, { vals: rng(dec), fmt: x => "," + x + u, value: t % dec }]).then(r => (r ? Math.round((r[0] + r[1] / dec) * 10) / 10 : null));
 }
@@ -3382,17 +3385,22 @@ $app.addEventListener("click", async e => {
       put("workout", w); save(); render();
     } break;
     case "cvadd": if (w && w.exercises[i]) {
-      const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key);
+      const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key), hid = cardioHidden(key);
+      const back = cardioDefs(e).filter(d => hid.includes(d.k)); // indicateurs retirés : on peut les remettre
+      if (back.length) {
+        const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
+        if (c !== "new") { const k = c.slice(2); setCardioHidden(key, hid.filter(x => x !== k)); render(); toast("« " + (back.find(d => d.k === k) || {}).n + " » remis pour " + e.name); return; }
+      }
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
       const r = await askIndicator(e.name); if (!r) return;
       if (cardioDefs(e).some(d => norm(d.n) === norm(r.n) && norm(d.u) === norm(r.u))) { toast("Cet indicateur existe déjà pour « " + e.name + " »"); return; }
       const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.concat([{ k: "c" + uid(), n: r.n, u: r.u }]); st.cardioCustom = cc; put("settings", st);
       render(); toast("« " + r.n + " » ajouté pour " + e.name);
     } break;
-    case "cvdel": if (w && w.exercises[i]) {
-      const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key), d = list.find(x => x.k === b.dataset.k); if (!d) return;
-      if (!await ask({ title: "Retirer « " + d.n + " » ?", text: "Il ne sera plus proposé pour « " + e.name + " ». Les valeurs déjà notées restent dans tes séances.", ok: "Retirer", danger: true })) return;
-      const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.filter(x => x.k !== d.k); st.cardioCustom = cc; put("settings", st); render();
+    case "cvdel": if (w && w.exercises[i]) { // retiré de la carte (pour cette machine) ; il reste dans « + Ajouter un indicateur » et ses valeurs restent dans tes séances
+      const e = w.exercises[i], key = cardioKey(e), d = cardioDefs(e).find(x => x.k === b.dataset.k); if (!d) return;
+      const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
+      render(); toast("« " + d.n + " » retiré (+ Ajouter un indicateur pour le remettre)");
     } break;
     case "sesspick": if (w) {
       const e = w.exercises[i]; if (!e) return;

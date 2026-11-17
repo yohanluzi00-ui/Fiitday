@@ -775,3 +775,11 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .link-next { display: block; margin: 8px 0 2px; }
 .link-row { gap: 16px; flex-wrap: wrap; margin-top: 6px; }
 .link-row .link-next { margin: 0; }
+/* + Série / − Série plus petits */
+.ex-actions .btn.sm { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+/* pastilles « Voir · Repos · Suivant » sur une seule ligne */
+.ex-chips { flex-wrap: wrap; }
+.ex-chips .chip-mini { white-space: nowrap; flex: 0 1 auto; min-width: 0; }
+.card.ex .ex-chips { gap: 5px; }
+.card.ex .ex-chips .chip-mini { padding: 0 9px; font-size: 12.5px; gap: 4px; }
+.card.ex .ex-chips .chip-mini svg { width: 10px; height: 10px; }

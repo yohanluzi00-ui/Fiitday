@@ -824,3 +824,66 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .welcome-box .welcome-logo { border-radius: 16px; margin: 4px auto 6px; display: block; }
 .welcome-box p { margin: 8px 0; line-height: 1.45; }
 .welcome-box .welcome-wish { font-weight: 700; color: var(--accent); margin-top: 12px; }
+
+/* ================= Grand écran (PC, 1100 px et plus) : plusieurs colonnes. En dessous (téléphone, tablette), les enveloppes ne changent rien ================= */
+.home-top, .pc-cols, .pc-main, .pc-side, .pc-tiles { display: contents; }
+.pc-on { background: var(--soft) !important; box-shadow: inset 3px 0 0 var(--accent); }
+@media (min-width: 1100px) {
+  .main.r-home, .main.r-progress, .main.r-evolution, .main.r-history, .main.r-exercices, .main.r-settings, .main.r-programs { max-width: 1320px; }
+  .main.r-program { max-width: 1040px; }
+  .pc-cols { display: grid; gap: 24px; align-items: start; }
+  .pc-main, .pc-side { display: block; min-width: 0; }
+  .pc-side { position: sticky; top: 24px; }
+  .pc-pane { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; max-height: calc(100vh - 48px); overflow: auto; }
+  /* accueil */
+  .home-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 24px; align-items: end; }
+  .home-top > * { grid-column: 1 / -1; }
+  .home-top > .page-head { grid-column: 1; grid-row: 1; }
+  .home-top > .home-actions { grid-column: 2; grid-row: 1; flex-wrap: nowrap; margin: 0 0 18px; }
+  .home-top > .home-actions .btn, .home-top > .home-actions .free-go { flex: 0 0 auto; padding: 0 18px; }
+  .pc-cols.home { grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); }
+  .pc-cols.home .stack[data-sortable] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+  .pc-cols.home .home-more { grid-template-columns: 1fr; }
+  .pc-cols > div > .section-title:first-child { margin-top: 0; }
+  /* stats */
+  .pc-tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .pc-tiles > .stats { display: contents; }
+  .pc-tiles + .pc-cols.stats, .pc-cols.stats { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); margin-top: 16px; }
+  .pc-cols.stats .pc-main > .card { margin-top: 0 !important; }
+  .pc-cols.stats .chart { max-height: 300px; width: 100%; display: block; }
+  .pc-cols.stats .chart text { font-size: 7px; }
+  /* évolution et historique : liste à gauche, détail à droite */
+  .pc-cols.evo { grid-template-columns: 380px minmax(0, 1fr); }
+  .pc-cols.evo .pc-pane .page-head { margin: 0 0 8px; }
+  .pc-cols.evo .pc-pane h1 { font-size: 26px; }
+  .pc-cols.evo .pc-pane .stats.k3 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pc-cols.hist { grid-template-columns: 400px minmax(0, 1fr); }
+  .pc-cols.hist .pc-pane .page-head h1 { font-size: 26px; }
+  .pc-cols.hist .pc-pane .stack { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; align-items: start; }
+  /* exercices : liste, mannequin en grand, fiche */
+  .exo-pc { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 24px; align-items: start; }
+  .exo-pane { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 10px; max-height: calc(100vh - 48px); }
+  .exo-pane .exo-chips { flex-wrap: wrap; overflow: visible; margin: 0; }
+  .exo-pane-list { overflow: auto; min-height: 0; padding-right: 2px; }
+  .exo-pane-list .section-title:first-child { margin-top: 4px; }
+  .exo-pane-main { min-width: 0; }
+  .exo-pane-main .exo-main { grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr); }
+  .exo-pane-main .exo-stage-col { position: sticky; top: 24px; }
+  .main.r-exercices #exo-list .list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* réglages et programmes Fiitday sur 2 colonnes */
+  .set-stack { display: block; columns: 2; column-gap: 16px; }
+  .set-stack > * { break-inside: avoid; margin-bottom: 16px; }
+  .set-stack > .credit { column-span: all; }
+  .pc-cols.progs { grid-template-columns: 1fr 1fr; }
+}
+/* PC à écran moyen (1100 à 1299 px) : moins de colonnes là où ce serait trop serré */
+@media (min-width: 1100px) and (max-width: 1299px) {
+  .pc-cols.home .stack[data-sortable] { grid-template-columns: minmax(0, 1fr); }
+  .pc-cols.evo { grid-template-columns: 340px minmax(0, 1fr); }
+  .pc-cols.evo .pc-pane .stats.k3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pc-cols.hist { grid-template-columns: 360px minmax(0, 1fr); }
+  .exo-pc { grid-template-columns: 260px minmax(0, 1fr); }
+  .exo-pane-main .exo-main { grid-template-columns: minmax(0, 1fr); }
+  .exo-pane-main .exo-stage-col { position: static; }
+  .main.r-exercices #exo-list .list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

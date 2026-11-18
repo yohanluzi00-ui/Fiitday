@@ -6,6 +6,8 @@ const SUPABASE_URL = "https://krszgabjpswqjtypalsn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_cb_B1dUxgdE-zO1qRjp7tA_BWTYMgUs"; // clé publique (sans danger)
 const DB_KEY = "muscuapp-v1";
 const WIDE = 900; // largeur (px) à partir de laquelle la séance s'affiche en tableau
+// grand écran (PC) : pages sur plusieurs colonnes (liste à gauche, détail à droite…) ; le téléphone n'est jamais concerné
+const PC = 1100, isPC = () => window.innerWidth >= PC;
 const Native = window.AndroidBridge || null;
 const $app = document.getElementById("app");
 let flashTimer = null; // clignotement de fin de repos
@@ -567,14 +569,25 @@ window.__navReplace = hash => {
   history.replaceState({ k: navKey(), prev }, "", hash);
   navRestoring = true; flushPending(); render(); navRestoreId++; navRestoring = false; window.scrollTo(0, 0);
 };
+// PC : choisir un élément dans une liste à gauche (séance, exercice) l'affiche à droite sans changer de page ni de position ;
+// le « Retour » du navigateur ramène toujours à la page d'avant
+window.__navPane = hash => {
+  const y = window.scrollY;
+  history.replaceState(Object.assign({}, history.state), "", hash); lastHash = location.hash;
+  flushPending(); render(); window.scrollTo(0, y);
+};
+document.addEventListener("click", e => {
+  const a = e.target.closest && e.target.closest("a[data-pane]"); if (!a || e.defaultPrevented || e.button || e.ctrlKey || e.metaKey) return;
+  e.preventDefault(); window.__navPane(a.getAttribute("href"));
+});
 // « ‹ Retour » vers la page d'où l'on vient : on revient en arrière dans l'historique (donc à la même position)
 document.addEventListener("click", e => {
   const a = e.target.closest && e.target.closest("a.back"); if (!a || e.defaultPrevented || e.button) return;
   const st = history.state, href = a.getAttribute("href");
   if (st && st.prev && href && sameHash(href, st.prev)) { e.preventDefault(); history.back(); }
 }, true);
-let isWide = window.innerWidth >= WIDE;
-window.addEventListener("resize", () => { const w = window.innerWidth >= WIDE; if (w !== isWide) { isWide = w; softRender(); } });
+let isWide = window.innerWidth >= WIDE, isPcNow = isPC();
+window.addEventListener("resize", () => { const w = window.innerWidth >= WIDE, pc = isPC(); if (w !== isWide || pc !== isPcNow) { isWide = w; isPcNow = pc; softRender(); } });
 
 // rafraîchit l'écran, sauf pendant une saisie (on attend que le champ perde le focus)
 let renderWaiting = false;
@@ -660,9 +673,9 @@ function renderNow() {
     case "session": { const v = viewSession(r.args[0]); body = v.html; wide = v.wide; immersive = v.active; break; }
     case "programs": body = viewPrograms(); break;
     case "program": body = viewProgram(r.args[0], r.args[1]); break;
-    case "history": body = viewHistory(); break;
+    case "history": body = viewHistory(r.args[0]); break;
     case "progress": if (r.args[0]) { history.replaceState(history.state, "", "#/evolution/" + encodeURIComponent(r.args[0])); body = viewEvolutionDetail(r.args[0]); } else body = viewProgress(); break; // ancien lien d'un exercice
-    case "evolution": body = r.args[0] ? viewEvolutionDetail(r.args[0]) : viewEvolution(); break;
+    case "evolution": body = isPC() && !isFree() && progressData().length ? viewEvolutionPc(r.args[0]) : r.args[0] ? viewEvolutionDetail(r.args[0]) : viewEvolution(); break;
     case "calendar": body = viewCalendar(r.args[0], r.args[1]); break;
     case "body": history.replaceState(history.state, "", "#/progress"); body = viewProgress(); break; // ancienne page Corps
     case "s":
@@ -685,7 +698,7 @@ function renderNow() {
   const tab = { guide: "settings", faq: "settings", premium: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
   $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand">Fiitday</div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
-    '</nav><main class="main' + (wide ? " wide" : "") + '">' + body + "</main></div>";
+    '</nav><main class="main r-' + esc(r.name) + (wide ? " wide" : "") + '">' + body + "</main></div>";
   keepScreen(immersive);
   if (r.name === "exercices") mountExercises(r.args[0], r.args[1]);
   tick();
@@ -939,17 +952,17 @@ function variantStats(t) {
 }
 function viewHome() {
   const act = activeWorkout();
-  let h = '<div class="page-head"><div><div class="muted small">' + esc(fmtDateLong(Date.now())) + '</div><h1>Bonjour' + (firstName() ? " " + esc(firstName()) : "") + '</h1></div></div>' +
+  let h = '<div class="home-top"><div class="page-head"><div><div class="muted small">' + esc(fmtDateLong(Date.now())) + '</div><h1>Bonjour' + (firstName() ? " " + esc(firstName()) : "") + '</h1></div></div>' +
     homeStretch(act) + planBanner() +
     '<div class="home-actions"><button class="btn primary" data-act="newtpl">+ Nouveau programme</button><button class="btn" data-act="importvar">Importer</button>' +
-      '<button class="btn free-go" data-act="freestart">' + ICON.play + "Séance libre, sans programme</button></div>";
+      '<button class="btn free-go" data-act="freestart">' + ICON.play + "Séance libre, sans programme</button></div></div>";
   if (act) {
     h += '<div class="hero"><div class="small" style="opacity:.75">Séance en cours</div><div style="font-size:21px;font-weight:800;margin-top:2px">' + esc(act.templateName) + " · " + esc(vLabel(act.variantName)) + "</div>" +
       '<div class="small" style="opacity:.8;margin-top:4px">Commencée à ' + fmtTime(act.startedAt) + ' · <span class="num" data-tick="elapsed" data-id="' + act.id + '"></span></div>' +
       '<a class="btn primary block big" href="#/session/' + act.id + '">Reprendre la séance</a></div>';
   }
   const ts = templates();
-  h += '<div class="section-title">Mes programmes</div><div class="stack" data-sortable="tpl">';
+  h += '<div class="pc-cols home"><div class="pc-main"><div class="section-title">Mes programmes</div><div class="stack" data-sortable="tpl">';
   if (!ts.length) h += '<div class="card welcome"><h2>Bienvenue sur Fiitday</h2><p class="muted">Commence par créer ton premier programme avec « + Nouveau programme » (par exemple « Push » ou « Haut du corps »), puis ajoute ses séances et ses exercices. Une séance reçue d\'un ami ? Appuie sur « Importer ».</p></div>';
   for (const t of ts) {
     const st = variantStats(t);
@@ -967,7 +980,7 @@ function viewHome() {
           '<span class="vgo" aria-hidden="true">›</span></button>';
       }).join("") + '<button class="variant add" data-act="homeaddvar" data-t="' + t.id + '" aria-label="Nouvelle séance dans ' + esc(t.name) + '"><b>+ Nouvelle séance</b></button></div></div>';
   }
-  h += "</div>";
+  h += "</div></div><div class=\"pc-side\">";
   h += '<div class="section-title">Découvrir</div><div class="home-more"><button type="button" class="card" data-act="cardiohome"><b>Séance cardio</b><span class="muted small">Tapis, vélo, elliptique, rameur… avec tes indicateurs</span></button>' +
     '<a class="card" href="#/programs"><b>Programmes Fiitday</b><span class="muted small">' + (isFree() ? '<span class="tag">Premium</span> ' : "") + 'Programmes prêts à l\'emploi et circuit training</span></a></div>';
   const recent = finished().slice(0, 3);
@@ -975,7 +988,7 @@ function viewHome() {
     h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(historyRow).join("") + "</div>" +
       '<a class="home-hist" href="#/history">Voir l\'historique ›</a>';
   }
-  return h;
+  return h + "</div></div>";
 }
 // fenêtre affichée en touchant une séance sur l'accueil : « Modifier » | « C'est parti », et « Retour » en dessous
 function startChoice(t, v) {
@@ -1280,14 +1293,14 @@ function groupCard(w, blk) {
   blk.items.forEach((x, n) => { h += noteBox(w, x.e, x.i, LETTERS[n]); });
   return h + "</div></section>";
 }
-function viewSession(id) {
+function viewSession(id, pane) {
   const w = getItem(id);
   if (!w) return { html: '<a class="back" href="#/home">‹ Accueil</a><div class="card empty">Séance introuvable.</div>', wide: false, active: false };
   const active = !w.endedAt;
-  const wide = window.innerWidth >= WIDE;
-  let h = '<div class="spread"><a class="back" href="#/' + (active ? "home" : "history") + '">‹ ' + (active ? "Accueil" : "Historique") + "</a>" +
-    (active ? '<button class="btn sm primary" data-act="finish">Terminer la séance</button>' : "") + "</div>" +
-    '<div class="page-head"><div><div class="muted small">' + esc(vLabel(w.variantName)) + " · " + esc(fmtDateLong(w.startedAt)) + "</div><h1>" + esc(w.templateName) + "</h1></div>" +
+  const wide = !pane && window.innerWidth >= WIDE;
+  let h = pane ? "" : '<div class="spread"><a class="back" href="#/' + (active ? "home" : "history") + '">‹ ' + (active ? "Accueil" : "Historique") + "</a>" +
+    (active ? '<button class="btn sm primary" data-act="finish">Terminer la séance</button>' : "") + "</div>";
+  h += '<div class="page-head"><div><div class="muted small">' + esc(vLabel(w.variantName)) + " · " + esc(fmtDateLong(w.startedAt)) + "</div><h1>" + esc(w.templateName) + "</h1></div>" +
     '<div class="row"><span class="num" style="font-size:18px;font-weight:700" data-tick="elapsed" data-id="' + w.id + '"></span>' +
     (active ? '<button class="btn sm" data-act="cancel">Annuler</button>' : "") + "</div></div>";
   if (!active) { const tn = workoutTon(w), kc = workoutKcal(w);
@@ -1306,7 +1319,7 @@ function viewSession(id) {
     '<div class="rp-btns"><button class="rp-b" data-act="chronocancel">Annuler</button><button class="rp-b rp-go" data-act="chronostop">Terminer</button></div>' +
     '<button class="rp-min" data-act="chronomin">Réduire</button></div></div>' +
     '<button class="restpill gain num" data-chronopill data-act="chronomax" hidden></button>';
-  else h += '<div class="bottom-bar"><div class="inner"><button class="btn danger big" data-act="delworkout" style="flex:1">Supprimer cette séance</button></div></div>';
+  else h += pane ? '<button class="btn danger block" data-act="delworkout" style="margin-top:16px">Supprimer cette séance</button>' : '<div class="bottom-bar"><div class="inner"><button class="btn danger big" data-act="delworkout" style="flex:1">Supprimer cette séance</button></div></div>';
   return { html: h, wide, active };
 }
 function sessionCards(w) {
@@ -1347,7 +1360,7 @@ function sessionTable(w) {
   });
   return h + "</tbody></table></div>";
 }
-function currentWorkout() { const r = route(); return r.name === "session" ? getItem(r.args[0]) : null; }
+function currentWorkout() { const r = route(); return r.name === "session" ? getItem(r.args[0]) : r.name === "history" && isPC() ? histSel(r.args[0]) : null; }
 function fillFrom(set, src, type) {
   if (!src) return;
   for (const f of type === "cardio" ? [] : type === "time" ? ["sec"] : type === "dist" ? ["sec", "kg"] : type === "rep" ? ["reps"] : ["kg", "reps"]) if ((set[f] === "" || set[f] == null) && src[f] !== "" && src[f] != null) set[f] = src[f];
@@ -1446,8 +1459,8 @@ function viewPrograms() {
     planCard("Les programmes Fiitday (musculation et circuit training) sont réservés aux abonnés Premium. Tes propres programmes restent sur l'accueil.");
   const sec = (title, text) => '<div class="section-title">' + title + '</div><div class="card prog-empty"><p class="muted small">' + text + "</p></div>";
   return '<div class="page-head"><div><h1>Programmes</h1><div class="muted small">Prêts à l\'emploi, pour débutants et intermédiaires</div></div></div>' +
-    sec("Musculation", "Des programmes complets, séance par séance, à ajouter en un appui à tes programmes.") +
-    sec("Circuit training", "Des circuits à faire à la salle ou à la maison, avec ou sans matériel.") +
+    '<div class="pc-cols progs"><div>' + sec("Musculation", "Des programmes complets, séance par séance, à ajouter en un appui à tes programmes.") + "</div><div>" +
+    sec("Circuit training", "Des circuits à faire à la salle ou à la maison, avec ou sans matériel.") + "</div></div>" +
     '<p class="muted small" style="margin-top:14px">Tes propres programmes se créent et se modifient depuis l\'<a href="#/home">Accueil</a>.</p>';
 }
 function exFields(e, k, letter, inGroup) {
@@ -1805,11 +1818,11 @@ function stretchCard(w, onHome) {
 }
 
 /* ================= Écran : historique ================= */
-function historyRow(w) {
+function historyRow(w, sel) {
   const done = w.exercises.reduce((n, e) => n + e.sets.filter(s => s.done || setHasData(s, e.type)).length, 0);
   // glisser la ligne de droite à gauche fait apparaître « Supprimer »
   return '<div class="swipe"><button type="button" class="swipe-del" data-act="swipedel" data-id="' + esc(w.id) + '" tabindex="-1">Supprimer</button>' +
-    '<a class="swipe-row" draggable="false" href="#/session/' + w.id + '"><div><b>' + esc(w.templateName) + '</b> <span class="muted">· ' + esc(vLabel(w.variantName)) + '</span><div class="muted small">' +
+    '<a class="swipe-row' + (sel === w.id ? " pc-on" : "") + '" draggable="false" href="#/' + (sel !== undefined ? "history" : "session") + "/" + w.id + '"' + (sel !== undefined ? " data-pane" : "") + (sel === w.id ? ' aria-current="true"' : "") + '><div><b>' + esc(w.templateName) + '</b> <span class="muted">· ' + esc(vLabel(w.variantName)) + '</span><div class="muted small">' +
     esc(fmtDate(w.startedAt)) + " · " + (w.cardio ? w.exercises.length + " machine" + (w.exercises.length > 1 ? "s" : "") + (workoutKcal(w) ? " · " + fmtNum(Math.round(workoutKcal(w))) + " kcal" : "") : w.exercises.length + " exercices · " + done + " séries" + (workoutTon(w) ? " · " + fmtTon(workoutTon(w)) : "")) + '</div></div><span class="muted small num">' + fmtDur((w.endedAt || Date.now()) - w.startedAt) + "</span></a></div>";
 }
 // glisser pour supprimer : la ligne suit le doigt (ou la souris) horizontalement ; le défilement vertical reste normal
@@ -1850,20 +1863,25 @@ $app.addEventListener("click", e => {
   const justSwiped = Date.now() - swipedAt < 350;
   if (justSwiped || row === swOpen) { e.preventDefault(); e.stopPropagation(); if (!justSwiped) swClose(row); }
 }, true);
-function viewHistory() {
-  const every = finished(), cut = Date.now() - FREE_HIST_DAYS * DAY, ws = isFree() ? every.filter(w => w.startedAt >= cut) : every, hidden = every.length - ws.length;
+// séances visibles dans l'historique (version gratuite : les 30 derniers jours)
+function histList() { const every = finished(), cut = Date.now() - FREE_HIST_DAYS * DAY; return { every, ws: isFree() ? every.filter(w => w.startedAt >= cut) : every }; }
+// PC : séance affichée à droite de l'historique (celle de l'adresse, sinon la plus récente)
+function histSel(id) { const ws = histList().ws; return ws.find(w => w.id === id) || ws[0] || null; }
+function viewHistory(id) {
+  const { every, ws } = histList(), hidden = every.length - ws.length, pc = isPC(), sel = pc ? histSel(id) : null;
   const head = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("history");
   const more = hidden ? planCard(hidden + " séance" + (hidden > 1 ? "s" : "") + " de plus de " + FREE_HIST_DAYS + " jours " + (hidden > 1 ? "sont gardées" : "est gardée") + ". Avec Premium, tu revois tout ton historique.") : "";
   if (!ws.length) return head + (hidden ? more : '<div class="card empty">Aucune séance terminée pour l\'instant.</div>');
-  let h = head + '<p class="muted small" style="margin:0 2px 4px">' + ws.length + " séance" + (ws.length > 1 ? "s" : "") + " terminée" + (ws.length > 1 ? "s" : "") + ". Touche une séance pour la voir ou la corriger, glisse-la vers la gauche pour la supprimer.</p>", month = "";
+  let h = (pc ? head + '<div class="pc-cols hist"><div class="pc-main">' : head) + '<p class="muted small" style="margin:0 2px 4px">' + ws.length + " séance" + (ws.length > 1 ? "s" : "") + " terminée" + (ws.length > 1 ? "s" : "") + ". " + (pc ? "Clique une séance pour la voir ou la corriger à droite" : "Touche une séance pour la voir ou la corriger") + ", glisse-la vers la gauche pour la supprimer.</p>", month = "";
   ws.slice(0, histLimit).forEach(w => {
     const m = dfMonth.format(w.startedAt);
     if (m !== month) { if (month) h += "</div>"; month = m; h += '<div class="section-title">' + esc(m) + '</div><div class="list">'; }
-    h += historyRow(w);
+    h += historyRow(w, sel ? sel.id : undefined);
   });
   h += "</div>";
   // longue liste : affichée par tranches de 100
   if (ws.length > histLimit) h += '<button class="btn block" data-act="histmore" style="margin-top:12px">Afficher les séances plus anciennes (' + (ws.length - histLimit) + ")</button>";
+  if (pc && sel) return h + more + '</div><div class="pc-side pc-pane">' + viewSession(sel.id, true).html + "</div></div>";
   return h + more;
 }
 let histLimit = 100;
@@ -1928,7 +1946,7 @@ function viewProgress() {
   const pct = Math.min(100, Math.round(100 * thisWeek / goal));
   const weekCard = '<div class="card stat"><div class="muted small">Cette semaine</div><div class="v num">' + thisWeek + " <small>/ " + goal + '</small></div><div class="meter" role="img" aria-label="' + thisWeek + " séances sur " + goal + '"><span style="width:' + pct + '%"></span></div></div>';
   if (isFree()) return h + '<div class="stats k1">' + weekCard + "</div>" + planCard("En version gratuite, tu vois ta semaine en cours. Avec Premium : le mois, le total, les semaines d'affilée, le temps à la salle, le tonnage et les graphiques.");
-  h += '<div class="stats k3">' + weekCard +
+  h += '<div class="pc-tiles"><div class="stats k3">' + weekCard +
     '<div class="card stat"><div class="muted small">Ce mois-ci</div><div class="v num">' + thisMonth + "</div></div>" +
     '<div class="card stat"><div class="muted small">Au total</div><div class="v num">' + ws.length + "</div></div>" +
     '<div class="card stat"><div class="muted small">Semaines objectif atteint</div><div class="v num">' + streak + " <small>d'affilée</small></div></div>" +
@@ -1938,7 +1956,7 @@ function viewProgress() {
   ws.forEach(w => { const k = weekStart(w.startedAt), d = workoutDur(w), tn = workoutTon(w); durWeek[k] = (durWeek[k] || 0) + d; tonWeek[k] = (tonWeek[k] || 0) + tn; durAll += d; tonAll += tn; });
   h += '<div class="stats" style="margin-top:10px">' +
     '<div class="card stat"><div class="muted small">Temps de sport cette semaine</div><div class="v num">' + fmtDurH(durWeek[cur] || 0) + "</div></div>" +
-    '<div class="card stat"><div class="muted small">Temps de sport depuis le début</div><div class="v num">' + fmtDurH(durAll) + '</div><div class="muted small">' + (ws.length ? "moyenne " + fmtDurH(durAll / ws.length) + " par séance" : "") + "</div></div></div>";
+    '<div class="card stat"><div class="muted small">Temps de sport depuis le début</div><div class="v num">' + fmtDurH(durAll) + '</div><div class="muted small">' + (ws.length ? "moyenne " + fmtDurH(durAll / ws.length) + " par séance" : "") + "</div></div></div></div>";
   // séances par semaine (8 dernières), avec la ligne d'objectif
   const weeks = []; let t = cur; for (let k = 0; k < 8; k++) { weeks.unshift(t); t = prevWeek(t); }
   const SM = statsMetric, src = SM === "time" ? durWeek : SM === "ton" ? tonWeek : perWeek, fmtV = v => SM === "time" ? fmtDurH(v) : SM === "ton" ? fmtTon(v) : String(v);
@@ -1957,12 +1975,12 @@ function viewProgress() {
   if (SM === "n") svg += '<line class="goal" x1="0" x2="' + W + '" y1="' + y(goal) + '" y2="' + y(goal) + '"></line><text x="4" y="' + (y(goal) - 6) + '">Objectif ' + goal + "</text>";
   svg += "</svg>";
   const segS = [["n", "Séances"], ["time", "Temps"], ["ton", "Tonnage"]].map(([k, l]) => '<button type="button" data-act="statm" data-v="' + k + '"' + (k === SM ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + l + "</button>").join("");
-  h += '<div class="card" style="margin-top:12px"><div class="seg evo-seg stat-seg" role="group" aria-label="Afficher par semaine">' + segS + '</div><div class="muted small" style="font-weight:600;margin:10px 0 8px">' + (SM === "time" ? "Temps de sport par semaine" : SM === "ton" ? "Tonnage par semaine" : "Séances par semaine") + "</div>" + svg + "</div>";
+  h += '<div class="pc-cols stats"><div class="pc-main"><div class="card" style="margin-top:12px"><div class="seg evo-seg stat-seg" role="group" aria-label="Afficher par semaine">' + segS + '</div><div class="muted small" style="font-weight:600;margin:10px 0 8px">' + (SM === "time" ? "Temps de sport par semaine" : SM === "ton" ? "Tonnage par semaine" : "Séances par semaine") + "</div>" + svg + "</div>";
   // par programme
   const byTpl = {};
   ws.forEach(w => { const k = w.templateId; (byTpl[k] = byTpl[k] || { name: w.templateName, n: 0, last: 0 }); byTpl[k].n++; byTpl[k].last = Math.max(byTpl[k].last, w.startedAt); const t = getItem(k); if (t) byTpl[k].name = t.name; });
-  h += '<div class="section-title">Par programme</div><div class="list">' + Object.values(byTpl).sort((a, b) => b.n - a.n).map(x =>
-    '<div><div><b>' + esc(x.name) + '</b><div class="muted small">Dernière : ' + esc(fmtDate(x.last)) + '</div></div><span class="num"><b>' + x.n + '</b> <span class="muted small">séance' + (x.n > 1 ? "s" : "") + "</span></span></div>").join("") + "</div>";
+  h += '</div><div class="pc-side"><div class="section-title">Par programme</div><div class="list">' + Object.values(byTpl).sort((a, b) => b.n - a.n).map(x =>
+    '<div><div><b>' + esc(x.name) + '</b><div class="muted small">Dernière : ' + esc(fmtDate(x.last)) + '</div></div><span class="num"><b>' + x.n + '</b> <span class="muted small">séance' + (x.n > 1 ? "s" : "") + "</span></span></div>").join("") + "</div></div></div>";
   return h;
 }
 /* ================= Stats : évolution d'un exercice ================= */
@@ -2040,12 +2058,24 @@ function evoListHtml() {
   return '<div class="list">' + hits.map(c => {
     const p = c.p, m = evoMetrics(p)[0], vs = p.entries.map(x => evoVal(x, m)).filter(v => v != null);
     const M = evoDef(m), rec = vs.length ? (M.low ? Math.min(...vs) : Math.max(...vs)) : null;
-    return '<a href="#/evolution/' + encodeURIComponent(p.key) + '"><div><b>' + esc(p.name) + "</b>" + (c.dup ? ' <span class="muted small">· ' + c.dup + "</span>" : "") +
+    return '<a href="#/evolution/' + encodeURIComponent(p.key) + '"' + (evoSel ? " data-pane" : "") + (p.key === evoSel ? ' class="pc-on" aria-current="true"' : "") + '><div><b>' + esc(p.name) + "</b>" + (c.dup ? ' <span class="muted small">· ' + c.dup + "</span>" : "") +
       '<div class="muted small">' + p.entries.length + " séance" + (p.entries.length > 1 ? "s" : "") + " · " + esc(dfDay.format(c.last)) + "</div></div>" +
       '<span class="evo-r">' + sparkline(vs.slice(-12), M.low) + '<span class="small"><b>' + evoFmt(m, rec) + '</b> <span class="muted">' + (p.type === "cardio" && m === "dur" ? "plus longue" : "record") + "</span></span></span></a>";
   }).join("") + "</div>";
 }
+let evoSel = null; // exercice affiché à droite de la liste (PC)
+function viewEvolutionPc(key) {
+  const all_ = progressData(), hits = evoSearch(evo.q), p = all_.find(x => x.key === key) || (hits[0] && hits[0].p) || all_[0];
+  evoSel = p ? p.key : null;
+  const detail = p ? viewEvolutionDetail(p.key, true) : "";
+  evoSel = p ? p.key : null;
+  return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + '<div class="pc-cols evo"><div class="pc-main">' +
+    '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
+    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe à droite. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div></div>" +
+    '<div class="pc-side pc-pane">' + detail + "</div></div>";
+}
 function viewEvolution() {
+  evoSel = null;
   let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution");
   if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.");
   if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>';
@@ -2132,11 +2162,11 @@ function evoFit() {
   evoPick(evoCur.k);
 }
 window.addEventListener("resize", () => { if (document.querySelector(".evo-svg")) evoFit(); });
-function viewEvolutionDetail(key) {
-  evoCur = null;
+function viewEvolutionDetail(key, pane) {
+  evoCur = null; if (!pane) evoSel = null;
   const all_ = progressData(); let p = all_.find(x => x.key === key);
   if (!p && key && !/^lib:/.test(key)) { const [nm, ty] = String(key).split("|"), lb = libFor(nm); if (lb) p = all_.find(x => x.key === "lib:" + lb.id + "|" + ty); } // ancien lien (nom de l'exercice)
-  const back = '<a class="back" href="#/evolution">‹ Évolution</a>';
+  const back = pane ? "" : '<a class="back" href="#/evolution">‹ Évolution</a>';
   if (isFree()) return back + planCard("La courbe de chaque exercice est réservée à Premium.");
   if (!p) return back + '<div class="card empty">Pas encore de données pour cet exercice.</div>';
   const ms = evoMetrics(p), m = ms.includes(evo.m[key]) ? evo.m[key] : ms[0], M = evoDef(m);
@@ -3226,7 +3256,7 @@ function viewSettings() {
   const ver = "Fiitday " + (num_ && num_ !== "1.0-dev" ? "V" + num_ : "(version de développement)");
   const fr = dataLocked(), lk = fr ? " locked-btn" : "", li = fr ? LOCK : "";
   const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Restaurer et le code de transfert sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
-  return '<div class="page-head"><h1>Réglages</h1></div><div class="stack">' + planSettings() +
+  return '<div class="page-head"><h1>Réglages</h1></div><div class="stack set-stack">' + planSettings() +
     '<div class="card"><b>Apparence</b><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
     '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
       return '<button class="swatch' + (on ? " on" : "") + '" aria-pressed="' + on + '" data-act="set" data-k="accent" data-val="' + k + '"><i style="background:linear-gradient(135deg,' + c + ')"></i>' + l + "</button>"; }).join("") + "</div></div>" +
@@ -3622,7 +3652,7 @@ $app.addEventListener("click", async e => {
     } break;
     case "delworkout": if (w) {
       if (!await ask({ title: "Supprimer cette séance ?", text: "Elle disparaîtra de l'historique.", ok: "Supprimer", danger: true })) return;
-      remove(w.id); go("history");
+      remove(w.id); if (route().name === "history") { if (route().args[0]) go("history"); else render(); } else go("history");
     } break;
 
     /* programmes */

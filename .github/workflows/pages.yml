@@ -3,7 +3,7 @@ name: Publier la version web
 on:
   push:
     branches: [main]
-    paths-ignore: ['README.md', 'supabase/**', 'android/**', '.github/workflows/build-apk.yml']
+    paths-ignore: ['README.md', 'supabase/**', '.github/workflows/build-apk.yml']
   workflow_dispatch:
 permissions:
   contents: read

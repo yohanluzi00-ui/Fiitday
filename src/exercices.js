@@ -1997,6 +1997,30 @@ function guideHtml() {
     '<p class="muted small guide-src">Sources : ACSM, recommandations sur la souplesse (position de 2011, mise à jour 2021) · Sports Medicine 2025, dose d\'étirement et souplesse (189 études) · Behm et al. 2016, étirements avant l\'effort · Afonso et al. 2021, étirements et récupération · Lauersen et al. 2014, prévention des blessures.</p>';
 }
 let api = null, bound = false;
+// PC (grand écran) : la liste des exercices reste à gauche de la fiche ; choisir un exercice l'affiche sans quitter la page
+const PANE_W = 1100;
+let paneScroll = 0;
+function paneList(mode, cur) {
+  const html = mode === "cardio" ? cardioListHtml() : mode === "etir" ? stretchListHtml() : listHtml();
+  return html.replace(/<a href="#\/exercices\/([a-z0-9-]+)"/g, (m, id) => '<a href="#/exercices/' + id + (mode === "cardio" ? "/cardio" : "") + '" data-pane' + (id === cur ? ' class="pc-on" aria-current="true"' : "") + "");
+}
+function addPane(root, ex) {
+  if (window.innerWidth < PANE_W || (api && api.back)) return;
+  const mode = ui.mode, et = mode === "etir", cd = mode === "cardio";
+  const pane = document.createElement("div"); pane.className = "exo-pane";
+  pane.innerHTML = (cd ? "" : '<input class="f exo-q" id="exo-pq" type="search" placeholder="' + (et ? "Rechercher un étirement" : "Rechercher un exercice") + '" autocomplete="off" aria-label="Rechercher" value="' + esc(et ? ui.qe : ui.q) + '">' +
+    '<div class="exo-chips" role="group" aria-label="Filtrer">' + (et ? ZONES.map(([z, n]) => '<button class="chip-btn" data-pz="' + z + '" aria-pressed="' + (ui.zone === z) + '">' + n + "</button>") : GROUPS.map(([g, n]) => '<button class="chip-btn" data-pg="' + g + '" aria-pressed="' + (ui.group === g) + '">' + n + "</button>")).join("") + "</div>") +
+    '<div class="exo-pane-list">' + paneList(mode, ex.id) + "</div>";
+  const main = document.createElement("div"); main.className = "exo-pane-main";
+  while (root.firstChild) main.appendChild(root.firstChild);
+  const wrap = document.createElement("div"); wrap.className = "exo-pc"; wrap.append(pane, main); root.appendChild(wrap);
+  const list = pane.querySelector(".exo-pane-list"), redo = () => { list.innerHTML = paneList(mode, ex.id); };
+  const q = pane.querySelector("#exo-pq"); if (q) q.addEventListener("input", () => { if (et) ui.qe = q.value.trim(); else ui.q = q.value.trim(); redo(); });
+  pane.querySelectorAll("[data-pg],[data-pz]").forEach(b => b.addEventListener("click", () => { if (b.dataset.pz) ui.zone = b.dataset.pz; else ui.group = b.dataset.pg; pane.querySelectorAll(et ? "[data-pz]" : "[data-pg]").forEach(x => x.setAttribute("aria-pressed", String(x === b))); redo(); list.scrollTop = 0; }));
+  list.addEventListener("scroll", () => { paneScroll = list.scrollTop; }, { passive: true });
+  list.scrollTop = paneScroll;
+  const on = list.querySelector(".pc-on"); if (on) { const r = on.getBoundingClientRect(), lr = list.getBoundingClientRect(); if (r.top < lr.top || r.bottom > lr.bottom) on.scrollIntoView({ block: "center" }); }
+}
 export function mount(root, id, appApi, arg) {
   api = appApi;
   const zoneArg = ZONES.some(z => z[0] === arg) ? arg : null;
@@ -2009,6 +2033,7 @@ export function mount(root, id, appApi, arg) {
   ui.mode = st ? "etir" : cd ? "cardio" : "muscu";
   if (st && zoneArg) { ui.zone = zoneArg; ui.qe = ""; }
   root.innerHTML = st ? stretchDetailHtml(ex) : cd ? cardioDetailHtml(ex) : detailHtml(ex);
+  addPane(root, ex);
   const stage = root.querySelector("#exo-stage"); view.stage = stage; view.pill = root.querySelector("#exo-pill"); view.phase = "";
   initScene();
   if (G.failed) { stage.insertAdjacentHTML("beforeend", '<div class="exo-fallback">L\'animation 3D n\'est pas disponible sur cet appareil.</div>'); }

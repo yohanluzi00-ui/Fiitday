@@ -49,7 +49,7 @@ Application personnelle pour noter mes performances pendant mes séances de musc
 À chaque modification poussée sur `main`, l'action GitHub « Construire l'APK » compile l'appli, la signe et publie une **Release** (`Fiitday-1.N.apk`).
 
 - Les secrets `KEYSTORE_B64` et `KEYSTORE_PASSWORD` doivent exister dans Settings › Secrets and variables › Actions. Garde une copie de la clé en lieu sûr : sans la même clé, une mise à jour ne peut pas s'installer par-dessus l'appli existante.
-- Dans **Obtainium** : Ajouter une appli › URL `https://github.com/yohanluzi00-ui/muscuapp`.
+- Dans **Obtainium** : Ajouter une appli › URL `https://github.com/yohanluzi00-ui/Fiitday`.
 
 En cas d'échec de compilation, le journal est poussé sur la branche `ci-logs`.
 

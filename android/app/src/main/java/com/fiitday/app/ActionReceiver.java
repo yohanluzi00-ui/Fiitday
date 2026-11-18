@@ -1,4 +1,4 @@
-package com.muscuapp.app;
+package com.fiitday.app;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

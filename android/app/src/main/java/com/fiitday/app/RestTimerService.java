@@ -1,4 +1,4 @@
-package com.muscuapp.app;
+package com.fiitday.app;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -39,8 +39,8 @@ public class RestTimerService extends Service {
     private static final String CH_END = "repos_fin";
     private static final String CH_WATCH_OLD = "montre_depart"; // V1.40 : notification de départ, retirée
     private static final String CH_END_WATCH = "montre_fin";
-    static final String ACT_SKIP = "com.muscuapp.app.SKIP_REST";
-    static final String ACT_STOP = "com.muscuapp.app.STOP_CHRONO";
+    static final String ACT_SKIP = "com.fiitday.app.SKIP_REST";
+    static final String ACT_STOP = "com.fiitday.app.STOP_CHRONO";
     private static final long[] PATTERN = new long[]{0, 350, 150, 350};
     /** heure de fin (ms) du dernier repos ou objectif signalé par une notification : l'appli ne re-sonne pas en revenant */
     static volatile long alertedEnd = 0;

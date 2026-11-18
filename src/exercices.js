@@ -1938,7 +1938,10 @@ function seqForEx(ex) {
   const f = MUSCU.filter(matches), pick = list => GROUPS.slice(2).flatMap(([g]) => list.filter(e => groupOf(e) === g));
   const ordered = pick(f); return ordered.includes(ex) ? ordered : pick(MUSCU).filter(e => groupOf(e) === groupOf(ex));
 }
-const swipeHint = (k, n, what) => n > 1 ? '<div class="exo-swipe"><span aria-hidden="true">‹</span><b>' + (k + 1) + " / " + n + "</b><span>Glisse la fiche pour changer d'" + what + '</span><span aria-hidden="true">›</span></div>' : "";
+// fiche précédente / suivante : glisser la fiche (téléphone), cliquer ‹ › ou les flèches ← → du clavier (ordinateur)
+const swipeHint = (k, n, what) => n > 1 ? '<div class="exo-swipe"><button type="button" class="exo-step" data-step="-1" aria-label="' + (what === "étirement" ? "Étirement précédent" : what === "machine" ? "Machine précédente" : "Exercice précédent") + '"' + (k ? "" : " disabled") + ">‹</button><b>" + (k + 1) + " / " + n + "</b>" +
+  '<span class="exo-swipe-t"><span class="t-touch">Glisse la fiche pour changer d\'' + what + '</span><span class="t-mouse">Clique sur ‹ › ou utilise les flèches ← → du clavier</span></span>' +
+  '<button type="button" class="exo-step" data-step="1" aria-label="' + (what === "étirement" ? "Étirement suivant" : what === "machine" ? "Machine suivante" : "Exercice suivant") + '"' + (k < n - 1 ? "" : " disabled") + ">›</button></div>" : "";
 let slideDir = 0; // sens du dernier glissé : la nouvelle fiche arrive de ce côté
 const slideCls = () => { const c = slideDir > 0 ? " from-right" : slideDir < 0 ? " from-left" : ""; slideDir = 0; return c; };
 // suite d'étirements parcourue en glissant : la liste filtrée en cours, sinon la zone de l'étirement
@@ -2054,6 +2057,7 @@ export function mount(root, id, appApi, arg) {
   root.addEventListener("touchstart", e => { const t = e.touches[0]; t0 = e.touches.length === 1 && !e.target.closest("#exo-stage") ? { x: t.clientX, y: t.clientY } : null; }, { passive: true });
   root.addEventListener("touchend", e => { if (!t0) return; const t = e.changedTouches[0], dx = t.clientX - t0.x, dy = t.clientY - t0.y; t0 = null; if (Math.abs(dx) > 60 && Math.abs(dx) > 1.8 * Math.abs(dy)) step(dx < 0 ? 1 : -1); }, { passive: true });
   keyStep = step;
+  root.querySelectorAll("[data-step]").forEach(b => b.addEventListener("click", () => step(+b.dataset.step)));
 }
 let keyStep = null;
 document.addEventListener("keydown", e => {

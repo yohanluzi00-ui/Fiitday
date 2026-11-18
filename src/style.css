@@ -514,9 +514,17 @@ a.chip-btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* fiches : repère « 2 / 8 · glisse » et arrivée de la fiche du côté du glissé */
 .exo-swipe { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: -4px 0 -6px; }
 .exo-swipe b { font-family: var(--display); color: var(--ink); font-variant-numeric: tabular-nums; }
-.exo-swipe span[aria-hidden] { font-size: 18px; line-height: 1; color: var(--accent); }
-.exo-swipe span:not([aria-hidden]) { flex: 1; }
-@media (hover: hover) and (pointer: fine) { .exo-swipe span:not([aria-hidden])::after { content: " (ou flèches ← →)"; } }
+.exo-step { font: inherit; font-size: 18px; line-height: 1; color: var(--accent); background: none; border: 0; padding: 0; margin: 0; min-height: 0; cursor: pointer; border-radius: 6px; }
+.exo-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.exo-swipe-t { flex: 1; }
+.exo-swipe .t-mouse { display: none; }
+/* ordinateur (souris) : les flèches ‹ › sont de vrais boutons, plus grands, et le texte l'indique */
+@media (hover: hover) and (pointer: fine) {
+  .exo-swipe .t-touch { display: none; } .exo-swipe .t-mouse { display: inline; }
+  .exo-step { font-size: 22px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--soft); }
+  .exo-step:not(:disabled):hover { background: var(--accent); color: #fff; }
+  .exo-step:disabled { opacity: .3; cursor: default; }
+}
 .exo-fiche.from-right { animation: fiche-in-r .28s ease both; }
 .exo-fiche.from-left { animation: fiche-in-l .28s ease both; }
 @keyframes fiche-in-r { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }

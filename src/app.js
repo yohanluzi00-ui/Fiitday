@@ -279,7 +279,8 @@ function lastPerfCompute(w, ex) {
   for (const x of before) {
     if (x.templateId === w.templateId && x.variantId === w.variantId) {
       const e = x.exercises.find(e => e.exId === ex.exId);
-      if (e && exHasData(e)) return { w: x, e, same: true };
+      const la = e && exLib(e), lb = exLib(ex); // renommé avec le nom d'un autre exercice de la liste : ce n'est plus le même exercice
+      if (e && exHasData(e) && !(la && lb && la.id !== lb.id)) return { w: x, e, same: true };
     }
   }
   const n = exKey(ex);

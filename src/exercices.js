@@ -1836,17 +1836,19 @@ const isCardio = ex => CARDIO.includes(ex);
 const ZONES = [["tous", "Tous"], ["haut", "Haut du corps"], ["milieu", "Milieu du corps"], ["bas", "Bas du corps"]];
 const zoneName = z => (ZONES.find(x => x[0] === z) || ["", ""])[1];
 const holdTxt = ex => ex.hold + " s" + (ex.side ? " de chaque côté" : "");
+// recherche : tous les mots tapés, dans n'importe quel ordre (« poulie nuque » trouve « … à la poulie au-dessus de la tête »)
+const hasAll = (text, q) => { const t = norm(text), ws = norm(q).split(/[^a-z0-9]+/).filter(Boolean); return ws.every(w => t.includes(w)); };
 function matches(ex) {
   const mus = ex.p.concat(ex.s);
   if (ui.group === "maison") { if (!atHome(ex)) return false; }
   else if (ui.group !== "tous" && groupOf(ex) !== ui.group && !(ui.group !== "hyrox" && ui.group !== "cardio" && !ex.cat && ex.p.some(mm => MUSCLES[mm][1] === ui.group))) return false;
   if (!ui.q) return true;
-  return norm([ex.n, ex.gear, (ex.al || []).join(" "), ex.cat || "", mus.map(mm => MUSCLES[mm][0]).join(" ")].join(" ")).includes(norm(ui.q));
+  return hasAll([ex.n, ex.gear, (ex.al || []).join(" "), ex.cat || "", mus.map(mm => MUSCLES[mm][0]).join(" ")].join(" "), ui.q);
 }
 function matchesStretch(ex) {
   if (ui.zone !== "tous" && ex.zone !== ui.zone) return false;
   if (!ui.qe) return true;
-  return norm([ex.n, ex.gear, (ex.al || []).join(" "), zoneName(ex.zone), ex.p.concat(ex.s).map(mm => MUSCLES[mm][0]).join(" ")].join(" ")).includes(norm(ui.qe));
+  return hasAll([ex.n, ex.gear, (ex.al || []).join(" "), zoneName(ex.zone), ex.p.concat(ex.s).map(mm => MUSCLES[mm][0]).join(" ")].join(" "), ui.qe);
 }
 function listHtml() {
   const v = MUSCU.filter(matches);

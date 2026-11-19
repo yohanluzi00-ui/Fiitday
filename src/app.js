@@ -164,11 +164,12 @@ const CARDIO_MACH = {
 };
 const CARDIO_BASE = ["dist", "cal", "fc"];
 const CARDIO_MAX_OWN = 10; // indicateurs perso par machine
+const ownCvOf = e => { if (e.machine && CARDIO_MACH[e.machine]) return null; const r = typeof ownEntry === "function" && e.name ? ownEntry(e.name) : null; return r && Array.isArray(r.cv) ? r.cv.filter(k => CARDIO_M[k]) : null; };
 const cardioKey = e => (e.machine && CARDIO_MACH[e.machine] ? e.machine : "n:" + norm(e.name || "").slice(0, 40));
 function cardioCustom(key) { const c = settings().cardioCustom, l = c && typeof c === "object" ? c[key] : null; return Array.isArray(l) ? l.filter(x => x && /^c[a-z0-9]{2,16}$/.test(x.k) && x.n) : []; }
 const cvOwn = (k, d) => Object.assign({ k, n: String(d.n).slice(0, 30), s: String(d.n).slice(0, 14), u: String(d.u || "").slice(0, 12), own: true });
 function cardioDefs(e) {
-  return (CARDIO_MACH[e.machine] || CARDIO_BASE).map(k => Object.assign({ k }, CARDIO_M[k])).concat(cardioCustom(cardioKey(e)).map(x => cvOwn(x.k, x)));
+  return (CARDIO_MACH[e.machine] || ownCvOf(e) || CARDIO_BASE).map(k => Object.assign({ k }, CARDIO_M[k])).concat(cardioCustom(cardioKey(e)).map(x => cvOwn(x.k, x)));
 }
 // indicateurs retirés par l'utilisateur pour une machine (ils restent proposés dans « + Ajouter un indicateur »)
 function cardioHidden(key) { const h = settings().cardioHidden, l = h && typeof h === "object" ? h[key] : null; return Array.isArray(l) ? l.filter(k => typeof k === "string") : []; }
@@ -292,6 +293,11 @@ function lastPerfCompute(w, ex) {
       if (x.templateId !== w.templateId || x.variantId !== w.variantId) continue;
       const e = x.exercises.find(e => exKey(e) === n && e.type === ex.type); // exercice ajouté pendant une séance d'avant
       if (e && exHasData(e)) return { w: x, e, same: true };
+    }
+    if (ex.sw) for (const x of before) { // exercice choisi en renommant : la dernière fois dans tout le programme
+      if (x.templateId !== w.templateId) continue;
+      const e = x.exercises.find(e => exKey(e) === n && e.type === ex.type);
+      if (e && exHasData(e)) return { w: x, e, same: false };
     }
     return null;
   }
@@ -712,9 +718,116 @@ function mountExercises(id, arg) {
   if (!id || id === "etirements" || id === "cardio") { exoReturn = null; stretchSeq = null; } // liste ouverte directement : retour normal
   const back = id && exoReturn ? { href: exoReturn, label: /^#\/session/.test(exoReturn) ? "Retour à la séance" : /^#\/(home)?$/.test(exoReturn) ? "Accueil" : "Retour au programme" } : null;
   const ready = exoMod ? Promise.resolve(exoMod) : import("./exercices.js?v=" + encodeURIComponent(window.APP_BUILD || "")).then(m => (exoMod = m));
-  ready.then(m => { if (root.isConnected) m.mount(root, id && /^[a-z0-9-]{1,60}$/.test(id) ? id : null, { add: addLibraryExercise, back, seq: stretchSeq, cardioStart, cardioInfo }, /^[a-z]{1,12}$/.test(arg || "") ? arg : null); })
+  ready.then(m => { if (root.isConnected) m.mount(root, id && /^[a-z0-9-]{1,60}$/.test(id) ? id : null, { add: addLibraryExercise, back, seq: stretchSeq, cardioStart, cardioInfo, own: { list: ownList, create: ownCreate, edit: ownEdit, del: ownDelete } }, /^[a-z]{1,12}$/.test(arg || "") ? arg : null); })
     .catch(err => { console.error(err); if (root.isConnected) root.innerHTML = '<div class="page-head"><h1>Exercices</h1></div><div class="card empty">Impossible de charger les exercices' + (navigator.onLine === false ? " sans connexion la première fois" : "") + '. Réessaie dans un instant.</div>'; });
 }
+// fenêtre soignée (même modèle que la bienvenue) pour confirmer un changement important
+function fancyAsk(o) {
+  return new Promise(res => {
+    const d = document.createElement("div"); d.className = "modal";
+    d.innerHTML = '<div class="modal-box welcome-box fancy" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '"><img class="welcome-logo" src="icon-192.png" alt="" width="64" height="64"><h3>' + esc(o.title) + "</h3>" + o.html +
+      '<div class="modal-btns"><button class="btn" data-r="0">' + esc(o.cancel || "Annuler") + '</button><button class="btn ' + (o.danger ? "strong" : "primary") + '" data-r="1">' + esc(o.ok) + "</button></div></div>";
+    document.body.appendChild(d);
+    d.addEventListener("click", e => { if (e.target === d) { d.remove(); res(false); return; } const b = e.target.closest("[data-r]"); if (b) { d.remove(); res(b.dataset.r === "1"); } });
+  });
+}
+// où un exercice perso est utilisé : séances de programme et séances faites
+function ownUses(name) {
+  const nn = norm(name), vars = [];
+  templates().forEach(t => t.variants.forEach(v => { if (v.exercises.some(e => !exLib(e) && norm(e.name) === nn)) vars.push(t.name + " · " + vLabel(v.name)); }));
+  const done = all("workout").filter(w => w.exercises.some(e => !exLib(e) && norm(e.name) === nn && exHasData(e))).length;
+  return { vars, done };
+}
+const TYPE_LABEL = { reps: "Poids × reps", rep: "Reps uniquement", time: "Temps", dist: "Distance", cardio: "Indicateurs au choix" };
+const OWN_CV = ["dist", "vit", "incl", "res", "cad", "watts", "spm", "etages", "marches", "niv", "t500", "cpm", "cal", "fc"];
+// création / modification d'un exercice perso : nom, ce que tu notes (comme en séance), indicateurs au choix comme pour le cardio
+function askOwnEx(cur) {
+  return new Promise(res => {
+    const used = cur ? ownUses(cur.n).done > 0 : false, key = cur ? cardioKey({ name: cur.n }) : "";
+    let type = cur ? cur.t : "reps", load = cur ? !!cur.load : false, cv = cur && Array.isArray(cur.cv) ? cur.cv.slice() : CARDIO_BASE.slice();
+    let custom = cur ? cardioCustom(key).map(x => ({ k: x.k, n: x.n, u: x.u, on: true })) : [];
+    const d = document.createElement("div"); d.className = "modal sheet";
+    const draw = () => {
+      const typeBtns = TYPE_CHOICES.map(([k, l, s]) => '<button type="button" class="btn block choice' + (type === k ? " on" : "") + '" data-ty="' + k + '" aria-pressed="' + (type === k) + '"' + (used && type !== k ? " disabled" : "") + "><b>" + esc(k === "cardio" ? "Indicateurs au choix" : l) + '</b><span class="choice-desc">' + esc(k === "cardio" ? "Durée, puis les indicateurs que tu choisis (distance, calories, fréquence cardiaque, les tiens…)" : s) + "</span></button>").join("");
+      const ind = type !== "cardio" ? "" : '<div class="own-cv"><div class="small muted" style="margin:10px 0 6px">Indicateurs notés (la durée est toujours notée)</div>' +
+        OWN_CV.map(k => '<label class="own-chk"><input type="checkbox" data-cv="' + k + '"' + (cv.includes(k) ? " checked" : "") + "><span>" + esc(CARDIO_M[k].n) + (CARDIO_M[k].u && CARDIO_M[k].u !== "niveau" ? ' <span class="muted small">' + esc(CARDIO_M[k].u) + "</span>" : "") + "</span></label>").join("") +
+        custom.map((x, n) => '<label class="own-chk"><input type="checkbox" data-cc="' + n + '"' + (x.on ? " checked" : "") + "><span>" + esc(x.n) + (x.u ? ' <span class="muted small">' + esc(x.u) + "</span>" : "") + ' <span class="tag">perso</span></span></label>').join("") +
+        '<button type="button" class="link small" data-newcv>+ Créer un indicateur</button></div>';
+      d.innerHTML = '<div class="modal-box own-box" role="dialog" aria-modal="true" aria-label="' + (cur ? "Modifier l'exercice" : "Nouvel exercice") + '"><h3>' + (cur ? "Modifier l'exercice" : "Nouvel exercice") + "</h3>" +
+        '<label class="fl">Nom<input class="f" data-on maxlength="80" autocomplete="off" placeholder="Ex. Tirage à l\'élastique" value="' + esc(nameV) + '"></label>' +
+        '<div class="small muted" style="margin:12px 0 6px">Ce que tu notes en séance</div><div class="stack" style="gap:8px">' + typeBtns + "</div>" +
+        (used ? '<p class="small muted" style="margin:6px 2px 0">Déjà fait en séance : le type ne peut plus changer (tes séances passées restent justes).</p>' : "") +
+        (type === "dist" ? '<label class="own-chk" style="margin-top:10px"><input type="checkbox" data-load' + (load ? " checked" : "") + "><span>Avec une charge (kg)</span></label>" : "") + ind +
+        '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">' + (cur ? "Enregistrer" : "Créer") + "</button></div></div>";
+    };
+    let nameV = cur ? cur.n : "";
+    draw(); document.body.appendChild(d);
+    const inp = () => d.querySelector("[data-on]");
+    if (!cur) setTimeout(() => inp().focus(), 0);
+    d.addEventListener("input", e => { if (e.target.matches("[data-on]")) nameV = e.target.value; });
+    d.addEventListener("change", e => {
+      const t = e.target;
+      if (t.dataset.cv) { const k = t.dataset.cv; cv = t.checked ? cv.concat([k]) : cv.filter(x => x !== k); }
+      if (t.dataset.cc != null) custom[+t.dataset.cc].on = t.checked;
+      if (t.matches("[data-load]")) load = t.checked;
+    });
+    d.addEventListener("click", async e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const ty = e.target.closest("[data-ty]"); if (ty && !ty.disabled) { type = ty.dataset.ty; draw(); return; }
+      if (e.target.closest("[data-newcv]")) { const r = await askIndicator(nameV.trim() || "ton exercice"); if (r) { custom.push({ k: "c" + uid(), n: r.n, u: r.u, on: true }); draw(); } return; }
+      const b = e.target.closest("[data-r]"); if (!b) return;
+      if (b.dataset.r !== "1") { d.remove(); res(null); return; }
+      const n = nameV.replace(/\s+/g, " ").trim(), m = d.querySelector("[data-m]");
+      if (!n) { m.textContent = "Donne un nom à ton exercice."; return; }
+      const lib = libFor(n); if (lib) { m.textContent = "« " + lib.n + " » est déjà dans la liste des exercices : choisis-le directement, ou donne un autre nom."; return; }
+      if ((!cur || norm(n) !== norm(cur.n)) && ownNames().some(x => norm(x) === norm(n))) { m.textContent = "Tu as déjà un exercice « " + n + " »."; return; }
+      d.remove(); res({ n: n.slice(0, 80), t: type, load: type === "dist" && load, cv: type === "cardio" ? cv : undefined, custom: custom.filter(x => x.on).map(x => ({ k: x.k, n: x.n, u: x.u })) });
+    });
+  });
+}
+function saveOwnEntry(st, old, r) {
+  const list = (Array.isArray(st.ownEx) ? st.ownEx : []).filter(x => x && norm(x.n) !== norm(old || r.n) && norm(x.n) !== norm(r.n));
+  list.push({ n: r.n, t: r.t, load: r.load || undefined, cv: r.cv, at: Date.now() }); st.ownEx = list;
+  st.ownGone = (Array.isArray(st.ownGone) ? st.ownGone : []).filter(k => k !== norm(r.n));
+  const nk = cardioKey({ name: r.n }), ok_ = old ? cardioKey({ name: old }) : nk, cc = Object.assign({}, st.cardioCustom), hh = Object.assign({}, st.cardioHidden);
+  if (r.t === "cardio") cc[nk] = r.custom.slice(0, CARDIO_MAX_OWN); else delete cc[nk];
+  if (ok_ !== nk) { delete cc[ok_]; if (hh[ok_]) { hh[nk] = hh[ok_]; delete hh[ok_]; } }
+  st.cardioCustom = cc; st.cardioHidden = hh;
+}
+async function ownCreate() {
+  if (isFree() && ownCount() >= FREE_OWN) { premiumGate("En version gratuite, tu peux avoir " + FREE_OWN + " exercices perso au plus."); return false; }
+  const r = await askOwnEx(null); if (!r) return false;
+  const st = settings(); saveOwnEntry(st, null, r); put("settings", st);
+  toast("« " + r.n + " » ajouté à Mes exercices"); return true;
+}
+async function ownEdit(name) {
+  const e = ownEntry(name), dft = ownDefaults(name) || {}, cur = { n: name, t: e ? e.t : dft.type || "reps", load: e ? !!e.load : !!dft.load, cv: e && Array.isArray(e.cv) ? e.cv : undefined };
+  const r = await askOwnEx(cur); if (!r) return false;
+  const renamed = r.n !== name, retype = r.t !== cur.t || !!r.load !== !!cur.load, u = ownUses(name);
+  if (renamed && !await fancyAsk({ title: "Renommer « " + name + " » ?", ok: "Renommer",
+    html: "<p>Il s'appellera <b>« " + esc(r.n) + " »</b> partout dans Fiitday :</p><ul class=\"fancy-list\">" +
+      "<li>" + (u.vars.length ? esc(u.vars.length + " séance" + (u.vars.length > 1 ? "s" : "") + " de programme : " + u.vars.join(", ")) : "Dans aucun programme pour l'instant") + "</li>" +
+      "<li>" + (u.done ? u.done + " séance" + (u.done > 1 ? "s" : "") + " déjà faite" + (u.done > 1 ? "s" : "") + " dans ton historique" : "Pas encore fait en séance") + "</li></ul>" +
+      '<p class="welcome-wish">Ton historique et ta courbe d\'évolution sont gardés.</p>' })) return false;
+  const nn = norm(name), fix = (x, tpl) => { if (exLib(x) || norm(x.name) !== nn) return false; x.name = r.n; if (retype && tpl) Object.assign(x, typeDefaults(r.t, r.load), tpl && r.t === "cardio" ? { sets: 1, drops: 0 } : {}); if (retype && !tpl && !x.sets.some(s => s.done || setHasData(s, x.type))) Object.assign(x, { type: r.t, load: !!r.load }); return true; };
+  templates().forEach(t => { let ch = false; t.variants.forEach(v => v.exercises.forEach(x => { if (fix(x, true)) ch = true; })); if (ch) put("template", t); });
+  all("workout").forEach(w => { let ch = false; w.exercises.forEach(x => { if (fix(x, false)) ch = true; }); if (ch) put("workout", w); });
+  const st = settings(); saveOwnEntry(st, name, r); put("settings", st);
+  toast(renamed ? "Renommé partout : « " + r.n + " »" : "« " + r.n + " » enregistré"); return true;
+}
+async function ownDelete(name) {
+  const u = ownUses(name);
+  if (!await fancyAsk({ title: "Supprimer « " + name + " » ?", ok: "Supprimer", danger: true,
+    html: "<p>Il sera retiré de <b>Mes exercices</b>" + (u.vars.length ? " et de tes programmes :" : ".") + "</p>" + (u.vars.length ? '<ul class="fancy-list">' + u.vars.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul>" : "") +
+      '<p class="welcome-wish">' + (u.done ? "Tes " + u.done + " séance" + (u.done > 1 ? "s" : "") + " passée" + (u.done > 1 ? "s" : "") + " et sa courbe d'évolution sont gardées." : "Tu ne l'as pas encore fait en séance : rien d'autre ne change.") + "</p>" })) return false;
+  const nn = norm(name);
+  templates().forEach(t => { let ch = false; t.variants.forEach(v => { const n0 = v.exercises.length; v.exercises = v.exercises.filter(x => exLib(x) || norm(x.name) !== nn); if (v.exercises.length !== n0) { ch = true; cleanGroups(v); } }); if (ch) put("template", t); });
+  const st = settings(); st.ownEx = (Array.isArray(st.ownEx) ? st.ownEx : []).filter(x => x && norm(x.n) !== nn);
+  st.ownGone = (Array.isArray(st.ownGone) ? st.ownGone : []).filter(k => k !== nn).concat([nn]); put("settings", st);
+  toast("« " + name + " » supprimé de Mes exercices"); return true;
+}
+// liste pour la page Exercices
+const ownList = () => ownNames().map(n => { const e = ownEntry(n), d = ownDefaults(n) || {}, u = ownUses(n); return { n, t: e ? e.t : d.type || "reps", label: TYPE_LABEL[e ? e.t : d.type || "reps"] || "", vars: u.vars.length, done: u.done }; });
 // « Ajouter à une séance » depuis la fiche d'un exercice
 async function addLibraryExercise(x) {
   const opts = [];
@@ -1024,7 +1137,7 @@ async function startWorkout(tid, vid, direct) {
   const w = {
     id: "w-" + uid(), templateId: t.id, variantId: v.id, templateName: t.name, variantName: v.name, startedAt: Date.now(), endedAt: null,
     exercises: v.exercises.map(e => ({ exId: e.id, name: e.name, lib: exLib(e) ? exLib(e).id : undefined, note: e.note || "", type: e.type, machine: e.type === "cardio" ? e.machine || "" : undefined, target: e.target, rest: e.rest, load: !!e.load, restNext: restNextOf(e, v), drops: dropsOf(e), groupId: e.groupId || null, groupKind: e.groupKind || null,
-      dropScope: e.dropScope === "last" ? "last" : "all",
+      dropScope: e.dropScope === "last" ? "last" : "all", sw: e.sw ? 1 : undefined,
       sets: (n => Array.from({ length: n }, (_, k) => blankSet(dropsFor(e, k, n))))(e.type === "cardio" ? 1 : Math.max(1, num(e.sets) || 1)) })),
   };
   put("workout", w);
@@ -1465,8 +1578,8 @@ function viewPrograms() {
 }
 function exFields(e, k, letter, inGroup) {
   const time = e.type === "time", dist = e.type === "dist", rep = e.type === "rep", cardio = e.type === "cardio", d = dropsOf(e);
-  return (inGroup ? '<div class="spread"><b><span class="letter">' + letter + '</span><span data-title="' + k + '">' + esc(e.name) + '</span></b><button class="btn sm danger" data-act="delex" data-e="' + k + '">Retirer</button></div>' : "") +
-    '<div class="ed-grid"><label class="fl full">Nom<input class="f" data-suggest autocomplete="off" maxlength="80" data-p="name" data-e="' + k + '" value="' + esc(e.name) + '"><div class="sugg" hidden></div></label>' +
+  return (inGroup ? '<div class="spread"><b><span class="letter">' + letter + '</span><span data-title="' + k + '">' + esc(e.name) + '</span></b><span class="cfg-acts"><button class="link" data-act="cfgrename" data-e="' + k + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + k + '">Retirer</button></span></div>' : "") +
+    '<div class="ed-grid">' +
     (exLib(e) ? '<div class="full" data-exolink="' + k + '"><button type="button" class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir le mouvement</button></div>" : '<div class="full" data-exolink="' + k + '" hidden></div>') +
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
     (cardio ? '<div class="fl"><span>Durée cible</span><button type="button" class="f pick" data-act="picksec" data-sf="ctarget" data-e="' + k + '">' + (num(e.target) ? fmtNum(num(e.target)) + " min" : "Aucune") + "</button></div>" +
@@ -1529,7 +1642,7 @@ function viewProgram(tid, vid) {
       const x = blk.items[0];
       const k = "t:" + x.e.id, f = folded.has(k);
       h += '<div class="card' + (f ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread">' + grip + foldTitle(k, '<b><span data-title="' + x.i + '">' + esc(x.e.name) + "</span></b>", f) + '<div class="row">' + moves +
-        '<button class="btn sm danger" data-act="delex" data-e="' + x.i + '">Supprimer</button></div></div>' + (f ? '<div class="fold-sum muted small">' + esc(tplLine(x.e)) + "</div>" : '<div class="blk-body">' + exFields(x.e, x.i, "", false) + nextField +
+        '<button class="link" data-act="cfgrename" data-e="' + x.i + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + x.i + '">Supprimer</button></div></div>' + (f ? '<div class="fold-sum muted small">' + esc(tplLine(x.e)) + "</div>" : '<div class="blk-body">' + exFields(x.e, x.i, "", false) + nextField +
         (bi < bl.length - 1 && !bl[bi + 1].groupId ? '<button class="link" style="margin-top:6px" data-act="link" data-b="' + bi + '">Enchaîner avec l\'exercice suivant (superset / biset)</button>' : "") + "</div>") + "</div>";
     }
   });
@@ -1568,7 +1681,7 @@ function choose(title, opts) {
 }
 // choix d'un ou plusieurs exercices (ou étirements) de la bibliothèque : recherche, filtres, cases à cocher ;
 // en musculation, aussi tes propres exercices et un exercice à créer avec le nom tapé
-const PK_GROUPS = [["", "Tous"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["machines", "Cardio"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"], ["maison", "Sans matériel"], ["own", "Tes exercices"]];
+const PK_GROUPS = [["", "Tous"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["machines", "Cardio"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"], ["maison", "Sans matériel"], ["own", "Mes exercices"]];
 const TYPE_CHOICES = [["reps", "Poids × reps", "Charge et nombre de répétitions"], ["rep", "Reps uniquement", "Pompes, tractions… sans charge"], ["time", "Temps", "Gainage, chaise… avec chrono"], ["dist", "Distance", "Course, rameur, Hyrox… avec chrono"], ["cardio", "Cardio", "Machine ou activité cardio : durée et indicateurs (distance, calories…)"]];
 const cardioPickLib = () => cardioMachines().map(x => x.cat === "cardio" ? x : Object.assign({}, x, { id: "c:" + x.id, g: "machines", cardioOf: x.id }));
 function pickExercises(mode, title) {
@@ -1582,7 +1695,7 @@ function pickExercises(mode, title) {
     let filt = "", q = "";
     const chips = cdo ? [] : etir ? [["", "Tous"], ["haut", "Haut"], ["milieu", "Milieu"], ["bas", "Bas"]] : PK_GROUPS.filter(g => g[0] !== "own" || own.length);
     const inFilt = x => !filt || (etir ? x.zone === filt : filt === "own" ? !!x.own : filt === "maison" ? /^Poids du corps/.test(x.gear || "") : !x.own && x.g === filt);
-    const sub = x => x.own ? "Tes exercices" : x.g === "machines" ? "Cardio · " + cardioInfo(x.cardioOf || x.id).slice(0, 3).map(t => t.replace(/ \(.*\)$/, "").toLowerCase()).join(", ") + "…" : etir || x.cat === "etirement" ? (etir ? "" : "Étirement · ") + x.mus + " · " + x.hold + " s" + (x.side ? " de chaque côté" : "") : x.mus + " · " + x.gear;
+    const sub = x => x.own ? "Mes exercices" : x.g === "machines" ? "Cardio · " + cardioInfo(x.cardioOf || x.id).slice(0, 3).map(t => t.replace(/ \(.*\)$/, "").toLowerCase()).join(", ") + "…" : etir || x.cat === "etirement" ? (etir ? "" : "Étirement · ") + x.mus + " · " + x.hold + " s" + (x.side ? " de chaque côté" : "") : x.mus + " · " + x.gear;
     const row = (key, name, s, cls) => '<label class="pk-row' + (cls || "") + '"><input type="checkbox" data-pk="' + esc(key) + '"' + (picked.includes(key) ? " checked" : "") + "><span><b>" + esc(name) + '</b><span class="muted small">' + esc(s) + "</span></span></label>";
     const what = etir ? "étirement" : cdo ? "machine" : "exercice";
     const listHtml = () => {
@@ -1635,10 +1748,14 @@ function pickExercises(mode, title) {
 }
 const stretchExercise = x => Object.assign(newExercise(), { name: x.n, lib: x.id }, libDefaults(x));
 // réglages d'un exercice choisi : ceux de la bibliothèque, sinon ceux que tu utilises déjà pour ce nom dans tes programmes
+const typeDefaults = (type, load) => type === "cardio" ? { type, sets: 1, target: "", rest: 0, machine: "" } : type === "time" ? { type, target: "45", rest: 60 } : type === "dist" ? { type, target: "1000", rest: 120, load: !!load } : { type, target: "8-10", rest: 90 };
 function ownDefaults(name) {
   const nn = norm(name);
-  for (const t of all("template")) for (const v of t.variants) for (const e of v.exercises) if (norm(e.name) === nn)
+  for (const t of all("template")) for (const v of t.variants) for (const e of v.exercises) if (norm(e.name) === nn && !exLib(e))
     return { type: e.type || "reps", sets: e.sets, target: e.target, rest: e.rest, load: !!e.load };
+  const r = ownEntry(name); if (r) return typeDefaults(r.t || "reps", !!r.load);
+  const w = all("workout").filter(x => x.exercises.some(e => !exLib(e) && norm(e.name) === nn)).sort((a, b) => b.startedAt - a.startedAt)[0]; // seulement dans l'historique
+  if (w) { const e = w.exercises.find(e => !exLib(e) && norm(e.name) === nn); return { type: e.type || "reps", sets: e.sets.length || undefined, target: e.target, rest: e.rest, load: !!e.load }; }
   return null;
 }
 function libExercise(p) {
@@ -2575,16 +2692,47 @@ const libById = {}; EXO_LIB.forEach(x => { libById[x.id] = x; });
 const exLib = e => (e ? (e.lib && libById[e.lib]) || (e.machine && libById[e.machine]) || libFor(e.name) : null);
 const exKey = e => { const l = exLib(e); return l ? "lib:" + l.id : norm(e.name); }; // même exercice, quel que soit son nom
 // renommer : le nom d'un autre exercice de la liste change d'exercice ; un nom perso garde l'exercice (et son mannequin)
+// renommer avec un autre exercice proposé (de la liste ou des tiens) : c'est un autre exercice ; un nom perso nouveau garde l'exercice
+function isSwitch(e, name) {
+  const m = libFor(name), cur = exLib(e);
+  if (m) return !cur || cur.id !== m.id;
+  if (norm(name) === norm(e.name || "")) return false;
+  return ownNames().some(x => norm(x) === norm(name));
+}
+// nouveau nom : on garde l'exercice (nom perso), ou on prend l'autre exercice avec sa fiche (mannequin, type, cible, repos)
+function applyName(e, name, sw, tpl) {
+  const n = String(name).slice(0, 80);
+  if (!sw) { renameEx(e, n); e.name = n; return; }
+  const m = libFor(n), keepCardio = m && e.type === "cardio" && CARDIO_MACH[m.id]; // rameur, SkiErg : la machine de cardio, pas l'atelier Hyrox
+  const d = (keepCardio ? { type: "cardio", machine: m.id, sets: 1, target: e.target, rest: 0 } : m ? libDefaults(m) : ownDefaults(n)) || {};
+  e.name = n;
+  if (m) e.lib = m.id; else delete e.lib;
+  if (d.type) e.type = d.type;
+  if (d.target != null) e.target = d.target;
+  if (d.rest != null) e.rest = d.rest;
+  e.load = !!d.load;
+  if (e.type === "cardio") e.machine = d.machine || ""; else delete e.machine;
+  if (tpl) { if (d.sets) e.sets = e.type === "cardio" ? 1 : d.sets; if (e.type !== "reps") e.drops = 0; }
+  e.sw = 1; // la dernière fois : aussi dans les autres séances du programme
+}
+const askRename = cur => ask({ title: "Renommer l'exercice", text: "Choisis un exercice proposé pour reprendre sa fiche (mouvement, réglages, historique), ou tape ton propre nom.", input: cur, suggest: true, ok: "Renommer" });
 function renameEx(e, name) {
   const cur = exLib(e); if (cur && !e.lib) e.lib = cur.id;
   const m = libFor(name); if (m) { e.lib = m.id; if (e.type === "cardio" && CARDIO_MACH[m.id]) e.machine = m.id; }
 }
 // noms de tes propres exercices (pas ceux de la liste, même renommés)
+// tes exercices créés dans la page Exercices (nom, type, indicateurs) ; ceux que tu as supprimés ne sont plus proposés
+const ownReg = () => { const l = settings().ownEx; return Array.isArray(l) ? l.filter(x => x && typeof x.n === "string" && x.n.trim()) : []; };
+const ownGone = () => { const l = settings().ownGone; return Array.isArray(l) ? l.filter(x => typeof x === "string") : []; };
+const ownEntry = name => ownReg().find(x => norm(x.n) === norm(name)) || null;
 function ownNames() {
-  const set = new Set(), add = e => { if (e.name && !exLib(e)) set.add(e.name.trim()); };
-  all("template").forEach(t => t.variants.forEach(v => v.exercises.forEach(add)));
-  all("workout").forEach(w => w.exercises.forEach(add));
-  return Array.from(set).sort((a, b) => a.localeCompare(b, "fr"));
+  const seen = new Map(), live = new Set();
+  const add = (e, inUse) => { if (!e.name || exLib(e)) return; const k = norm(e.name); if (!seen.has(k)) seen.set(k, e.name.trim()); if (inUse) live.add(k); };
+  all("template").forEach(t => t.variants.forEach(v => v.exercises.forEach(e => add(e, true))));
+  all("workout").forEach(w => w.exercises.forEach(e => add(e, !w.endedAt)));
+  ownReg().forEach(x => add({ name: x.n }, true));
+  const gone = new Set(ownGone());
+  return Array.from(seen).filter(([k]) => live.has(k) || !gone.has(k)).map(x => x[1]).sort((a, b) => a.localeCompare(b, "fr"));
 }
 // mots courants (anglais, abréviations, pluriels) → mots de la bibliothèque ; « | » sépare des choix possibles
 const SYN = { bench: "developpe couche", dc: "developpe couche", di: "developpe incline", ohp: "developpe militaire", military: "militaire", sdt: "souleve terre", deadlift: "souleve terre",
@@ -2646,7 +2794,7 @@ function suggestFor(input) {
   if (!hits.length) { box.hidden = true; box.innerHTML = ""; return; }
   // met en gras le début des mots qui correspondent à ce qui est tapé
   const hl = n => n.split(/(\s+)/).map(part => { const w = norm(part), t = toks.find(x => w.startsWith(x)); return t ? "<b>" + esc(part.slice(0, t.length)) + "</b>" + esc(part.slice(t.length)) : esc(part); }).join("");
-  box.innerHTML = hits.map(c => '<button type="button" data-pick="' + esc(c.n) + '"><span class="sg-n">' + hl(c.n) + '</span><span class="sg-d">' + (c.own ? "Tes exercices" : esc(c.mus + " · " + c.gear)) + "</span></button>").join("");
+  box.innerHTML = hits.map(c => '<button type="button" data-pick="' + esc(c.n) + '"><span class="sg-n">' + hl(c.n) + '</span><span class="sg-d">' + (c.own ? "Mes exercices" : esc(c.mus + " · " + c.gear)) + "</span></button>").join("");
   box.hidden = false;
 }
 document.addEventListener("input", e => { if (e.target.matches && e.target.matches("input[data-suggest]")) suggestFor(e.target); });
@@ -2786,7 +2934,8 @@ const GUIDE = [
   ["Exercices", "#/exercices", "La bibliothèque, avec le mannequin 3D.", [
     "Musculation, Cardio et Étirements : chaque fiche montre le mouvement en 3D, les muscles travaillés et les conseils.",
     "Recherche par nom, par muscle ou par matériel.",
-    "« Ajouter à une séance » pour le mettre directement dans un de tes programmes."]],
+    "« Ajouter à une séance » pour le mettre directement dans un de tes programmes.",
+    "Filtre « Mes exercices » : crée, modifie ou supprime tes propres exercices, avec ce que tu veux noter (poids, reps, temps, distance ou tes indicateurs)."]],
   ["Stats", "#/progress", "Tes progrès, en quatre onglets.", [
     "Séances : ta semaine par rapport à ton objectif, le temps de sport et les séances par semaine.",
     "Évolution : la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records.",
@@ -3588,12 +3737,21 @@ $app.addEventListener("click", async e => {
     } break;
     case "rename": if (w) {
       const ex = w.exercises[i];
-      const n = await ask({ title: "Renommer l'exercice", input: ex.name, ok: "Renommer" });
-      if (!n) return;
-      renameEx(ex, n); ex.name = n.slice(0, 80); put("workout", w);
-      const t = getItem(w.templateId), te = tplExercise(w, ex.exId);
-      if (t && te) { renameEx(te, n); te.name = n.slice(0, 80); put("template", t); }
-      render();
+      const n = await askRename(ex.name);
+      if (!n || n === ex.name) return;
+      const t = getItem(w.templateId), te = tplExercise(w, ex.exId), sw = isSwitch(ex, n);
+      applyName(ex, n, sw, false);
+      if (t && te) { applyName(te, n, sw, true); if (sw) { te.id = "e-" + uid(); ex.exId = te.id; } put("template", t); }
+      else if (sw) ex.exId = "e-" + uid();
+      put("workout", w); render();
+    } break;
+    case "cfgrename": {
+      const { t, v } = currentProgram(); if (!v) return;
+      const ex = v.exercises[+b.dataset.e]; if (!ex) return;
+      const n = await askRename(ex.name);
+      if (!n || n === ex.name) return;
+      const sw = isSwitch(ex, n); applyName(ex, n, sw, true); if (sw) ex.id = "e-" + uid();
+      put("template", t); render();
     } break;
     case "addex": case "sessstretch": if (w) {
       const etir = a === "sessstretch", what = etir ? "étirement" : "exercice";

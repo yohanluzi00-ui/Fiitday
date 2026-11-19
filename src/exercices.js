@@ -21,7 +21,7 @@ export const MUSCLES = {
   quadriceps: ["Quadriceps", "jambes"], ischios: ["Ischio-jambiers", "jambes"], fessiers: ["Fessiers", "jambes"],
   adducteurs: ["Adducteurs", "jambes"], abducteurs: ["Abducteurs (moyen fessier)", "jambes"], mollets: ["Mollets", "jambes"],
 };
-const GROUPS = [["tous", "Tous"], ["maison", "Sans matériel"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"]];
+const GROUPS = [["tous", "Tous"], ["maison", "Sans matériel"], ["pectoraux", "Pectoraux"], ["dos", "Dos"], ["epaules", "Épaules"], ["bras", "Bras"], ["jambes", "Jambes"], ["abdos", "Abdos"], ["cardio", "Circuit Training"], ["hyrox", "Hyrox"], ["own", "Mes exercices"]];
 const atHome = ex => /^Poids du corps/.test(ex.gear);
 
 /* =====================================================================
@@ -1850,17 +1850,36 @@ function matchesStretch(ex) {
   if (!ui.qe) return true;
   return hasAll([ex.n, ex.gear, (ex.al || []).join(" "), zoneName(ex.zone), ex.p.concat(ex.s).map(mm => MUSCLES[mm][0]).join(" ")].join(" "), ui.qe);
 }
+// tes exercices (créés par toi) : créer, modifier, supprimer
+function ownHtml(withNew) {
+  const all = api && api.own ? api.own.list() : [], q = norm(ui.q || ""), v = all.filter(x => !q || norm(x.n).includes(q));
+  const row = x => '<div class="own-row"><div><b>' + esc(x.n) + '</b><div class="muted small">' + esc(x.label) + (x.vars ? " · " + x.vars + " séance" + (x.vars > 1 ? "s" : "") + " de programme" : "") + (x.done ? " · fait " + x.done + " fois" : "") + "</div></div>" +
+    '<span class="own-acts"><button type="button" class="btn sm" data-own-edit="' + esc(x.n) + '">Modifier</button><button type="button" class="btn sm danger" data-own-del="' + esc(x.n) + '">Supprimer</button></span></div>';
+  return (withNew ? '<button type="button" class="btn primary block own-new" data-own-new>+ Créer un exercice</button>' : "") +
+    (v.length ? '<div class="section-title">Mes exercices</div><div class="list own-list">' + v.map(row).join("") + "</div>"
+      : withNew ? '<div class="card empty">' + (all.length ? "Aucun de tes exercices ne correspond à ta recherche." : "Tu n'as pas encore d'exercice à toi. Crée-le ici, ou pendant une séance avec « + Ajouter un exercice ».") + "</div>" : "");
+}
 function listHtml() {
-  const v = MUSCU.filter(matches);
-  if (!v.length) return '<div class="card empty">Aucun exercice ne correspond à ta recherche.</div>';
+  if (ui.group === "own") return ownHtml(true);
+  const v = MUSCU.filter(matches), mine = ui.group === "tous" ? ownHtml(false) : "";
+  if (!v.length) return mine || '<div class="card empty">Aucun exercice ne correspond à ta recherche.</div>';
   let h = "";
   for (const [gid, gname] of GROUPS.slice(2)) {
     const items = v.filter(e => groupOf(e) === gid); if (!items.length) continue;
     h += '<div class="section-title">' + gname + '</div><div class="list">' + items.map(e => '<a href="#/exercices/' + e.id + '"><div><b>' + esc(e.n) + '</b><div class="muted small">' +
       esc(e.p.map(mm => MUSCLES[mm][0]).join(", ")) + " · " + esc(e.gear) + '</div></div><span class="exo-go" aria-hidden="true">›</span></a>').join("") + "</div>";
   }
-  return h;
+  return h + mine;
 }
+// boutons de tes exercices (liste de la page et liste à gauche de la fiche sur PC)
+document.addEventListener("click", async e => {
+  const b = e.target.closest && e.target.closest("[data-own-new],[data-own-edit],[data-own-del]"); if (!b || !api || !api.own) return;
+  e.preventDefault();
+  const ok = b.hasAttribute("data-own-new") ? await api.own.create() : b.dataset.ownEdit != null ? await api.own.edit(b.dataset.ownEdit) : await api.own.del(b.dataset.ownDel);
+  if (!ok) return;
+  const box = document.getElementById("exo-list"); if (box) box.innerHTML = listHtml();
+  const pl = document.querySelector(".exo-pane-list"); if (pl) pl.innerHTML = listHtml().replace(/<a href="#\/exercices\/([a-z0-9-]+)"/g, '<a href="#/exercices/$1" data-pane');
+});
 function stretchListHtml() {
   const v = STRETCHES.filter(matchesStretch);
   if (!v.length) return '<div class="card empty">Aucun étirement ne correspond à ta recherche.</div>';

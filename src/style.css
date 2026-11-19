@@ -895,3 +895,22 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
   .exo-pane-main .exo-stage-col { position: static; }
   .main.r-exercices #exo-list .list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ================= Mes exercices : création / modification, fenêtres de confirmation, bouton Renommer de la configuration ================= */
+.cfg-acts { display: inline-flex; align-items: center; gap: 12px; }
+.card .spread .row .link[data-act="cfgrename"] { margin-right: 4px; }
+.own-new { margin: 4px 0 6px; }
+.own-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.own-row > div { min-width: 0; }
+.own-row b { overflow-wrap: anywhere; }
+.own-acts { display: inline-flex; gap: 6px; flex: none; }
+.own-box { max-height: min(90vh, 820px); overflow-y: auto; overscroll-behavior: contain; }
+.own-box .modal-btns { position: sticky; bottom: calc(-20px - env(safe-area-inset-bottom)); background: var(--card); padding: 10px 0 calc(4px + env(safe-area-inset-bottom)); margin-top: 4px; }
+.own-box .choice.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.own-box .choice:disabled { opacity: .45; }
+.own-cv { display: flex; flex-direction: column; gap: 2px; }
+.own-chk { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
+.own-chk input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.own-cv .link { align-self: flex-start; margin-top: 6px; }
+.fancy-list { text-align: left; margin: 8px auto; padding-left: 20px; max-width: 34ch; line-height: 1.5; }
+.fancy-list li + li { margin-top: 4px; }

@@ -33,11 +33,11 @@ const atHome = ex => /^Poids du corps/.test(ex.gear);
    ===================================================================== */
 const STAND = { foot: [0, 0.085, 0.13], knee: [1, 0, 0.1], fdir: [1, 0, 0.15] };
 const HANG = { t: [0.0, -0.6, 0.235] };
-const ST = (o) => Object.assign({ pc: [-0.02, 0.975], th: 0 }, STAND, o);
+const ST = (o) => Object.assign({ pc: [-0.02, 1.0], th: 0 }, STAND, o);
 const BENCH = { pc: [0, 0.565], th: -90, cp: 3, hp: -3, foot: [0.5, 0.085, 0.2], knee: [0.4, 1, 0.25], fdir: [1, 0, 0.25] };
 const SEATED = (o) => Object.assign({ pc: [0, 0.6], th: -6, foot: [0.42, 0.085, 0.2], knee: [0.3, 1, 0.2], fdir: [1, 0, 0.2] }, o);
-const PUSHUP_A = { pc: [-0.458, 0.403], th: 70.7, foot: [-1.32, 0.205, 0.10], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0] };
-const PUSHUP_B = { pc: [-0.398, 0.166], th: 85.9 };
+const PUSHUP_A = { pc: [-0.44, 0.407], th: 70.9, foot: [-1.34, 0.205, 0.10], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0] };
+const PUSHUP_B = { pc: [-0.416, 0.24], th: 94.5 };
 const m = (o, p) => Object.assign({}, o, p);
 
 // course (tapis de course, tapis incurvé, atelier Hyrox) : foulée en boucle
@@ -161,7 +161,7 @@ export const EXOS = [
     tips: ["Un pas en avant, buste légèrement penché", "Bras légèrement fléchis, ramène les poignées en arc de cercle", "Croise un peu les mains en fin de mouvement pour bien contracter", "Reviens lentement en gardant la tension"],
     err: ["Tirer avec les bras au lieu de serrer les pectoraux", "Se laisser emporter par les câbles au retour", "Hausser les épaules"],
     vars: ["Pec deck (butterfly)", "Écarté couché haltères"], order: "con", ph: { con: "Fermeture", exc: "Ouverture lente" },
-    a: ST({ pc: [-0.03, 0.97], th: 12, hand: { c: "sh", r: 0.53, d: [-0.15, 0.35, 1] }, elbow: [-0.4, 0.5, 0.8], palm: [1, 0, 0], foot: [[0.2, 0.085, 0.13], [-0.22, 0.085, 0.13]], knee: [1, 0, 0.1] }), b: { hand: { c: "sh", r: 0.53, d: [0.85, -0.45, -0.2] }, palm: [0.3, 0, -1] },
+    a: ST({ pc: [-0.03, 0.995], th: 12, hand: { c: "sh", r: 0.53, d: [-0.15, 0.35, 1] }, elbow: [-0.4, 0.5, 0.8], palm: [1, 0, 0], foot: [[0.2, 0.085, 0.13], [-0.22, 0.085, 0.13]], knee: [1, 0, 0.1] }), b: { hand: { c: "sh", r: 0.53, d: [0.85, -0.45, -0.2] }, palm: [0.3, 0, -1] },
     props: P => { P.tower(0.05, -1.05, 1.95); P.tower(0.05, 1.05, 1.95); }, imp: [{ t: "cable", from: [0.05, 1.95, 1.05], to: "hands", handle: "d", stacks: [0, 1] }], view: [1, 0.35, 0.45] },
   { id: "developpe-machine", n: "Développé à la machine", gear: "Machine (chest press)", lvl: "Débutant", p: ["pectoraux"], s: ["triceps", "deltoides_ant"], reps: "8-12", rest: 90,
     tips: ["Poignées à hauteur du milieu de la poitrine", "Dos plaqué, omoplates serrées", "Pousse devant toi sans verrouiller les coudes", "Reviens lentement jusqu'à l'étirement"],
@@ -231,7 +231,7 @@ export const EXOS = [
     err: ["Dos rond au départ", "Barre qui s'éloigne des jambes", "Tirer avec les bras pliés"],
     vars: ["Soulevé de terre roumain", "Rowing barre", "Hip thrust"], order: "con", ph: { con: "Montée", exc: "Descente contrôlée" },
     a: ST({ pc: [-0.301, 0.604], th: 61.6, hp: -30, hand: [0.12, 0.29, 0.27], elbow: [-0.3, 0, 0.3], palm: [-1, 0, 0], foot: [0, 0.085, 0.13], knee: [1, 0.1, 0.08] }),
-    m: { pc: [-0.297, 0.876], th: 59, hp: -25, hand: [0.11, 0.57, 0.27] }, mt: 0.45, b: { pc: [-0.03, 0.975], th: 0, hp: 0, hand: [0.09, 0.895, 0.27] },
+    m: { pc: [-0.297, 0.876], th: 59, hp: -25, hand: [0.11, 0.57, 0.27] }, mt: 0.45, b: { pc: [-0.03, 1.0], th: 0, hp: 0, hand: [0.09, 0.895, 0.27] },
     imp: [{ t: "bar", r: 0.225 }] },
   { id: "pull-over", n: "Pull-over haltère", gear: "Haltère et banc plat", lvl: "Intermédiaire", g: "dos", p: ["dorsaux", "pectoraux"], s: ["triceps"], reps: "10-12", rest: 60,
     tips: ["Allongé, un haltère tenu à deux mains au-dessus de la poitrine", "Bras légèrement fléchis, descends l'haltère derrière la tête", "Va jusqu'à sentir l'étirement sous les bras", "Remonte en arc de cercle au-dessus de la poitrine"],
@@ -256,7 +256,7 @@ export const EXOS = [
     tips: ["Debout, barre posée sur le haut de la poitrine", "Abdos et fessiers serrés pour ne pas te cambrer", "Pousse la barre à la verticale, la tête recule un peu pour la laisser passer", "Finis bras tendus, barre au-dessus de la tête"],
     err: ["Se cambrer fortement", "Pousser la barre devant soi", "Utiliser les jambes pour lancer la barre"],
     vars: ["Développé haltères", "Développé militaire à la machine"], order: "con", ph: { con: "Poussée", exc: "Descente contrôlée" },
-    a: ST({ pc: [-0.03, 0.975], th: -3, hand: [0.13, 1.42, 0.26], elbow: [1, -1, 0.5], hdir: [0, 1, 0], palm: [1, 0, 0] }), m: { hp: -14, hand: [0.09, 1.66, 0.25], elbow: [0.6, -0.5, 0.8] }, mt: 0.4, b: { hp: 0, hand: [-0.02, 1.99, 0.24], elbow: [0.2, 0, 1] },
+    a: ST({ pc: [-0.03, 1.0], th: -3, hand: [0.13, 1.42, 0.26], elbow: [1, -1, 0.5], hdir: [0, 1, 0], palm: [1, 0, 0] }), m: { hp: -14, hand: [0.09, 1.66, 0.25], elbow: [0.6, -0.5, 0.8] }, mt: 0.4, b: { hp: 0, hand: [-0.02, 1.99, 0.24], elbow: [0.2, 0, 1] },
     imp: [{ t: "bar", r: 0.2 }] },
   { id: "developpe-halteres-assis", n: "Développé haltères", al: ["Développé haltères assis", "Développé épaules haltères assis", "Seated dumbbell press"], gear: "Haltères et banc", lvl: "Débutant", p: ["deltoides_ant", "deltoides_lat"], s: ["triceps"], reps: "8-12", rest: 90,
     tips: ["Dossier presque vertical, dos bien en appui", "Haltères à hauteur des oreilles, paumes vers l'avant", "Pousse vers le haut en rapprochant légèrement les haltères", "Redescends jusqu'à hauteur des oreilles"],
@@ -286,13 +286,13 @@ export const EXOS = [
     tips: ["Debout au milieu des deux poulies réglées à hauteur d'épaules, câbles croisés : la main gauche tient la poignée de droite, et l'inverse", "Bras tendus devant toi à hauteur d'épaules, coudes très légèrement fléchis", "Ouvre les bras sur les côtés jusqu'à former un T, en serrant les omoplates", "Reviens lentement devant toi sans relâcher la tension"],
     err: ["Plier les coudes (ça devient un tirage)", "Hausser les épaules", "Se pencher en arrière pour tirer"],
     vars: ["Oiseau", "Pec deck inversé", "Face pull"], order: "con", ph: { con: "Ouverture en T", exc: "Retour lent" },
-    a: ST({ pc: [-0.03, 0.975], th: 4, hand: { c: "sh", r: 0.53, d: [0.95, -0.08, -0.17] }, elbow: [-0.3, 0.6, 0.4], palm: [0, 0, -1] }), b: { hand: { c: "sh", r: 0.53, d: [-0.12, -0.02, 1] }, palm: [1, 0, 0] },
+    a: ST({ pc: [-0.03, 1.0], th: 4, hand: { c: "sh", r: 0.53, d: [0.95, -0.08, -0.17] }, elbow: [-0.3, 0.6, 0.4], palm: [0, 0, -1] }), b: { hand: { c: "sh", r: 0.53, d: [-0.12, -0.02, 1] }, palm: [1, 0, 0] },
     props: P => { P.tower(0.3, -1.05, 1.55); P.tower(0.3, 1.05, 1.55); }, imp: [{ t: "cable", from: [0.3, 1.55, -1.05], to: "hands", handle: "d", stacks: [0, 1] }], view: [1, 0.35, 0.45] },
   { id: "face-pull", n: "Face pull", gear: "Poulie haute et corde", lvl: "Débutant", p: ["deltoides_post"], s: ["trapezes", "deltoides_lat"], reps: "12-15", rest: 60,
     tips: ["Poulie à hauteur du visage, corde prise à deux mains", "Tire la corde vers le front en écartant les mains", "Coudes hauts, au niveau des épaules", "Reviens lentement bras tendus"],
     err: ["Coudes trop bas", "Se pencher en arrière", "Tirer trop lourd"],
     vars: ["Oiseau", "Tirage horizontal"], order: "con", ph: { con: "Tirage", exc: "Retour contrôlé" },
-    a: ST({ pc: [-0.05, 0.975], th: -6, hand: [0.42, 1.55, 0.08], elbow: [0, -0.3, 1], palm: [0, 0, -1] }), b: { hand: [0.14, 1.64, 0.26], elbow: [-0.4, 0.4, 1] },
+    a: ST({ pc: [-0.05, 1.0], th: -6, hand: [0.42, 1.55, 0.08], elbow: [0, -0.3, 1], palm: [0, 0, -1] }), b: { hand: [0.14, 1.64, 0.26], elbow: [-0.4, 0.4, 1] },
     props: P => P.tower(1.08, 0, 1.72, 0.95), imp: [{ t: "cable", from: [0.95, 1.72, 0], to: "mid", handle: "rope", stacks: [0] }] },
   { id: "developpe-epaules-machine", n: "Développé militaire à la machine", al: ["Développé épaules à la machine"], gear: "Machine", lvl: "Débutant", p: ["deltoides_ant", "deltoides_lat"], s: ["triceps"], reps: "8-12", rest: 90,
     tips: ["Poignées à hauteur des épaules au départ", "Dos plaqué contre le dossier", "Pousse vers le haut sans verrouiller les coudes", "Redescends lentement"],
@@ -343,7 +343,7 @@ export const EXOS = [
     tips: ["Coudes collés au corps, ils ne bougent pas", "Buste légèrement penché vers l'avant", "Pousse la barre vers le bas jusqu'à tendre les bras", "Remonte lentement jusqu'à hauteur de poitrine"],
     err: ["Décoller les coudes", "Se pencher sur la barre pour pousser", "Remonter trop haut"],
     vars: ["Extension triceps à la poulie au-dessus de la tête", "Barre au front", "Extension nuque haltère", "Dips entre deux bancs"], order: "con", ph: { con: "Extension", exc: "Remontée lente" },
-    a: ST({ pc: [-0.06, 0.975], th: 12, hand: { c: { el: [-0.12, -1, 0] }, r: L.fa, d: [0.72, 0.68, -0.05] }, elbow: [-1, 0.1, 0], palm: "pro" }), b: { hand: { c: { el: [-0.12, -1, 0] }, r: L.fa, d: [0.22, -1, -0.03] } },
+    a: ST({ pc: [-0.06, 1.0], th: 12, hand: { c: { el: [-0.12, -1, 0] }, r: L.fa, d: [0.72, 0.68, -0.05] }, elbow: [-1, 0.1, 0], palm: "pro" }), b: { hand: { c: { el: [-0.12, -1, 0] }, r: L.fa, d: [0.22, -1, -0.03] } },
     props: P => P.tower(0.55, 0, 2.0, 0.4), imp: [{ t: "bar", r: 0, len: 0.5 }, { t: "cable", from: [0.4, 2.0, 0], to: "mid", stacks: [0] }] },
   { id: "extension-triceps-poulie-nuque", n: "Extension triceps à la poulie au-dessus de la tête", al: ["Extension triceps poulie basse dos à la machine", "Extension triceps corde derrière la tête", "Extension nuque à la poulie", "Extension triceps vers le haut à la poulie", "Overhead triceps extension"], gear: "Poulie basse et corde", lvl: "Intermédiaire", p: ["triceps"], s: [], reps: "10-15", rest: 60,
     tips: ["Dos à la poulie réglée en bas, corde tenue à deux mains derrière la nuque", "Coudes pointés vers le plafond, près de la tête : ils ne bougent pas", "Tends les bras vers le ciel jusqu'à l'extension complète", "Redescends lentement les mains derrière la nuque, en sentant l'étirement du triceps"],
@@ -385,13 +385,13 @@ export const EXOS = [
     tips: ["Barre posée sur les trapèzes, jamais sur la nuque", "Pieds largeur d'épaules, pointes légèrement ouvertes", "Descends en poussant les fesses en arrière, genoux dans l'axe des pieds", "Dos droit et regard devant, remonte en poussant dans les talons"],
     err: ["Genoux qui rentrent vers l'intérieur", "Talons qui décollent du sol", "Dos qui s'arrondit en bas du mouvement"],
     vars: ["Squat goblet", "Presse à cuisses", "Hack squat", "Fentes"], order: "exc", ph: { exc: "Descente", con: "Remontée" },
-    a: { pc: [-0.03, 0.975], th: 4, hand: { t: [-0.12, -0.075, 0.44] }, palm: [1, 0.2, 0], elbow: [-0.5, -1, 0.4], foot: [0, 0.085, 0.17], knee: [1, 0.05, 0.35], fdir: [1, 0, 0.28] },
+    a: { pc: [-0.03, 1.0], th: 4, hand: { t: [-0.12, -0.075, 0.44] }, palm: [1, 0.2, 0], elbow: [-0.5, -1, 0.4], foot: [0, 0.085, 0.17], knee: [1, 0.05, 0.35], fdir: [1, 0, 0.28] },
     b: { pc: [-0.25, 0.53], th: 42, cp: -6, hp: -22 }, imp: [{ t: "bar", r: 0.225 }] },
   { id: "squat-goblet", n: "Squat goblet", gear: "Haltère", lvl: "Débutant", p: ["quadriceps", "fessiers"], s: ["ischios", "abdos"], reps: "10-12", rest: 90,
     tips: ["Haltère tenu à la verticale contre la poitrine", "Pieds un peu plus larges que les épaules", "Descends entre tes jambes, buste bien droit", "Remonte en poussant dans les talons"],
     err: ["Buste qui s'effondre vers l'avant", "Talons qui décollent", "Genoux qui rentrent"],
     vars: ["Squat", "Fentes", "Presse à cuisses"], order: "exc", ph: { exc: "Descente", con: "Remontée" },
-    a: { pc: [-0.03, 0.975], th: 3, hand: { t: [0.2, -0.2, 0.06] }, hdir: { t: [0, 1, 0] }, palm: [0, 0, -1], elbow: { t: [0, -1, 0.4] }, foot: [0, 0.085, 0.2], knee: [1, 0, 0.4], fdir: [1, 0, 0.35] },
+    a: { pc: [-0.03, 1.0], th: 3, hand: { t: [0.2, -0.2, 0.06] }, hdir: { t: [0, 1, 0] }, palm: [0, 0, -1], elbow: { t: [0, -1, 0.4] }, foot: [0, 0.085, 0.2], knee: [1, 0, 0.4], fdir: [1, 0, 0.35] },
     b: { pc: [-0.15, 0.50], th: 22, hp: -10 }, imp: [{ t: "db1", axis: "torso" }] },
   { id: "presse-cuisses", n: "Presse à cuisses", gear: "Machine (presse à 45°)", lvl: "Débutant", p: ["quadriceps", "fessiers"], s: ["ischios", "adducteurs"], reps: "10-12", rest: 120,
     tips: ["Dos et fesses bien plaqués contre le dossier", "Pieds largeur de hanches au milieu de la plateforme", "Descends jusqu'à ce que les genoux forment un angle droit", "Pousse sans verrouiller les genoux"],
@@ -409,7 +409,7 @@ export const EXOS = [
     tips: ["Genoux légèrement fléchis, ils restent ainsi", "Pousse les fesses en arrière, la barre glisse le long des cuisses", "Descends jusqu'au milieu des tibias, dos plat", "Remonte en poussant les hanches vers l'avant"],
     err: ["Arrondir le dos", "Plier les genoux comme un squat", "Barre qui s'éloigne des jambes"],
     vars: ["Soulevé de terre", "Leg curl allongé", "Hip thrust"], order: "exc", ph: { exc: "Descente", con: "Remontée" },
-    a: ST({ pc: [-0.03, 0.97], hand: [0.075, 0.90, 0.22], elbow: [-0.3, 0, 0.2], palm: [-1, 0, 0], foot: [0, 0.085, 0.14], knee: [1, 0, 0.15] }), b: { pc: [-0.33, 0.87], th: 80, hp: -30, hand: [0.08, 0.405, 0.22] },
+    a: ST({ pc: [-0.03, 0.995], hand: [0.075, 0.90, 0.22], elbow: [-0.3, 0, 0.2], palm: [-1, 0, 0], foot: [0, 0.085, 0.14], knee: [1, 0, 0.15] }), b: { pc: [-0.33, 0.87], th: 80, hp: -30, hand: [0.08, 0.405, 0.22] },
     imp: [{ t: "bar", r: 0.2 }] },
   { id: "leg-extension", n: "Leg extension", gear: "Machine", lvl: "Débutant", p: ["quadriceps"], s: [], reps: "12-15", rest: 60,
     tips: ["Genoux alignés avec l'axe de la machine", "Boudin sur le bas des tibias", "Tends les jambes en contractant les cuisses", "Redescends lentement sans laisser claquer les poids"],
@@ -474,7 +474,7 @@ export const EXOS = [
     err: ["Soulever la kettlebell avec les bras", "Arrondir le dos en bas", "Faire un squat au lieu d'une flexion de hanches"],
     vars: ["Soulevé de terre roumain", "Hip thrust"], order: "con", ph: { con: "Extension des hanches", exc: "Retour entre les jambes" },
     a: { pc: [-0.25, 0.86], th: 55, hp: -25, hand: { c: "sh", r: 0.55, d: [-0.25, -1, -0.2] }, elbow: [0, 1, 0.5], palm: [-1, 0, 0], foot: [0, 0.085, 0.22], knee: [1, 0, 0.35], fdir: [1, 0, 0.3] },
-    b: { pc: [-0.04, 0.975], th: -4, hp: 0, palm: [0, -1, 0], hand: { c: "sh", r: 0.55, d: [1, 0.05, -0.2] } }, imp: [{ t: "kb" }] },
+    b: { pc: [-0.04, 1.0], th: -4, hp: 0, palm: [0, -1, 0], hand: { c: "sh", r: 0.55, d: [1, 0.05, -0.2] } }, imp: [{ t: "kb" }] },
 
   /* ---------------- Abdos ---------------- */
   { id: "crunch", n: "Crunch", gear: "Poids du corps", lvl: "Débutant", p: ["abdos"], s: ["obliques"], reps: "15-20", rest: 45,
@@ -487,8 +487,8 @@ export const EXOS = [
     tips: ["Avant-bras au sol, coudes sous les épaules", "Corps aligné des talons à la tête", "Serre les abdos et les fessiers", "Respire calmement pendant tout le maintien"],
     err: ["Bassin trop haut ou qui s'affaisse", "Retenir sa respiration", "Regarder devant soi (nuque cassée)"],
     vars: ["Crunch", "Roue abdominale", "Mountain climbers"], order: "iso", ph: { iso: "Maintien de la position" },
-    a: { pc: [-0.467, 0.264], th: 77, hand: [0.265, 0.022, 0.10], hdir: [1, 0, -0.15], hpose: "flat", palm: [0, -1, 0], elbow: [-0.3, -1, 0.2], foot: [-1.35, 0.205, 0.10], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0] },
-    b: { pc: [-0.467, 0.272] }, props: P => P.mat(-1.6, 0.5) },
+    a: { pc: [-0.449, 0.284], th: 79.3, hand: [0.265, 0.022, 0.10], hdir: [1, 0, -0.15], hpose: "flat", palm: [0, -1, 0], elbow: [-0.3, -1, 0.2], foot: [-1.365, 0.205, 0.10], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0] },
+    b: { pc: [-0.45, 0.291], th: 79.2 }, props: P => P.mat(-1.6, 0.5) },
   { id: "releve-jambes-suspendu", n: "Relevé de jambes suspendu", gear: "Barre de traction", lvl: "Confirmé", p: ["abdos"], s: ["obliques"], reps: "8-12", rest: 60,
     tips: ["Suspendu à la barre, bras tendus", "Monte les jambes tendues jusqu'à l'horizontale", "Enroule légèrement le bassin en haut", "Redescends lentement sans te balancer"],
     err: ["Se balancer pour monter les jambes", "Redescendre en laissant tomber les jambes", "Cambrer le dos"],
@@ -511,9 +511,16 @@ export const EXOS = [
     tips: ["Position de pompe, bras tendus sous les épaules", "Ramène un genou vers la poitrine, puis l'autre", "Garde le bassin bas et le dos plat", "Rythme régulier, respiration continue"],
     err: ["Bassin qui monte", "Mains trop en avant des épaules", "Mouvement trop court"],
     vars: ["Gainage (planche)", "Pompes"], order: "alt", ph: { con: "Genou gauche", exc: "Genou droit" },
-    a: { pc: [-0.485, 0.58], th: 90, hp: -15, hand: [0, 0.022, 0.28], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.65], foot: [{ c: { kn: [0.6, -0.8, 0.05] }, r: L.sh, d: [-0.9, 0.3, 0] }, { c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }], knee: [0, -1, 0], fdir: [[0.35, -0.94, 0.03], [0.55, -0.84, 0.03]] },
-    m: { foot: [{ c: { kn: [-0.2, -0.98, 0.03] }, r: L.sh, d: [-0.95, 0.3, 0] }, { c: { kn: [-0.2, -0.98, 0.03] }, r: L.sh, d: [-0.95, 0.3, 0] }], fdir: [[-0.5, -0.85, 0.03], [-0.5, -0.85, 0.03]] }, mt: 0.5,
-    b: { foot: [{ c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }, { c: { kn: [0.6, -0.8, 0.05] }, r: L.sh, d: [-0.9, 0.3, 0] }], fdir: [[0.55, -0.84, 0.03], [0.35, -0.94, 0.03]] }, props: P => P.mat(-1.5, 0.4) },
+    // genou ramené vers la poitrine (pied décollé, pointe vers l'arrière), l'autre jambe tendue en appui sur les orteils ;
+    // la jambe passe sous le corps genou plié (pied en l'air), puis on repasse par la planche avant l'autre genou
+    a: { pc: [-0.485, 0.58], th: 90, hp: -15, hand: [0, 0.022, 0.28], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.65], foot: [{ c: { kn: [0.73, -0.68, 0.06] }, r: L.sh, d: [-0.97, -0.2, 0] }, { c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }], knee: [0, -1, 0], fdir: [[-0.55, -0.83, 0.03], [0.55, -0.84, 0.03]] },
+    keys: [{ at: 0 }, { at: 0.25, pc: [-0.485, 0.62], foot: [{ c: { kn: [0.3, -0.95, 0.04] }, r: L.sh, d: [-0.96, 0.28, 0] }, { c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }], fdir: [[0.1, -0.99, 0.03], [0.55, -0.84, 0.03]] },
+      { at: 0.375, pc: [-0.485, 0.59], foot: [{ c: { kn: [-0.6, -0.8, 0.02] }, r: L.sh, d: [-0.97, 0.1, 0] }, { c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }], fdir: [[0.3, -0.95, 0.03], [0.55, -0.84, 0.03]] },
+      { at: 0.5, pc: [-0.485, 0.6], foot: [{ c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }, { c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }], fdir: [[0.55, -0.84, 0.03], [0.55, -0.84, 0.03]] },
+      { at: 0.625, pc: [-0.485, 0.59], foot: [{ c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }, { c: { kn: [-0.6, -0.8, 0.02] }, r: L.sh, d: [-0.97, 0.1, 0] }], fdir: [[0.55, -0.84, 0.03], [0.3, -0.95, 0.03]] },
+      { at: 0.75, pc: [-0.485, 0.62], foot: [{ c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }, { c: { kn: [0.3, -0.95, 0.04] }, r: L.sh, d: [-0.96, 0.28, 0] }], fdir: [[0.55, -0.84, 0.03], [0.1, -0.99, 0.03]] },
+      { at: 1, pc: [-0.485, 0.58], foot: [{ c: { kn: [-0.891, -0.454, 0] }, r: L.sh, d: [-0.891, -0.454, 0] }, { c: { kn: [0.73, -0.68, 0.06] }, r: L.sh, d: [-0.97, -0.2, 0] }], fdir: [[0.55, -0.84, 0.03], [-0.55, -0.83, 0.03]] }],
+    props: P => P.mat(-1.5, 0.4) },
   { id: "crunch-poulie", n: "Crunch à la poulie", gear: "Poulie haute et corde", lvl: "Intermédiaire", p: ["abdos"], s: ["obliques"], reps: "12-15", rest: 60,
     tips: ["À genoux face à la poulie, corde tenue près de la tête", "Les hanches ne bougent pas", "Enroule le buste vers le sol en contractant les abdos", "Reviens lentement"],
     err: ["Tirer avec les bras", "S'asseoir sur les talons", "Garder le dos droit (pas d'enroulement)"],
@@ -531,8 +538,8 @@ export const EXOS = [
     tips: ["Pieds posés sur un banc ou une chaise, mains au sol", "Corps gainé, bassin dans l'alignement", "Descends jusqu'à frôler le sol avec la poitrine", "Plus les pieds sont hauts, plus le haut des pectoraux et les épaules travaillent"],
     err: ["Bassin trop haut (position en V)", "Tête qui tombe", "Amplitude trop courte"],
     vars: ["Pompes", "Pompes inclinées", "Développé couché incliné"], order: "exc", ph: { exc: "Descente", con: "Poussée" },
-    a: { pc: [-0.475, 0.58], th: 90, hand: [0, 0.022, 0.3], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.65], foot: [-1.28, 0.61, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0] },
-    b: { pc: [-0.43, 0.34], th: 102 }, props: P => { P.benchZ(-1.3, 0.45); P.mat(-0.9, 0.4); } },
+    a: { pc: [-0.422, 0.542], th: 85.7, hand: [0, 0.022, 0.3], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.65], foot: [-1.34, 0.61, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0, -1, 0] },
+    b: { pc: [-0.443, 0.381], th: 106.3 }, props: P => { P.benchZ(-1.3, 0.45); P.mat(-0.9, 0.4); } },
   { id: "developpe-militaire-halteres", n: "Développé militaire haltères", al: ["Développé militaire haltère"], gear: "Haltères", lvl: "Intermédiaire", p: ["deltoides_ant", "deltoides_lat"], s: ["triceps", "trapezes", "abdos"], reps: "8-12", rest: 90,
     tips: ["Debout, pieds largeur de hanches, abdos et fessiers serrés", "Haltères à hauteur des oreilles, paumes vers l'avant", "Pousse vers le haut en rapprochant légèrement les haltères", "Redescends lentement jusqu'aux oreilles"],
     err: ["Se cambrer pour pousser", "Pousser les haltères devant soi", "Descendre trop bas"],
@@ -616,7 +623,7 @@ export const EXOS = [
     tips: ["Face à la poulie, sangle à la cheville, mains sur la machine", "Buste légèrement penché, dos droit, abdos serrés", "Tends la jambe vers l'arrière en serrant le fessier", "Reviens lentement sans poser le pied"],
     err: ["Cambrer le bas du dos", "Lancer la jambe", "Plier fortement le genou"],
     vars: ["Hip thrust", "Pont fessier", "Abducteurs à la machine"], order: "con", ph: { con: "Extension de la hanche", exc: "Retour lent" },
-    a: ST({ pc: [-0.12, 0.97], th: 18, hand: [0.42, 1.18, 0.2], elbow: [-0.5, -1, 0.5], palm: [1, 0, 0], foot: [[0, 0.085, 0.12], { c: "hip", r: 0.79, d: [0.15, -1, 0.02] }], knee: [1, 0, 0.05], fdir: [[1, 0, 0.12], [1, -0.1, 0.05]] }),
+    a: ST({ pc: [-0.12, 0.995], th: 18, hand: [0.42, 1.18, 0.2], elbow: [-0.5, -1, 0.5], palm: [1, 0, 0], foot: [[0, 0.085, 0.12], { c: "hip", r: 0.79, d: [0.15, -1, 0.02] }], knee: [1, 0, 0.05], fdir: [[1, 0, 0.12], [1, -0.1, 0.05]] }),
     b: { foot: [[0, 0.085, 0.12], { c: "hip", r: 0.79, d: [-0.62, -0.78, 0.02] }], fdir: [[1, 0, 0.12], [0.3, -0.95, 0.05]] },
     props: P => P.tower(0.62, 0.12, 0.1, 0.5), imp: [{ t: "cable", from: [0.5, 0.1, 0.12], to: "ankle1", stacks: [0] }] },
   { id: "kickback-fessier-machine", n: "Kickback fessier à la machine", al: ["Rear kick à la machine", "Rear kick machine", "Glute kickback machine"], gear: "Machine à kickback", lvl: "Débutant", p: ["fessiers"], s: ["ischios", "lombaires"], reps: "12-15 par jambe", rest: 60,
@@ -640,14 +647,15 @@ export const EXOS = [
     tips: ["Pieds largeur d'épaules, pointes légèrement ouvertes", "Descends en poussant les fesses en arrière, bras tendus devant pour l'équilibre", "Genoux dans l'axe des pieds, talons au sol", "Remonte en poussant dans les talons"],
     err: ["Genoux qui rentrent", "Talons qui décollent", "Dos qui s'arrondit"],
     vars: ["Squat", "Squat sauté", "Squat goblet"], order: "exc", ph: { exc: "Descente", con: "Remontée" },
-    a: { pc: [-0.03, 0.975], th: 3, hand: { c: "sh", r: 0.55, d: [0.08, -1, 0.06] }, elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.18], knee: [1, 0, 0.35], fdir: [1, 0, 0.3] },
+    a: { pc: [-0.03, 1.0], th: 3, hand: { c: "sh", r: 0.55, d: [0.08, -1, 0.06] }, elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.18], knee: [1, 0, 0.35], fdir: [1, 0, 0.3] },
     b: { pc: [-0.2, 0.52], th: 30, hp: -12, hand: { c: "sh", r: 0.55, d: [1, 0.05, 0.02] }, palm: [0, -1, 0] } },
   { id: "squat-saute", n: "Squat sauté", gear: "Poids du corps", lvl: "Intermédiaire", g: "cardio", p: ["quadriceps", "fessiers"], s: ["mollets", "ischios"], reps: "10-15", rest: 60,
     tips: ["Descends en squat, bras vers l'arrière", "Saute le plus haut possible en lançant les bras vers le haut", "Atterris sur l'avant des pieds, genoux souples", "Enchaîne directement le squat suivant"],
     err: ["Atterrir jambes tendues", "Genoux qui rentrent à la réception", "Dos rond en bas"],
     vars: ["Squat au poids du corps", "Burpees", "Fentes sautées"], order: "loop", dur: 2.0, ph: { loop: "Squat sauté" },
-    a: { pc: [-0.03, 0.975], th: 3, hand: { c: "sh", r: 0.55, d: [0.05, -1, 0.08] }, elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.16], knee: [1, 0, 0.3], fdir: [1, 0, 0.25] },
+    a: { pc: [-0.03, 1.0], th: 3, hand: { c: "sh", r: 0.55, d: [0.05, -1, 0.08] }, elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.16], knee: [1, 0, 0.3], fdir: [1, 0, 0.25] },
     keys: [{ at: 0, lab: "Descente" }, { at: 0.35, lab: "Impulsion", pc: [-0.17, 0.56], th: 28, hp: -10, hand: { c: "sh", r: 0.55, d: [-0.45, -0.88, 0.1] } },
+      { at: 0.45, hand: { c: "sh", r: 0.55, d: [0.97, 0.12, 0.1] } }, // les bras balancent par l'avant (pas par le côté)
       { at: 0.55, lab: "Saut", pc: [-0.02, 1.2], th: 0, hp: 0, hand: { c: "sh", r: 0.55, d: [0.45, 0.88, 0.08] }, foot: [0.03, 0.31, 0.16], fdir: [0.6, -0.8, 0.2] },
       { at: 0.75, lab: "Réception", pc: [-0.07, 0.9], th: 8, hand: { c: "sh", r: 0.55, d: [0.6, -0.8, 0.08] }, foot: [0, 0.085, 0.16], fdir: [1, 0, 0.25] }, { at: 1, back: true }] },
   { id: "fentes-sautees", n: "Fentes sautées", gear: "Poids du corps", lvl: "Confirmé", g: "cardio", p: ["quadriceps", "fessiers"], s: ["ischios", "mollets"], reps: "10-20", rest: 60,
@@ -663,10 +671,16 @@ export const EXOS = [
     tips: ["Debout, descends en squat et pose les mains au sol", "Jette les pieds en arrière en position de pompe, puis fais une pompe", "Ramène les pieds vers les mains", "Saute en levant les bras au-dessus de la tête"],
     err: ["Dos qui s'affaisse en position de planche", "Oublier la pompe ou le saut", "Atterrir jambes tendues"],
     vars: ["Burpees sautés en longueur", "Pompes", "Squat sauté"], order: "loop", dur: 3.4, ph: { loop: "Burpee" },
-    a: { pc: [-0.02, 0.975], th: 0, hand: [-0.02, 0.86, 0.24], elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.13], knee: [1, 0, 0.15], fdir: [1, 0, 0.15] },
+    a: { pc: [-0.02, 1.0], th: 0, hand: [-0.02, 0.86, 0.24], elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.13], knee: [1, 0, 0.15], fdir: [1, 0, 0.15] },
     keys: [{ at: 0, lab: "Descente en squat" }, { at: 0.15, lab: "Pieds en arrière", pc: [-0.12, 0.5], th: 42, hp: -20, hand: [0.42, 0.022, 0.2], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.6], knee: [1, 0.35, 0.45] },
-      { at: 0.3, lab: "Pompe", pc: [-0.058, 0.403], th: 70.7, hp: -10, foot: [-0.92, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [1, 0.35, 0.3] },
-      { at: 0.43, lab: "Pompe", pc: [0.002, 0.166], th: 85.9 }, { at: 0.56, lab: "Pieds vers les mains", pc: [-0.058, 0.403], th: 70.7 },
+      { at: 0.18 }, // mains posées, on bascule le poids sur les mains
+      { at: 0.225, pc: [-0.08, 0.6], th: 58, foot: [-0.62, 0.3, 0.12], fdir: [0.6, -0.8, 0.06], knee: [0.5, -0.85, 0.25] }, // saut des pieds vers l'arrière, bassin haut
+      { at: 0.27, pc: [-0.04, 0.407], th: 70.9, hp: -10, foot: [-0.94, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0.3, -1, 0.15] },
+      { at: 0.3, lab: "Pompe", pc: [-0.04, 0.407], th: 70.9, hp: -10, foot: [-0.94, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0.3, -1, 0.15] },
+      { at: 0.43, lab: "Pompe", pc: [-0.016, 0.24], th: 94.5 }, { at: 0.56, lab: "Pieds vers les mains", pc: [-0.04, 0.407], th: 70.9 },
+      { at: 0.59 }, // on repousse le sol, bassin qui monte
+      { at: 0.635, pc: [-0.09, 0.64], th: 54, hp: -15, foot: [-0.4, 0.3, 0.12], fdir: [0.7, -0.7, 0.1], knee: [0.9, -0.4, 0.35] }, // saut des pieds vers les mains, genoux sous la poitrine
+      { at: 0.68, pc: [-0.12, 0.5], th: 42, hp: -20, foot: [0, 0.085, 0.13], fdir: [1, 0, 0.15], knee: [1, 0.35, 0.45] },
       { at: 0.7, lab: "Saut", pc: [-0.12, 0.5], th: 42, hp: -20, foot: [0, 0.085, 0.13], fdir: [1, 0, 0.15], knee: [1, 0.35, 0.45] },
       { at: 0.85, lab: "Saut", pc: [-0.02, 1.2], th: -2, hp: 0, hand: [-0.02, 2.12, 0.22], hdir: [0, 1, 0], hpose: "grip", palm: [1, 0, 0], elbow: [0, 0, 1], foot: [0.02, 0.31, 0.13], fdir: [0.6, -0.8, 0.12], knee: [1, 0, 0.15] },
       { at: 1, back: true }], props: P => P.mat(-1.3, 0.6) },
@@ -674,7 +688,7 @@ export const EXOS = [
     tips: ["Debout, pieds joints, bras le long du corps", "Saute en écartant les jambes et en montant les bras au-dessus de la tête", "Saute à nouveau pour revenir pieds joints, bras le long du corps", "Reste sur l'avant des pieds, rythme régulier"],
     err: ["Atterrir sur les talons", "Bras qui ne montent qu'à moitié", "Genoux verrouillés"],
     vars: ["Montées de genoux", "Burpees"], order: "alt", tempo: 0.85, ph: { con: "Ouverture", exc: "Fermeture" },
-    a: { pc: [-0.02, 0.975], th: 0, hand: { c: "sh", r: 0.55, d: [0.03, -1, 0.15] }, elbow: [-0.2, 0, 1], palm: [0, 0, -1], foot: [0, 0.085, 0.1], knee: [1, 0, 0.1], fdir: [1, 0, 0.2] },
+    a: { pc: [-0.02, 1.0], th: 0, hand: { c: "sh", r: 0.55, d: [0.03, -1, 0.15] }, elbow: [-0.2, 0, 1], palm: [0, 0, -1], foot: [0, 0.085, 0.1], knee: [1, 0, 0.1], fdir: [1, 0, 0.2] },
     b: { pc: [-0.02, 0.955], hand: { c: "sh", r: 0.55, d: [0.03, 0.92, 0.4] }, palm: [0.3, 0, -1], foot: [0, 0.085, 0.36], knee: [1, 0, 0.4] }, view: [1, 0.3, 0.3] },
   { id: "montees-de-genoux", n: "Montées de genoux", gear: "Poids du corps", lvl: "Débutant", g: "cardio", p: ["quadriceps"], s: ["mollets", "abdos"], reps: "30-60 s", time: true, rest: 30,
     tips: ["Cours sur place en montant les genoux à hauteur de hanches", "Reste sur l'avant des pieds", "Les bras accompagnent le mouvement comme pour courir", "Buste droit, abdos serrés"],
@@ -702,8 +716,8 @@ export const EXOS = [
     tips: ["Allongé sur le ventre, bras tendus devant toi", "Décolle en même temps les bras, la poitrine et les jambes", "Regard vers le sol, nuque dans l'alignement", "Marque une pause en haut, puis redescends lentement"],
     err: ["Relever fortement la tête", "Plier les genoux", "Aller trop vite"],
     vars: ["Extensions lombaires", "Pont fessier"], order: "con", ph: { con: "Extension", exc: "Retour lent" },
-    a: { pc: [0, 0.108], th: 90, hp: -8, hand: [0.94, 0.04, 0.2], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [0, 1, 0.3], foot: [-0.9, 0.085, 0.1], fdir: [-0.95, -0.3, 0.05], knee: [0, 1, 0] },
-    b: { cp: -20, hp: -12, hand: [0.9, 0.25, 0.22], foot: [-0.87, 0.25, 0.1] }, props: P => P.mat(-1.1, 1.2) },
+    a: { pc: [0, 0.108], th: 90, hp: -8, hand: [0.94, 0.04, 0.2], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [0, 1, 0.3], foot: [-0.925, 0.085, 0.1], fdir: [-0.95, -0.3, 0.05], knee: [0, -1, 0] }, // jambes tendues, rotule vers le sol
+    b: { cp: -20, hp: -12, hand: [0.9, 0.25, 0.22], foot: [-0.925, 0.25, 0.1] }, props: P => P.mat(-1.1, 1.2) },
   { id: "planche-laterale", n: "Planche latérale", gear: "Poids du corps", lvl: "Débutant", p: ["obliques"], s: ["abdos", "abducteurs", "fessiers"], time: true, rest: 45,
     tips: ["Sur le côté, coude sous l'épaule, jambes tendues l'une sur l'autre", "Décolle les hanches pour aligner les chevilles, les hanches et les épaules", "Serre les abdos et les fessiers", "Change de côté à la série suivante"],
     err: ["Hanches qui tombent vers le sol", "Coude loin de l'épaule", "Basculer le buste vers l'avant"],
@@ -744,7 +758,7 @@ export const EXOS = [
     tips: ["Bras tendus en haut, poignées en main", "Tire vers le bas en pliant légèrement les hanches et les genoux", "Finis les mains près des cuisses, bras tendus", "Remonte en grandissant le corps, rythme régulier"],
     err: ["Tirer seulement avec les bras", "Trop plier les genoux (ça devient un squat)", "Arrondir le dos"],
     vars: ["Rameur", "Tirage vertical"], order: "con", tempo: 1.4, ph: { con: "Tirage", exc: "Remontée" },
-    a: ST({ pc: [-0.02, 0.975], th: -2, hand: [0.32, 1.92, 0.22], hdir: [0, 1, 0], palm: [1, 0, 0], elbow: [-0.5, -0.4, 1], foot: [0, 0.085, 0.14] }),
+    a: ST({ pc: [-0.02, 1.0], th: -2, hand: [0.32, 1.92, 0.22], hdir: [0, 1, 0], palm: [1, 0, 0], elbow: [-0.5, -0.4, 1], foot: [0, 0.085, 0.14] }),
     m: { pc: [-0.09, 0.9175], th: 20, hp: -10, hand: [0.25, 1.33, 0.22], hdir: [1, -0.1, 0], palm: [0, -1, 0], elbow: [-0.55, 0.05, 0.7], knee: [1, 0, 0.125] }, mt: 0.5,
     b: { pc: [-0.16, 0.86], th: 42, hp: -20, hand: [0.18, 0.74, 0.22], hdir: [0.3, -1, 0], palm: [-1, -0.3, 0], elbow: [-0.6, 0.5, 0.4], knee: [1, 0, 0.15] },
     props: P => P.skierg(0.66), imp: [{ t: "cable", from: [0.6, 2.15, 0.22], to: "hands", handle: "d" }], view: [0.25, 0.3, 1] },
@@ -766,15 +780,19 @@ export const EXOS = [
     tips: ["Fais un burpee : poitrine au sol, puis remonte les pieds vers les mains", "Saute vers l'avant à deux pieds, le plus loin possible", "Atterris genoux souples et enchaîne le burpee suivant", "Garde un rythme régulier sur toute la distance"],
     err: ["Sauter sur une seule jambe", "Atterrir jambes tendues", "Ne pas toucher le sol avec la poitrine"],
     vars: ["Burpees", "Squat sauté"], order: "loop", dur: 3.4, ph: { loop: "Burpee" },
-    a: { pc: [-0.02, 0.975], th: 0, hand: [-0.02, 0.86, 0.24], elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.13], knee: [1, 0, 0.15], fdir: [1, 0, 0.15] },
+    a: { pc: [-0.02, 1.0], th: 0, hand: [-0.02, 0.86, 0.24], elbow: [-1, 0, 0.2], palm: [0, 0, -1], foot: [0, 0.085, 0.13], knee: [1, 0, 0.15], fdir: [1, 0, 0.15] },
     keys: [{ at: 0, lab: "Descente" }, { at: 0.14, lab: "Poitrine au sol", pc: [-0.12, 0.5], th: 42, hp: -20, hand: [0.42, 0.022, 0.27], hdir: [1, 0, -0.1], hpose: "flat", palm: [0, -1, 0], elbow: [-0.8, 0.6, 0.6], knee: [1, 0.35, 0.45] },
-      { at: 0.28, pc: [0.002, 0.166], th: 85.9, hp: -10, foot: [-0.92, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [1, 0.35, 0.3] },
+      { at: 0.19, pc: [-0.08, 0.6], th: 58, foot: [-0.62, 0.3, 0.12], fdir: [0.6, -0.8, 0.06], knee: [0.5, -0.85, 0.25] }, // saut des pieds vers l'arrière, bassin haut
+      { at: 0.235, pc: [-0.04, 0.407], th: 70.9, hp: -10, foot: [-0.94, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0.3, -1, 0.15] }, // réception en planche
+      { at: 0.28, pc: [-0.016, 0.24], th: 94.5, hp: -10, foot: [-0.94, 0.205, 0.1], fdir: [0.55, -0.84, 0.03], knee: [0.3, -1, 0.15] },
+      { at: 0.32, pc: [-0.04, 0.407], th: 70.9, hp: -10 }, // on repousse le sol avant de ramener les pieds
+      { at: 0.37, pc: [-0.09, 0.64], th: 54, hp: -15, foot: [-0.4, 0.3, 0.12], fdir: [0.7, -0.7, 0.1], knee: [0.9, -0.4, 0.35] }, // pieds vers les mains, genoux sous la poitrine
       { at: 0.42, lab: "Pieds vers les mains", pc: [-0.12, 0.5], th: 42, hp: -20, foot: [0, 0.085, 0.13], fdir: [1, 0, 0.15], knee: [1, 0.35, 0.45] },
       { at: 0.485, lab: "Pieds vers les mains", hand: [0.2, 0.42, 0.38], hdir: [0, -1, 0], hpose: "grip", palm: [0, 0, -1], elbow: [-1, 0, 0.3] },
       { at: 0.55, lab: "Saut en avant", pc: [-0.12, 0.62], th: 30, hand: [-0.3, 0.75, 0.3], hdir: [-0.3, -1, 0], hpose: "grip", palm: [0, 0, -1], elbow: [-1, 0, 0.2] },
       { at: 0.7, lab: "Saut en avant", pc: [0.35, 1.05], th: 10, hp: 0, hand: [0.75, 1.3, 0.22], hdir: [1, 0.4, 0], foot: [0.25, 0.3, 0.13], fdir: [0.7, -0.7, 0.12] },
       { at: 0.82, lab: "Réception", pc: [0.6, 0.62], th: 30, hp: -15, hand: [0.95, 0.75, 0.24], hdir: [0.5, -1, 0], foot: [0.62, 0.085, 0.13], fdir: [1, 0, 0.15] },
-      { at: 0.92, lab: "Réception", pc: [0.6, 0.975], th: 0, hand: [0.6, 0.86, 0.24], hdir: null, knee: [1, 0, 0.15] }, { at: 1, back: true }],
+      { at: 0.92, lab: "Réception", pc: [0.6, 1.0], th: 0, hand: [0.6, 0.86, 0.24], hdir: null, knee: [1, 0, 0.15] }, { at: 1, back: true }],
     props: P => P.mat(-1.3, 1.3) },
   { id: "rameur", n: "Rameur", gear: "Rameur", lvl: "Débutant", g: "hyrox", cat: "hyrox", cardio: true, p: ["dorsaux", "quadriceps"], s: ["ischios", "biceps", "fessiers", "lombaires"], dist: 1000, rest: 120,
     tips: ["Départ : genoux pliés, bras tendus, buste légèrement penché en avant", "Pousse d'abord avec les jambes, puis bascule le buste, puis tire les bras", "Ramène la poignée sous la poitrine, coudes près du corps", "Reviens dans l'ordre inverse : bras, buste, puis jambes"],
@@ -798,9 +816,9 @@ export const EXOS = [
     tips: ["Sac posé sur le haut du dos, tenu des deux mains", "Grand pas en avant, genou arrière jusqu'au sol (sans le cogner)", "Buste droit, remonte en poussant sur le talon avant", "Alterne les jambes à chaque pas"],
     err: ["Genou avant qui rentre", "Buste qui penche en avant", "Pas trop courts"],
     vars: ["Fentes", "Squat bulgare"], order: "loop", dur: 3.2, ph: { loop: "Fente" },
-    a: { pc: [-0.04, 0.975], th: 1, hand: { t: [-0.1, 0.0, 0.3] }, palm: [1, 0.3, 0], elbow: [0, -1, 0.5], foot: [[0, 0.085, 0.12], [0, 0.085, 0.12]], knee: [[1, 0, 0.1], [1, 0, 0.1]], fdir: [[1, 0, 0.12], [1, 0, 0.12]] },
+    a: { pc: [-0.04, 1.0], th: 1, hand: { t: [-0.1, 0.0, 0.3] }, palm: [1, 0.3, 0], elbow: [0, -1, 0.5], foot: [[0, 0.085, 0.12], [0, 0.085, 0.12]], knee: [[1, 0, 0.1], [1, 0, 0.1]], fdir: [[1, 0, 0.12], [1, 0, 0.12]] },
     keys: [{ at: 0, lab: "Fente jambe gauche" }, { at: 0.25, lab: "Remontée", pc: [-0.05, 0.56], foot: [[0.38, 0.085, 0.12], [-0.5, 0.215, 0.12]], knee: [[1, 0, 0.1], [1, -0.2, 0.1]], fdir: [[1, 0, 0.12], [0.55, -0.84, 0.05]] },
-      { at: 0.5, lab: "Fente jambe droite", pc: [-0.04, 0.975], foot: [[0, 0.085, 0.12], [0, 0.085, 0.12]], knee: [[1, 0, 0.1], [1, 0, 0.1]], fdir: [[1, 0, 0.12], [1, 0, 0.12]] },
+      { at: 0.5, lab: "Fente jambe droite", pc: [-0.04, 1.0], foot: [[0, 0.085, 0.12], [0, 0.085, 0.12]], knee: [[1, 0, 0.1], [1, 0, 0.1]], fdir: [[1, 0, 0.12], [1, 0, 0.12]] },
       { at: 0.75, lab: "Remontée", pc: [-0.05, 0.56], foot: [[-0.5, 0.205, 0.12], [0.38, 0.085, 0.12]], knee: [[1, -0.2, 0.1], [1, 0, 0.1]], fdir: [[0.55, -0.84, 0.05], [1, 0, 0.12]] }, { at: 1, back: true }],
     imp: [{ t: "sandbag" }] },
   { id: "wall-balls", n: "Wall balls", gear: "Medicine ball et mur", lvl: "Intermédiaire", g: "hyrox", cat: "hyrox", p: ["quadriceps", "deltoides_ant"], s: ["fessiers", "triceps", "abdos"], reps: "20", rest: 90,
@@ -843,7 +861,7 @@ export const EXOS = [
     err: ["Se pencher vers l'avant en s'appuyant sur les poignées", "Décoller les talons", "Résistance trop faible (mouvement qui s'emballe)"],
     vars: ["Arc trainer", "Tapis de course", "Vélo droit"], order: "loop", dur: 1.1, lin: true, ph: { loop: "Foulée" },
     a: { pc: [-0.05, 1.23], th: 6, hand: ELL.keys[0].hand, palm: [0, 0, -1], hdir: [0, 1, 0], elbow: [-1, -0.4, 0.3], knee: [1, 0, 0.08], foot: ELL.foot, fdir: [1, 0, 0.1] },
-    keys: ELL.keys, props: P => P.elliptical(false), imp: [{ t: "plates", rail: [-0.62, 0.3, 0.16] }, { t: "handles", piv: [0.62, 0.45, 0.28] }] },
+    keys: ELL.keys, props: P => P.elliptical(false), imp: [{ t: "plates", rail: [-0.62, 0.3, 0.16], crank: 0.13 }, { t: "handles", piv: [0.62, 0.45, 0.28] }] },
   { id: "arc-trainer", n: "Arc trainer", gear: "Arc trainer", lvl: "Intermédiaire", cat: "cardio", g: "machines", p: ["fessiers", "quadriceps"], s: ["ischios", "mollets", "dorsaux"], rest: 0, al: ["Arc", "Cybex Arc", "Arc trainer Cybex"],
     tips: ["Les pieds montent et avancent en arc : pousse vers le bas et l'arrière", "Choisis l'inclinaison : plus elle est haute, plus les fessiers travaillent", "Garde le buste droit, mains sur les poignées mobiles", "Moins d'impact qu'en courant : bien pour les genoux"],
     err: ["S'avachir sur les poignées", "Décoller les talons des pédales", "Mouvement trop court"],
@@ -855,9 +873,13 @@ export const EXOS = [
     err: ["Se pendre aux rampes (le travail baisse)", "Monter seulement sur la pointe des pieds", "Se pencher très en avant"],
     vars: ["Arc trainer", "Tapis de course"], order: "loop", dur: 1.1, lin: true, ph: { loop: "Marche" },
     a: { pc: [-0.12, 1.18], th: 9, hand: [0.24, 1.12, 0.36], palm: [0, -1, 0], elbow: [-1, -0.5, 0.4], knee: [1, 0, 0.08], foot: [[0.24, 0.485, 0.11], [-0.03, 0.285, 0.11]], fdir: [[1, 0, 0.08], [1, 0, 0.08]] },
-    keys: [{ at: 0, lab: "Montée jambe gauche" }, { at: 0.25, pc: [-0.12, 1.21], foot: [[0.12, 0.39, 0.11], [0.08, 0.52, 0.11]], fdir: [[1, 0, 0.08], [1, -0.3, 0.08]] },
+    // pied d'appui : il descend avec sa marche (−0,27 ; −0,2 par pas) ; pied qui monte : il passe au-dessus de la marche suivante avant de s'y poser
+    keys: [{ at: 0, lab: "Montée jambe gauche" }, { at: 0.125, pc: [-0.12, 1.195], foot: [[0.1725, 0.435, 0.11], [-0.05, 0.445, 0.11]], fdir: [[1, 0, 0.08], [1, -0.25, 0.08]] }, { at: 0.25, pc: [-0.12, 1.21], foot: [[0.105, 0.385, 0.11], [0.08, 0.535, 0.11]], fdir: [[1, 0, 0.08], [1, -0.3, 0.08]] },
+      { at: 0.375, pc: [-0.12, 1.2], foot: [[0.0375, 0.335, 0.11], [0.19, 0.565, 0.11]], fdir: [[1, 0, 0.08], [1, -0.1, 0.08]] },
       { at: 0.5, lab: "Montée jambe droite", pc: [-0.12, 1.18], foot: [[-0.03, 0.285, 0.11], [0.24, 0.485, 0.11]], fdir: [[1, 0, 0.08], [1, 0, 0.08]] },
-      { at: 0.75, pc: [-0.12, 1.21], foot: [[0.08, 0.52, 0.11], [0.12, 0.39, 0.11]], fdir: [[1, -0.3, 0.08], [1, 0, 0.08]] }, { at: 1, back: true }],
+      { at: 0.625, pc: [-0.12, 1.195], foot: [[-0.05, 0.445, 0.11], [0.1725, 0.435, 0.11]], fdir: [[1, -0.25, 0.08], [1, 0, 0.08]] },
+      { at: 0.75, pc: [-0.12, 1.21], foot: [[0.08, 0.535, 0.11], [0.105, 0.385, 0.11]], fdir: [[1, -0.3, 0.08], [1, 0, 0.08]] },
+      { at: 0.875, pc: [-0.12, 1.2], foot: [[0.19, 0.565, 0.11], [0.0375, 0.335, 0.11]], fdir: [[1, -0.1, 0.08], [1, 0, 0.08]] }, { at: 1, back: true }],
     props: P => P.stairs() },
   { id: "air-bike", n: "Air bike", gear: "Air bike (Assault, Echo)", lvl: "Avancé", cat: "cardio", g: "machines", p: ["quadriceps", "deltoides_ant"], s: ["fessiers", "pectoraux", "dorsaux", "triceps", "biceps"], rest: 0, al: ["Assault bike", "Echo bike", "Fan bike", "Vélo à air"],
     tips: ["Pousse et tire les poignées en même temps que tu pédales : tout le corps travaille", "Plus tu vas vite, plus le ventilateur résiste", "Dos droit, abdos gainés, selle réglée comme un vélo droit", "Idéal en intervalles : 20 s à fond, 40 s tranquille"],
@@ -889,7 +911,7 @@ export const EXOS = [
     err: ["Coudes plus hauts que les épaules (épaules coincées)", "Cambrer le bas du dos", "Avancer trop fort d'un coup"],
     br: "À chaque expiration, avance de quelques millimètres en gardant les épaules basses.",
     vars: ["Étirement des biceps et des épaules", "Étirement de l'épaule bras croisé"],
-    ...STR({ pc: [-0.2, 0.975], th: 0, hand: [-0.025, 1.7, 0.47], hdir: [0, 1, 0], palm: [1, 0, 0], elbow: [0, -0.3, 1], foot: [[0.02, 0.085, 0.13], [-0.42, 0.085, 0.13]], knee: [1, 0, 0.1], fdir: [1, 0, 0.15] },
+    ...STR({ pc: [-0.2, 1.0], th: 0, hand: [-0.025, 1.7, 0.47], hdir: [0, 1, 0], palm: [1, 0, 0], elbow: [0, -0.3, 1], foot: [[0.02, 0.085, 0.13], [-0.42, 0.085, 0.13]], knee: [1, 0, 0.1], fdir: [1, 0, 0.15] },
       { pc: [0.0, 0.965], th: 9, cp: -4, foot: [[0.02, 0.085, 0.13], [-0.42, 0.085, 0.13]] }, false),
     props: P => P.door(0.0), view: [1, 0.25, 0.3] },
   { id: "etirement-triceps", n: "Étirement des triceps", gear: "Sans matériel", lvl: "Débutant", zone: "haut", cat: "etirement", p: ["triceps"], s: ["dorsaux"], time: true, hold: 30, side: true, rest: 15,
@@ -1076,6 +1098,9 @@ function materials() {
     bag: new THREE.MeshStandardMaterial({ color: 0x3d4a3a, roughness: 0.9 }), ball: new THREE.MeshStandardMaterial({ color: 0x2b2f3a, roughness: 0.7 }),
     belt: new THREE.MeshStandardMaterial({ color: 0x18171d, roughness: 0.9 }),
     wall: new THREE.MeshStandardMaterial({ color: 0xb8b0c4, roughness: 0.95 }),
+    mark: new THREE.MeshStandardMaterial({ color: 0x5d596e, roughness: 0.85 }),
+    turf: new THREE.MeshStandardMaterial({ color: 0x2c3a2e, roughness: 0.95 }),
+    cage: new THREE.MeshStandardMaterial({ color: 0x55515f, metalness: 0.5, roughness: 0.5, transparent: true, opacity: 0.28, depthWrite: false }),
   });
 }
 const SPH = () => G.geo.sph;
@@ -1344,16 +1369,29 @@ function kitBuilder(g) {
   // pad rembourré orienté dans le plan x-y (ang : direction de la longueur, en degrés depuis la verticale)
   const padAt = (cx, cy, ang, len, thk, wd, z) => box([thk, len, wd], [cx, cy, z || 0], "dark", -ang * D2R);
   const stacks = [];
+  // roue d'inertie / ventilateur qui tourne pendant l'exercice : disque, jante et rayons (pour voir la rotation) ; axe latéral (z)
+  const spinWheel = (cx, cy, r, w, mat, spokes, rate) => {
+    const grp = new THREE.Group(); grp.position.set(cx, cy, 0); g.add(grp);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(r, r, w, 40), MAT[mat || "dark"]); disc.rotation.x = Math.PI / 2; grp.add(disc);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(r * 0.98, 0.012, 8, 48), MAT.steel); grp.add(rim);
+    for (let k = 0; k < (spokes || 6); k++) { const sp = new THREE.Mesh(new THREE.BoxGeometry(r * 1.9, 0.026, w + 0.012), MAT.steel); sp.rotation.z = k * Math.PI / (spokes || 6); grp.add(sp); }
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, w + 0.04, 18), MAT.steel); hub.rotation.x = Math.PI / 2; grp.add(hub);
+    (P._spin = P._spin || []).push({ o: grp, rate: rate || 1 });
+    return grp;
+  };
   const P = {
     box: (s, p, m, rz) => box(s, p, m, rz),
     treadmill() {
       box([1.75, 0.1, 0.68], [0.05, 0.06, 0], "frame"); box([1.62, 0.025, 0.52], [0.05, 0.123, 0], "belt");
+      // repères sur la bande : ils reculent sous les pieds (la bande tourne)
+      P._belt = { x0: -0.76, x1: 0.86, y: x => 0.1365, slope: () => 0, marks: [] };
+      for (let k = 0; k < 9; k++) P._belt.marks.push(box([0.04, 0.004, 0.5], [-0.76 + k * 0.2, 0.1365, 0], "mark"));
       [1, -1].forEach(z => { box([0.06, 1.15, 0.06], [0.88, 0.62, 0.32 * z], "frame", -0.12); cyl(0.02, 0.62, [0.62, 1.02, 0.32 * z], [0, 0, Math.PI / 2], "steel"); });
       box([0.14, 0.26, 0.62], [0.98, 1.22, 0], "dark", -0.5);
     },
     skierg(x) {
       box([0.14, 2.25, 0.3], [x, 1.125, 0], "frame"); box([0.28, 0.08, 0.6], [x - 0.08, 2.2, 0], "frame");
-      box([0.32, 0.45, 0.36], [x + 0.02, 0.4, 0], "dark"); box([0.9, 0.04, 0.7], [x - 0.25, 0.02, 0], "frame");
+      box([0.3, 0.45, 0.06], [x + 0.02, 0.4, -0.15], "dark"); spinWheel(x + 0.02, 0.4, 0.17, 0.2, "dark", 4, 3); cyl(0.19, 0.24, [x + 0.02, 0.4, 0], [Math.PI / 2, 0, 0], "cage", 32); box([0.9, 0.04, 0.7], [x - 0.25, 0.02, 0], "frame");
       [1, -1].forEach(z => cyl(0.035, 0.04, [x - 0.06, 2.15, 0.22 * z], [Math.PI / 2, 0, 0], "steel", 20));
     },
     sled(x, poles) {
@@ -1362,6 +1400,11 @@ function kitBuilder(g) {
       cyl(0.03, 0.34, [x + 0.42, 0.27, 0], null, "steel");
       [0, 1, 2].forEach(k => cyl(0.2, 0.045, [x + 0.42, 0.13 + k * 0.05, 0], null, k === 2 ? "pink" : "plate", 36));
       if (poles) [1, -1].forEach(z => { cyl(0.022, 1.0, [x, 0.6, 0.22 * z], null, "steel"); box([0.4, 0.05, 0.05], [x + 0.2, 0.12, 0.22 * z], "steel"); });
+      if (poles) { // piste de poussée : bande de gazon, ses lignes reculent sous les pieds (on avance avec le traîneau)
+        g = g0; box([3.0, 0.006, 1.1], [0.1, 0.003, 0], "turf");
+        P._belt = { x0: -1.4, x1: 1.6, y: () => 0.0075, slope: () => 0, marks: [] };
+        for (let k = 0; k < 6; k++) P._belt.marks.push(box([0.05, 0.004, 1.1], [-1.4 + k * 0.5, 0.0075, 0], "mark"));
+        g = sg; }
       else box([0.1, 0.1, 0.1], [x - 0.25, 0.3, 0], "steel");
       g = g0;
     },
@@ -1381,7 +1424,7 @@ function kitBuilder(g) {
     rower() {
       box([1.95, 0.06, 0.16], [0.18, 0.25, 0], "frame"); box([0.08, 0.25, 0.4], [-0.75, 0.125, 0], "frame");
       box([0.36, 0.06, 0.44], [0.78, 0.12, 0], "frame"); box([0.05, 0.3, 0.38], [0.79, 0.27, 0], "dark", -0.45);
-      cyl(0.24, 0.14, [1.05, 0.48, 0], [Math.PI / 2, 0, 0], "dark", 32); box([0.12, 0.42, 0.12], [1.02, 0.21, 0], "frame");
+      spinWheel(1.05, 0.48, 0.24, 0.14, "dark", 4, 2); cyl(0.255, 0.16, [1.05, 0.48, 0], [Math.PI / 2, 0, 0], "cage", 32); box([0.12, 0.42, 0.12], [1.02, 0.21, 0], "frame");
     },
     // vélos : cadre au sol, selle, guidon, roue d'inertie ; kind « droit », « biking » (roue lourde devant) ou « air » (ventilateur devant)
     bike(kind) {
@@ -1390,8 +1433,8 @@ function kitBuilder(g) {
       segment(cyl(0.035, 1, [0, 0, 0], null, "frame", 14), V(0.12, 0.05, 0), V(sx, sy - 0.04, 0)); box([0.26, 0.05, 0.17], [sx, sy, 0], "dark");
       segment(cyl(0.035, 1, [0, 0, 0], null, "frame", 14), V(0.52, 0.05, 0), V(hx - 0.04, hy - 0.08, 0));
       if (kind !== "air") { box([0.07, 0.04, 0.5], [hx, hy, 0], "frame"); [1, -1].forEach(z => cyl(0.02, 0.14, [hx + 0.04, hy, 0.22 * z], [0, 0, Math.PI / 2], "dark")); }
-      if (kind === "biking") { cyl(0.25, 0.06, [0.62, 0.42, 0], [Math.PI / 2, 0, 0], "plate", 36); box([0.1, 0.06, 0.12], [0.62, 0.42, 0.07], "pink"); }
-      else if (kind === "air") { const f = cyl(0.36, 0.2, [0.82, 0.5, 0], [0, 0, Math.PI / 2], "dark", 40); f.rotation.set(0, 0, Math.PI / 2); cyl(0.33, 0.21, [0.82, 0.5, 0], [0, 0, Math.PI / 2], "plate", 40); box([0.08, 0.5, 0.08], [0.82, 0.25, 0], "frame"); }
+      if (kind === "biking") { const w = spinWheel(0.62, 0.42, 0.25, 0.06, "plate", 3, -3); const m = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.08), MAT.pink); m.position.set(0.17, 0, 0.04); w.add(m); }
+      else if (kind === "air") { spinWheel(0.82, 0.5, 0.34, 0.16, "dark", 5, -2); cyl(0.36, 0.2, [0.82, 0.5, 0], [Math.PI / 2, 0, 0], "cage", 40); box([0.08, 0.5, 0.08], [0.82, 0.25, 0], "frame"); }
       else { box([0.36, 0.46, 0.22], [0.34, 0.33, 0], "dark"); box([0.18, 0.12, 0.05], [hx - 0.02, hy + 0.12, 0], "dark", -0.4); }
     },
     // vélo semi-allongé : siège bas avec dossier, pédalier devant, poignées sur les côtés
@@ -1405,13 +1448,14 @@ function kitBuilder(g) {
     elliptical(arc) {
       box([1.8, 0.06, 0.6], [0.05, 0.03, 0], "frame");
       if (arc) { box([0.42, 1.2, 0.5], [0.78, 0.6, 0], "dark", -0.15); }
-      else { cyl(0.25, 0.1, [-0.62, 0.3, 0], [Math.PI / 2, 0, 0], "dark", 32); [1, -1].forEach(z => box([1.1, 0.04, 0.05], [-0.05, 0.12, 0.2 * z], "steel")); }
+      else { spinWheel(-0.62, 0.3, 0.25, 0.1, "dark", 3, -1); [1, -1].forEach(z => box([1.1, 0.04, 0.05], [-0.05, 0.12, 0.2 * z], "steel")); }
       segment(cyl(0.04, 1, [0, 0, 0], null, "frame", 14), V(0.62, 0.06, 0), V(0.55, 1.15, 0)); box([0.22, 0.15, 0.06], [0.52, 1.28, 0], "dark", 0.4);
     },
     // escalier (StairMaster) : marches qui défilent, rampes de chaque côté
     stairs() {
-      for (let k = 0; k < 4; k++) box([0.27, 0.2 * (k + 1), 0.62], [0.02 + k * 0.27, 0.1 * (k + 1), 0], "dark"); // marches (elles défilent vers le bas sur la vraie machine)
-      for (let k = 0; k < 4; k++) box([0.27, 0.012, 0.6], [0.02 + k * 0.27, 0.2 * (k + 1) + 0.006, 0], "belt");
+      // marches qui défilent vers le bas : une marche par pas ; elles sortent en haut de la machine et rentrent en bas
+      P._stairs = [];
+      for (let k = -1; k <= 4; k++) { const blk = box([0.27, 1, 0.62], [0, 0.5, 0], "dark"), tread = box([0.27, 0.012, 0.6], [0, 0, 0], "belt"), nose = box([0.02, 0.02, 0.6], [0, 0, 0], "steel"); P._stairs.push({ k, blk, tread, nose }); }
       box([1.5, 0.05, 0.8], [0.35, 0.025, 0], "frame"); box([0.12, 1.8, 0.8], [1.08, 0.9, 0], "frame");
       [1, -1].forEach(z => { segment(cyl(0.022, 1, [0, 0, 0], null, "steel", 12), V(-0.15, 1.05, 0.36 * z), V(0.95, 1.25, 0.36 * z)); box([0.05, 1.05, 0.05], [-0.15, 0.525, 0.38 * z], "frame"); });
       box([0.2, 0.16, 0.05], [1.0, 1.55, 0], "dark", 0.4);
@@ -1419,7 +1463,10 @@ function kitBuilder(g) {
     // tapis incurvé (sans moteur) : bande en creux, rampes à l'avant
     curveTread() {
       box([1.9, 0.06, 0.7], [0.05, 0.03, 0], "frame");
-      for (let k = -6; k <= 6; k++) { const x = k * 0.13, y = 0.16 + 0.12 * (k / 6) * (k / 6); box([0.135, 0.03, 0.52], [x + 0.05, y, 0], "belt", Math.atan(0.24 * (k / 6) / 0.78) ); }
+      // lattes posées sur la courbe : elles défilent vers l'arrière sous les pieds (tapis sans moteur)
+      const cy = x => 0.16 + 0.12 * ((x - 0.05) / 0.78) * ((x - 0.05) / 0.78), cs = x => 0.24 * (x - 0.05) / (0.78 * 0.78);
+      P._belt = { x0: -0.73, x1: 0.83, y: cy, slope: cs, marks: [], slats: true };
+      for (let k = 0; k < 12; k++) P._belt.marks.push(box([0.125, 0.03, 0.52], [-0.73 + k * 0.13, 0.2, 0], "belt"));
       [1, -1].forEach(z => { box([0.06, 1.1, 0.06], [0.95, 0.6, 0.34 * z], "frame", -0.12); cyl(0.02, 0.6, [0.68, 1.02, 0.34 * z], [0, 0, Math.PI / 2], "steel"); });
       box([0.12, 0.2, 0.6], [1.0, 1.2, 0], "dark", -0.5);
     },
@@ -1499,6 +1546,15 @@ function kitBuilder(g) {
       box([0.5, 0.05, 0.6], [0.24, 0.12, 0], "dark", 20 * D2R); box([1.6, 0.05, 0.7], [-0.05, 0.025, 0]);
       [1, -1].forEach(s => box([0.07, 2.0, 0.07], [-0.78, 1.0, 0.3 * s]));
     },
+  };
+  // mouvement des machines à chaque image : s = avancement dans le cycle (0 → 1) ; tout est calé sur s pour boucler sans saut
+  P._move = (o, s) => {
+    if (P._stairs) { const u = (((s * 2) % 1) + 1) % 1; P._stairs.forEach(st => { const top = 0.2 * (st.k + 1 - u), xc = 0.02 + (st.k - u) * 0.27, x0 = xc - 0.135, x1 = Math.min(xc + 0.135, 1.02), w = x1 - x0, vis = top > 0.052 && w > 0.01;
+      [st.blk, st.tread, st.nose].forEach(m => { m.visible = vis; }); if (!vis) return; const x = (x0 + x1) / 2;
+      st.blk.scale.set(w / 0.27, top, 1); st.blk.position.set(x, top / 2, 0); st.tread.scale.x = w / 0.27; st.tread.position.set(x, top + 0.006, 0); st.nose.position.set(x0 + 0.01, top + 0.004, 0); }); }
+    if (P._belt && P._belt.speed != null) { const B = P._belt, L0 = B.x1 - B.x0, n = B.marks.length;
+      B.marks.forEach((m, k) => { let x = B.x0 + (((k * L0 / n - B.speed * s) % L0) + L0) % L0; m.position.set(x, B.y(x), 0); if (B.slats) m.rotation.z = Math.atan(B.slope(x)); }); }
+    if (P._spin) P._spin.forEach(w => { w.o.rotation.z = s * w.rate * Math.PI * 2; });
   };
   return { P, stacks };
 }
@@ -1606,10 +1662,16 @@ function buildImplements(ex, g, stacks, o0, P) {
       // pédales sous les pieds qui suivent le mouvement (elliptique, arc trainer, escalier)
       const pl = [0, 1].map(() => { const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.15), MAT.dark); g.add(shadowy(b)); return b; });
       const rods = im.rail ? [0, 1].map(() => { const a = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 1, 10), MAT.frame); g.add(shadowy(a)); return a; }) : null;
+      // manivelle (elliptique) : l'arrière du rail est accroché à un maneton qui tourne avec la roue, en phase avec l'ellipse du pied
+      const arms = im.crank ? [0, 1].map(() => { const a = new THREE.Mesh(new THREE.BoxGeometry(1, 0.04, 0.03), MAT.steel); g.add(shadowy(a)); return a; }) : null;
+      const ell = im.crank ? [0, 1].map(i => { let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9; for (let k = 0; k < 24; k++) { const a = solve(ex, k / 24).an[i]; X0 = Math.min(X0, a.x); X1 = Math.max(X1, a.x); Y0 = Math.min(Y0, a.y); Y1 = Math.max(Y1, a.y); } return { cx: (X0 + X1) / 2, cy: (Y0 + Y1) / 2, rx: (X1 - X0) / 2 || 1, ry: (Y1 - Y0) / 2 || 1 }; }) : null;
       ups.push(o => [0, 1].forEach(i => {
         const f = o.fdir[i].clone().setZ(0).normalize(), c = o.an[i].clone().addScaledVector(f, 0.06).add(V(0, -0.1, 0));
         pl[i].position.copy(c); pl[i].rotation.set(0, 0, Math.atan2(f.y, f.x));
-        if (rods) { const zs = o.an[i].z >= 0 ? 1 : -1; segment(rods[i], V(im.rail[0], im.rail[1], zs * im.rail[2]), V(c.x - 0.08, c.y - 0.02, zs * im.rail[2])); }
+        if (rods) { const zs = o.an[i].z >= 0 ? 1 : -1; let a0 = V(im.rail[0], im.rail[1], zs * im.rail[2]);
+          if (arms) { const e = ell[i], th = Math.atan2((o.an[i].y - e.cy) / e.ry, (o.an[i].x - e.cx) / e.rx), pin = V(im.rail[0] + im.crank * Math.cos(th), im.rail[1] + im.crank * Math.sin(th), zs * im.rail[2]);
+            arms[i].scale.x = im.crank + 0.04; arms[i].position.set(im.rail[0] + Math.cos(th) * im.crank / 2, im.rail[1] + Math.sin(th) * im.crank / 2, zs * (im.rail[2] - 0.02)); arms[i].rotation.set(0, 0, th); a0 = pin; }
+          segment(rods[i], a0, V(c.x - 0.08, c.y - 0.02, zs * im.rail[2])); }
       }));
     } else if (im.t === "sledpull") {
       // le traîneau avance à chaque traction de corde (une main, puis l'autre), sur plusieurs boucles avant de repartir
@@ -1769,7 +1831,12 @@ function showExercise(ex) {
   ex.p.forEach(n => (H.muscles[n] || []).forEach(m => { m.material = MAT.primary; }));
   ex.s.forEach(n => (H.muscles[n] || []).forEach(m => { if (m.material !== MAT.primary) m.material = MAT.secondary; }));
   const o0 = solve(ex, 0);
-  view.update = buildImplements(ex, g, stacks, o0, P);
+  // vitesse de la bande d'un tapis = vitesse du pied d'appui vers l'arrière (la bande suit vraiment les pieds)
+  if (P._belt) { const N = 48, os = []; for (let k = 0; k <= N; k++) os.push(solve(ex, k / N)); let sum = 0, n = 0;
+    for (const i of [0, 1]) { const lo = Math.min(...os.map(q => q.an[i].y)); for (let k = 0; k < N; k++) if (os[k].an[i].y < lo + 0.02 && os[k + 1].an[i].y < lo + 0.02) { sum += (os[k].an[i].x - os[k + 1].an[i].x) * N; n++; } }
+    const B = P._belt, gap = (B.x1 - B.x0) / B.marks.length; B.speed = Math.max(1, Math.round((n ? sum / n : 2) / gap)) * gap; }
+  const upd = buildImplements(ex, g, stacks, o0, P);
+  view.update = (o, s) => { upd(o, s); if (P._move) P._move(o, s); };
   // cadrage automatique : mannequin aux deux extrémités du mouvement, plus le matériel
   const box = new THREE.Box3(), body = new THREE.Box3();
   for (const s of ex.keys ? [0, 0.2, 0.4, 0.6, 0.8, 1] : [0, 0.5, 1]) { const o = solve(ex, s); applyPose(H, o); view.update(o, s); H.man.updateMatrixWorld(true); body.expandByObject(H.man); }

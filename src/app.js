@@ -1329,10 +1329,22 @@ function exHead(w, e, i, letter) {
   return '<div class="spread">' + (fk ? foldTitle(fk, '<span class="ex-name">' + nm + "</span>", folded.has(fk)) : '<div class="ex-name">' + nm + "</div>") + '<span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button>' + '<button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button>' + "</span></div>" +
     '<div class="ex-meta">' + metaText(e, !!letter, live) + "</div>" + (chips ? '<div class="ex-chips' + (live && time ? " wrap" : "") + '">' + chips + "</div>" : "");
 }
-function setActions(idx, count, word) {
+function setActions(idx, count, word, extra) {
   const g = idx.join(",");
   return '<div class="ex-actions"><button class="btn sm" data-act="addset" data-g="' + g + '">+ ' + word + "</button>" +
-    (count > 1 ? '<button class="btn sm" data-act="delset" data-g="' + g + '">− ' + word + "</button>" : "") + "</div>";
+    (count > 1 ? '<button class="btn sm" data-act="delset" data-g="' + g + '">− ' + word + "</button>" : "") + (extra || "") + "</div>";
+}
+// séance : ajouter / retirer un dégressif (exercices poids × reps)
+const dropBtn = (e, i) => (e.type === "reps" || !e.type) ? '<button class="btn sm' + (dropsOf(e) ? " on-drop" : "") + '" data-act="wdrop" data-i="' + i + '">' + (dropsOf(e) ? "Dégressif ✎" : "+ Dégressif") + "</button>" : "";
+// baisses des séries pas encore validées : n par série (toutes, ou seulement la dernière) ; les séries validées ne bougent pas
+function applyDrops(e, n, scope) {
+  e.drops = n; e.dropScope = scope === "last" ? "last" : "all";
+  e.sets.forEach((st, k) => {
+    if (st.done) return;
+    const want = n && (scope !== "last" || k === e.sets.length - 1) ? n : 0;
+    st.drops = (st.drops || []).slice(0, want);
+    while (st.drops.length < want) st.drops.push({ kg: "", reps: "" });
+  });
 }
 function noteBox(w, e, i, letter) {
   const te = e.note == null ? tplExercise(w, e.exId) : null, note = e.note != null ? e.note : (te && te.note) || ""; // la note de CETTE séance
@@ -1370,7 +1382,7 @@ function exCard(w, e, i) {
   e.sets.forEach((s, k) => { rows += setRows(w, e, i, k, k + 1); });
   const f = folded.has("w:" + w.id + ":" + (e.exId || i)), dn = e.sets.filter(x => x.done).length;
   return '<section class="card ex' + (f ? " folded" : "") + '">' + exHead(w, e, i, "") + (f ? '<div class="fold-sum muted small">' + dn + " / " + e.sets.length + " série" + (e.sets.length > 1 ? "s" : "") + " validée" + (dn > 1 ? "s" : "") + "</div>" :
-    '<div class="blk-body"><div class="sets">' + rows + "</div>" + setActions([i], e.sets.length, "Série") + linkNext(w, i, false) + noteBox(w, e, i, "") + "</div>") + "</section>";
+    '<div class="blk-body"><div class="sets">' + rows + "</div>" + setActions([i], e.sets.length, "Série", dropBtn(e, i)) + linkNext(w, i, false) + noteBox(w, e, i, "") + "</div>") + "</section>";
 }
 // séance en cours : repos avant l'exercice suivant (après la dernière série, ou le dernier tour d'un superset), s'il y a un exercice après
 const restNextVal = mem => num(mem[mem.length - 1].restNext) || num(mem[0].restNext) || 0;
@@ -1458,7 +1470,7 @@ function sessionTable(w) {
         '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div>' +
         (exLib(e) ? '<button class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir</button>" : "") +
         (dropsOf(e) ? '<div class="muted small">Dégressif · ' + dropsOf(e) + " baisse" + (dropsOf(e) > 1 ? "s" : "") + "</div>" : "") +
-        (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série") : "") + "</td>" +
+        (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série", grouped ? "" : dropBtn(e, i)) : "") + "</td>" +
         "<td>" + e.sets.length + "</td><td>" + (isDist ? esc(fmtNum(num(e.target) || 0)) + " m" : time && !w.endedAt ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : time ? esc(fmtHold(e.target) || "—") : esc(e.target || "—")) + "</td><td>" +
         (grouped && !lastOfGroup ? "enchaîné" : !w.endedAt ? '<button class="chip-mini" data-act="sesspick" data-sf="' + (grouped ? "grest" : "rest") + '" data-i="' + (grouped ? idx[0] : i) + '">' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : esc(fmtRest(e.rest))) + "</td>";
       for (let k = 0; k < max; k++) {
@@ -2077,6 +2089,8 @@ function viewProgress() {
   // séances par semaine (8 dernières), avec la ligne d'objectif
   const weeks = []; let t = cur; for (let k = 0; k < 8; k++) { weeks.unshift(t); t = prevWeek(t); }
   const SM = statsMetric, src = SM === "time" ? durWeek : SM === "ton" ? tonWeek : perWeek, fmtV = v => SM === "time" ? fmtDurH(v) : SM === "ton" ? fmtTon(v) : String(v);
+  // valeur courte au-dessus des barres (elles sont étroites) : « 2,1 t », « 1h05 », « 45 min »
+  const barLab = v => SM === "ton" ? (v >= 1000 ? fmtNum(Math.round(v / 100) / 10) + " t" : Math.round(v) + " kg") : SM === "time" ? (m => m >= 60 ? Math.floor(m / 60) + "h" + pad(m % 60) : m + " min")(Math.round(v / 60000)) : String(v);
   const vals = weeks.map(k => src[k] || 0), max = Math.max(SM === "n" ? goal : 0, ...vals, 1);
   const W = 360, H = 150, top = 18, bw = W / weeks.length, y = v => H - (v / max) * (H - top);
   let svg = '<svg class="chart" viewBox="0 0 ' + W + " " + (H + 26) + '" role="img" aria-label="Séances par semaine sur les 8 dernières semaines, objectif ' + goal + '">';
@@ -2087,7 +2101,8 @@ function viewProgress() {
     svg += "<g><title>" + esc(tip) + "</title>" + '<rect class="hit" x="' + n * bw + '" y="0" width="' + bw + '" height="' + H + '"></rect>';
     if (v > 0) { const hh = H - y(v), r = Math.min(4, hh / 2, w / 2); svg += '<path class="bar' + (SM === "n" && v >= goal ? " ok" : "") + (k === cur ? "" : " dim") + '" d="M' + x + "," + H + "V" + (y(v) + r) + "Q" + x + "," + y(v) + " " + (x + r) + "," + y(v) + "H" + (x + w - r) + "Q" + (x + w) + "," + y(v) + " " + (x + w) + "," + (y(v) + r) + "V" + H + 'Z"></path>'; }
     svg += '<text x="' + (n * bw + bw / 2) + '" y="' + (H + 18) + '" text-anchor="middle">' + lab + "</text></g>";
-    if (k === cur) svg += '<text x="' + (n * bw + bw / 2) + '" y="' + (y(v) - 6) + '" text-anchor="middle" style="font-weight:700;fill:var(--ink)">' + esc(fmtV(v)) + "</text>";
+    // valeur au-dessus de chaque barre ; en « Séances », pas de chiffre quand l'objectif est pile atteint (barre verte)
+    if (v > 0 && !(SM === "n" && v === goal)) svg += '<text class="bar-v' + (k === cur ? " cur" : "") + '" x="' + (n * bw + bw / 2) + '" y="' + (y(v) - 6) + '" text-anchor="middle">' + esc(barLab(v)) + "</text>";
   });
   if (SM === "n") svg += '<line class="goal" x1="0" x2="' + W + '" y1="' + y(goal) + '" y2="' + y(goal) + '"></line><text x="4" y="' + (y(goal) - 6) + '">Objectif ' + goal + "</text>";
   svg += "</svg>";
@@ -2296,7 +2311,7 @@ function viewEvolutionDetail(key, pane) {
   const lib = libById[p.lib] || libFor(p.name), cdm = p.type === "cardio" && CARDIO_MACH[p.machine] ? p.machine : "", lid = cdm || (lib && lib.id);
   let h = back + '<div class="page-head"><h1>' + esc(p.name) + "</h1></div>" +
     (lid ? '<div class="ex-chips" style="margin:-4px 0 12px"><button type="button" class="chip-mini" data-act="exoview" data-id="' + esc(lid) + '"' + (cdm ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cdm ? "Voir la machine" : "Voir le mouvement") + "</button></div>" : "");
-  const seg = (list, on, act) => '<div class="seg evo-seg" role="group">' + list.map(x => '<button type="button" data-act="' + act + '" data-k="' + esc(key) + '" data-v="' + x[0] + '"' + (x[0] === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div>";
+  const seg = (list, on, act) => '<div class="seg evo-seg seg-' + act + '" role="group">' + list.map(x => '<button type="button" data-act="' + act + '" data-k="' + esc(key) + '" data-v="' + x[0] + '"' + (x[0] === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div>";
   if (ms.length > 1 || pers.length > 1) h += '<div class="evo-filters">' + (ms.length > 1 ? seg(ms.map(x => [x, evoDef(x).short]), m, "evometric") : "") + (pers.length > 1 ? seg(pers, per, "evoper") : "") + "</div>";
   if (!pts.length) return h + '<div class="card empty">Aucune séance avec cet exercice sur cette période.</div>';
   const vs = pts.map(x => x.v), best = M.low ? Math.min(...vs) : Math.max(...vs), first = pts[0].v, last = pts[pts.length - 1].v;
@@ -2363,6 +2378,7 @@ function viewCalendar(ym, day) {
   const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(), lead = (first.getDay() + 6) % 7;
   if (isFree()) return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("calendar") + planCard("Le calendrier de tes séances est réservé à Premium. Ta semaine en cours est dans « Séances ».");
   const byDay = {}; finished().forEach(w => { const k = ymd(w.startedAt); (byDay[k] = byDay[k] || []).push(w); });
+  const goal = num(settings().goal) || 5, perWeek = {}; finished().forEach(w => { const k = weekStart(w.startedAt); perWeek[k] = (perWeek[k] || 0) + 1; });
   const prev = new Date(y, m - 1, 1), next = new Date(y, m + 1, 1);
   const key = d => d.getFullYear() + "-" + pad(d.getMonth() + 1);
   const monthCount = Object.keys(byDay).filter(k => k.startsWith(y + "-" + pad(m + 1))).reduce((n, k) => n + byDay[k].length, 0);
@@ -2375,12 +2391,13 @@ function viewCalendar(ym, day) {
   const today = ymd(Date.now());
   for (let d = 1; d <= days; d++) {
     const k = y + "-" + pad(m + 1) + "-" + pad(d), ws = byDay[k] || [];
-    const cls = "cal-d" + (ws.length ? " has" : "") + (k === today ? " today" : "") + (k === day ? " sel" : "");
+    const ok = ws.length && (perWeek[weekStart(new Date(y, m, d, 12).getTime())] || 0) >= goal; // semaine où l'objectif est atteint
+    const cls = "cal-d" + (ws.length ? " has" : "") + (ok ? " goal" : "") + (k === today ? " today" : "") + (k === day ? " sel" : "");
     const label = d + " " + MONTHS[m] + (ws.length ? " : " + ws.map(w => w.templateName).join(", ") : "");
     h += ws.length ? '<a class="' + cls + '" href="#/calendar/' + y + "-" + pad(m + 1) + "/" + k + '" aria-label="' + esc(label) + '"><span>' + d + "</span>" + (ws.length > 1 ? "<i>" + ws.length + "</i>" : "") + "</a>"
       : '<div class="' + cls + '" aria-label="' + esc(label) + '"><span>' + d + "</span></div>";
   }
-  h += "</div></div>";
+  h += '</div><div class="cal-legend"><span class="lg"><span class="cal-key goal"></span>Semaine où ton objectif (' + goal + " séance" + (goal > 1 ? "s" : "") + ') est atteint</span><span class="lg"><span class="cal-key"></span>Autres séances</span></div></div>';
   const list = day && byDay[day] ? byDay[day] : finished().filter(w => ymd(w.startedAt).startsWith(y + "-" + pad(m + 1)));
   h += '<div class="section-title">' + (day && byDay[day] ? esc(fmtDateLong(byDay[day][0].startedAt)) : "Séances du mois") + "</div>" +
     (list.length ? '<div class="list">' + list.map(historyRow).join("") + "</div>" : '<div class="card empty">Aucune séance ce mois-ci.</div>');
@@ -2652,7 +2669,7 @@ function pickWheels(title, cols) {
     document.body.appendChild(d);
     const H = 44, wheels = [...d.querySelectorAll(".wheel")];
     const idx = cols.map(c => Math.max(0, c.vals.indexOf(c.value)));
-    const items = wheels.map(w => w.children), shown = cols.map(() => -1), settleT = cols.map(() => 0);
+    const items = wheels.map(w => w.children), shown = cols.map(() => -1), raf = cols.map(() => 0), touching = cols.map(() => false);
     const mark = n => {
       const w = wheels[n]; idx[n] = Math.max(0, Math.min(cols[n].vals.length - 1, Math.round(w.scrollTop / H)));
       if (shown[n] === idx[n]) return;
@@ -2663,10 +2680,25 @@ function pickWheels(title, cols) {
     };
     const settle = n => { const w = wheels[n], t = idx[n] * H; if (Math.abs(w.scrollTop - t) > 1) w.scrollTo({ top: t, behavior: "smooth" }); };
     requestAnimationFrame(() => { wheels.forEach((w, n) => { w.scrollTop = idx[n] * H; mark(n); }); wheels[0].focus(); });
-    const done = ok => { settleT.forEach(clearTimeout); wheels.forEach((w, n) => mark(n)); d.remove(); res(ok ? cols.map((c, n) => c.vals[idx[n]]) : null); };
+    // calage sur une valeur seulement quand le doigt est levé ET que la roue est vraiment immobile (élan terminé) :
+    // on regarde la position image après image, ce qui marche même si le téléphone est occupé (aucun arrêt en plein élan)
+    const watch = n => {
+      if (raf[n]) return;
+      let last = wheels[n].scrollTop, still = 0;
+      const step = () => {
+        if (touching[n] || !d.isConnected) { raf[n] = 0; return; }
+        const y = wheels[n].scrollTop;
+        if (Math.abs(y - last) < 0.5) still++; else { still = 0; last = y; }
+        if (still >= 4) { raf[n] = 0; settle(n); return; }
+        raf[n] = requestAnimationFrame(step);
+      };
+      raf[n] = requestAnimationFrame(step);
+    };
+    const done = ok => { raf.forEach(cancelAnimationFrame); wheels.forEach((w, n) => mark(n)); d.remove(); res(ok ? cols.map((c, n) => c.vals[idx[n]]) : null); };
     wheels.forEach((w, n) => {
-      w.addEventListener("scroll", () => { mark(n); clearTimeout(settleT[n]); settleT[n] = setTimeout(() => settle(n), 110); }, { passive: true });
-      w.addEventListener("scrollend", () => { clearTimeout(settleT[n]); settle(n); });
+      w.addEventListener("scroll", () => { mark(n); if (!touching[n]) watch(n); }, { passive: true });
+      w.addEventListener("touchstart", () => { touching[n] = true; if (raf[n]) { cancelAnimationFrame(raf[n]); raf[n] = 0; } }, { passive: true });
+      ["touchend", "touchcancel"].forEach(ev => w.addEventListener(ev, () => { touching[n] = false; watch(n); }, { passive: true }));
       w.addEventListener("keydown", e => {
         if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); w.scrollTo({ top: (idx[n] + (e.key === "ArrowDown" ? 1 : -1)) * H, behavior: "smooth" }); }
         if (e.key === "Enter") done(true);
@@ -3714,6 +3746,19 @@ $app.addEventListener("click", async e => {
 
     /* séance */
     case "done": if (w) markDone(w, i, s); break;
+    case "wdrop": if (w && w.exercises[i]) {
+      const e = w.exercises[i], cur = dropsOf(e), last = e.dropScope === "last";
+      const opts = cur ? [["more", "Ajouter une baisse", (cur + 1) + " baisses " + (last ? "sur la dernière série" : "après chaque série")], ["off", "Retirer le dégressif", "Les baisses déjà validées restent notées"]].filter(o => o[0] !== "more" || cur < 3)
+        : [["all", "Sur chaque série", "Une baisse de charge juste après chaque série"], ["last", "Sur la dernière série", "Une baisse seulement après la dernière série"]];
+      const c = await choose(cur ? "Dégressif · " + cur + " baisse" + (cur > 1 ? "s" : "") + (last ? " sur la dernière série" : " après chaque série") : "Ajouter un dégressif", opts); if (!c) return;
+      const n = c === "off" ? 0 : c === "more" ? cur + 1 : 1, scope = c === "all" || c === "last" ? c : (last ? "last" : "all");
+      const t = getItem(w.templateId), te = !w.endedAt && t ? tplExercise(w, e.exId) : null;
+      let where = "today";
+      if (te) { where = await choose("Ce changement est pour…", [["today", "Seulement aujourd'hui", "Pour cette séance uniquement"], ["always", "Toutes les séances", "Enregistré aussi dans « " + w.templateName + " · " + vLabel(w.variantName) + " »"]]); if (!where) return; }
+      applyDrops(e, n, scope); put("workout", w);
+      if (where === "always") { te.drops = n; te.dropScope = scope; put("template", t); }
+      render(); toast(n ? "Dégressif : " + n + " baisse" + (n > 1 ? "s" : "") + (scope === "last" ? " sur la dernière série" : " après chaque série") : "Dégressif retiré");
+    } break;
     case "addset": if (w) {
       b.dataset.g.split(",").map(Number).forEach(k => {
         const ex = w.exercises[k];

@@ -431,6 +431,7 @@ let syncTimer = null, syncing = false, syncAgain = false;
 function scheduleSync() { if (!db.auth) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 2500); }
 async function sync() {
   if (!db.auth) return;
+  if (!planTesting()) await loadPlan();
   if (isFree() && !planTesting()) { syncState.status = "free"; updateSyncBadges(); return; } // version gratuite : les données restent sur l'appareil
   if (syncing) { syncAgain = true; return; }
   if (navigator.onLine === false) { syncState.status = "offline"; updateSyncBadges(); return; }
@@ -472,6 +473,7 @@ async function sync() {
     syncState.status = "ok"; syncState.at = Date.now(); syncState.error = "";
   } catch (e) {
     console.error(e);
+    if ((e.status === 403 || e.code === "42501") && !planTesting()) { await loadPlan(true); if (isFree()) { syncState.status = "free"; return; } } // le serveur refuse : abonnement fini
     syncState.status = "err";
     syncState.error = e.code === "PGRST205" || e.code === "42P01" || /items/.test(e.message) && e.status === 404
       ? "La base Supabase n'est pas encore prête (table « items » absente)." : (e.message === "Failed to fetch" ? "Pas de connexion." : e.message);
@@ -993,8 +995,8 @@ async function afterLogin() {
     // données saisies sans compte : elles sont envoyées au compte
     Object.values(db.items).forEach(i => { if (i.updated_at > 0) i.dirty = true; });
   }
-  db.owner = uidNow;
-  saveNow(); render(); await sync();
+  db.owner = uidNow; db.plan = null; famSrv = null;
+  saveNow(); await loadPlan(true); render(); await sync();
   if (db.pendingConsent || db.pendingName) {
     const st = settings();
     if (db.pendingConsent) { st.consentAt = db.pendingConsent; st.consentVersion = LEGAL.version; }
@@ -2990,12 +2992,22 @@ function viewGuide() {
     GUIDE.map(([t, href, lead, pts]) => '<section class="card guide-p"><div class="spread"><h2>' + esc(t) + "</h2>" + (href ? '<a class="link small" href="' + href + '">Ouvrir ›</a>' : "") + "</div>" +
       '<p class="muted small">' + esc(lead) + '</p><ul class="exo-tips">' + pts.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></section>").join("");
 }
+// questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
+const FAQ_PLAN = ["Abonnement Premium", [
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["gratuit", "Que garde la version gratuite ?", "1 programme et 2 séances actives (tu choisis lesquelles), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. <b>Rien n'est supprimé</b> : tes autres programmes, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes. La synchro entre tes appareils est réservée à Premium."],
+  ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : 1,99 € par mois ou 19,90 € par an. <b>Famille</b> (toi + 4 proches, chacun son compte) : 6,99 € par mois ou 69,90 € par an. <b>À vie</b>, en un seul paiement : 49,90 € en Solo ou 149,90 € en Famille jusqu'au 31 décembre 2027, puis 79,90 € et 229,90 €. Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
+  ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
+  ["resilier", "Comment résilier mon abonnement ?", "Abonné par Google Play : Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier. Abonné sur fiitday.com : Réglages › Abonnement › « Gérer mon abonnement ». Tu gardes Premium jusqu'à la fin de la période payée, puis tu passes en version gratuite sans rien perdre."],
+  ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite sans rien perdre."],
+  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Tu as 14 jours après ton abonnement pour te rétracter (seule la période déjà utilisée reste due). Abonné par Google Play : fais la demande dans Google Play (Paiements et abonnements), ou écris-nous. Sur fiitday.com : écris-nous à l'adresse des mentions légales. Le détail est dans les conditions générales de vente."]]];
+const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
   faqIdx = null;
-  const n = FAQ.reduce((a, c) => a + c[1].length, 0);
+  const FAQ_ = faqList(), n = FAQ_.reduce((a, c) => a + c[1].length, 0);
   return '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>Questions fréquentes</h1><span class="muted small">' + n + " questions</span></div>" +
     '<input class="f" id="faq-q" type="search" autocomplete="off" placeholder="Rechercher : repos, sauvegarde…" aria-label="Rechercher dans les questions fréquentes">' +
-    FAQ.map(([cat, qs]) => '<section class="faq-cat"><div class="section-title">' + esc(cat) + '</div><div class="faq-box">' +
+    FAQ_.map(([cat, qs]) => '<section class="faq-cat"><div class="section-title">' + esc(cat) + '</div><div class="faq-box">' +
       qs.map(([id, q, a]) => '<details class="faq-q" id="faq-' + id + '"' + (id === open ? " open" : "") + "><summary>" + esc(nbsp(q)) + '</summary><div class="faq-a">' + nbsp(a) + "</div></details>").join("") + "</div></section>").join("") +
     '<p class="muted faq-none" hidden>Aucune question ne correspond. Essaie un autre mot.</p>' +
     '<div class="card faq-more"><b>Tu n\'as pas trouvé ta réponse ?</b><div class="small muted" style="margin-top:4px">Écris-nous : l\'adresse de contact est dans Réglages › Informations légales › Mentions légales.</div></div>';
@@ -3026,7 +3038,8 @@ $app.addEventListener("input", e => {
 });
 
 /* ================= Premium : abonnement, essai et version gratuite ================= */
-// MONETIZATION = false tant que l'abonnement n'est pas lancé : tout le monde garde l'appli complète, sans rien de Premium à l'écran.
+// Le statut (essai, Premium, gratuit) vient du serveur : tant que la date de lancement n'est pas fixée, tout le monde garde l'appli complète.
+// MONETIZATION = false tant que le paiement (RevenueCat, Google Play, Stripe) n'est pas branché : le bouton « S'abonner » reste désactivé.
 // Le compte testeur voit seulement le mode test (Réglages) pour essayer l'essai, la version gratuite et Premium sur son appareil.
 const MONETIZATION = false;
 const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
@@ -3038,16 +3051,33 @@ const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 
 // Pas de prix barré : la loi demande qu'un prix barré ait vraiment été pratiqué dans les 30 jours d'avant.
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028";
 const FAMILY_SIZE = 5;
-let premiumFor = "solo";
+let premiumFor = "solo", premiumPick = "year";
 const isPlanTester = () => !!(db.auth && PLAN_TESTERS.includes(db.auth.user.id));
 const planTesting = () => isPlanTester() && ["trial", "free", "premium", "family", "member"].includes(db.planTest);
-const trialLeft = () => Math.max(0, Math.ceil(((planTesting() ? db.planTestEnd : db.plan && db.plan.trialEnds) - Date.now()) / DAY) || 0);
+const trialLeft = () => Math.max(0, Math.ceil(((planTesting() ? db.planTestEnd : db.plan && Date.parse(db.plan.trial_ends)) - Date.now()) / DAY) || 0);
 // « off » : pas d'abonnement (appli complète) · « trial » : essai, tout comme Premium · « free » : version gratuite · « premium » : abonné
 function planState() {
   if (planTesting()) return db.planTest === "trial" && trialLeft() <= 0 ? "free" : db.planTest === "family" || db.planTest === "member" ? "premium" : db.planTest;
-  if (!MONETIZATION) return "off";
-  const p = db.plan || {}; // à brancher au lancement : statut du compte envoyé par RevenueCat dans Supabase
-  return p.premium ? "premium" : p.trialEnds > Date.now() ? "trial" : "free";
+  // statut donné par le serveur (my_plan) : « off » tant que la date de lancement n'est pas atteinte
+  const p = db.auth && db.plan;
+  if (!p || !p.launched) return "off";
+  return p.state === "premium" || p.state === "trial" || p.state === "free" ? p.state : "off";
+}
+// statut du compte calculé par le serveur (essai, abonnement, achat à vie, Premium offert, famille) ; gardé sur l'appareil pour le hors-ligne
+let planLoading = null;
+function loadPlan(force) {
+  if (!db.auth) return Promise.resolve(null);
+  if (!force && db.plan && Date.now() - (db.plan.at_ms || 0) < 10 * 60000) return Promise.resolve(db.plan);
+  if (planLoading) return planLoading;
+  planLoading = (async () => {
+    try {
+      const p = await rpc("my_plan");
+      if (p && p.state && p.state !== "none") { const before = planState() + "|" + JSON.stringify(db.plan && db.plan.source); db.plan = Object.assign(p, { at_ms: Date.now() }); saveNow(); if (planState() + "|" + JSON.stringify(p.source) !== before) render(); }
+    } catch (e) { /* hors ligne : le dernier statut connu reste valable, et le serveur vérifie de toute façon */ }
+    finally { planLoading = null; }
+    return db.plan;
+  })();
+  return planLoading;
 }
 const isFree = () => planState() === "free";
 // restaurer une sauvegarde et le code de transfert : abonnés seulement, même pendant l'essai (sinon un nouveau compte par mois avec un nouvel essai, et tout transféré)
@@ -3098,12 +3128,36 @@ function planBanner() {
 }
 const planCard = text => '<div class="card plan-lock">' + LOCK + '<div><b>Réservé à Premium</b><div class="small muted">' + text + '</div><a class="btn sm primary" href="#/premium">Voir Premium</a></div></div>';
 function planStatus() {
-  const s = planState(), d = trialLeft();
+  const s = planState(), d = trialLeft(), p = (!planTesting() && db.plan) || {}, until = p.until ? fmtDateLong(Date.parse(p.until)) : "";
+  if (s === "premium" && !isMember() && !isFamily() && p.source) {
+    if (p.source === "family-member") return "Membre de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + " : Premium partagé, sans rien payer.";
+    if (p.source === "gift") return "Premium " + (p.kind === "family" ? "Famille " : "") + "offert" + (until ? " jusqu'au " + until : " à vie") + ". Profite bien !";
+    if (p.source === "lifetime") return "Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + ". Merci de soutenir Fiitday !";
+    if (p.source === "subscription" && p.renews === false) return "Abonnement résilié : Premium jusqu'au " + until + ", puis version gratuite sans rien perdre.";
+    if (p.source === "subscription") return "Abonné Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " · prochain renouvellement le " + until : "") + ". Merci de soutenir Fiitday !";
+  }
+  if (s === "off" && p.would === "premium") return "L'abonnement n'est pas encore ouvert : tu as toute l'appli." + (p.source === "family-member" ? " Tu fais déjà partie de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + "." : p.source === "gift" ? " Premium " + (p.kind === "family" ? "Famille " : "") + "t'est offert" + (until ? " jusqu'au " + until : " à vie") + "." : "");
   return s === "trial" ? "Essai Premium : encore " + d + " jour" + (d > 1 ? "s" : "") + ". À la fin, tu passes en version gratuite sans rien perdre."
     : s === "free" ? "Version gratuite. Toutes tes données sont gardées : tout se débloque dès que tu t'abonnes."
     : s === "premium" && isMember() ? "Membre de la famille de " + ((db.planTestJoined || {}).owner || "ton proche") + " : Premium partagé, sans rien payer."
     : s === "premium" && isFamily() ? "Abonné Premium Famille : tu partages Premium avec jusqu'à " + (FAMILY_SIZE - 1) + " proches."
     : s === "premium" ? "Abonné Premium. Merci de soutenir Fiitday !" : "L'abonnement n'est pas encore ouvert : tu as toute l'appli.";
+}
+// formule choisie sur l'écran Premium : prix du bouton et conditions affichées juste en dessous (obligatoires avant le paiement)
+const isNativeApp = () => !!Native;
+const pickPrice = () => { const pr = PRICES[premiumFor]; return premiumPick === "month" ? pr.month + " / mois" : premiumPick === "life" ? (Date.now() < LIFE_END ? pr.life : pr.lifeAfter) + " en une fois" : pr.year + " / an"; };
+const pickLabel = () => (premiumPick === "life" ? "Acheter Premium à vie · " : "S'abonner · ") + pickPrice();
+function pickTerms() {
+  const store = isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
+  return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte."
+    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation au moins 24 h avant la fin de la période. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Abonnement") + ". Tu as 14 jours pour te rétracter.";
+}
+// déjà Premium : d'où il vient, et comment le gérer
+function premiumOwned() {
+  const p = (!planTesting() && db.plan) || {};
+  if (p.source === "subscription" && p.store === "PLAY_STORE") return '<a class="btn block" href="https://play.google.com/store/account/subscriptions?package=com.fiitday.app" target="_blank" rel="noopener">Gérer mon abonnement dans Google Play</a>';
+  if (p.source === "subscription") return '<button class="btn block" data-act="planmanage">Gérer mon abonnement</button>';
+  return "";
 }
 function viewPremium() {
   const s = planState(), prev = (history.state && history.state.prev) || "#/settings";
@@ -3115,13 +3169,14 @@ function viewPremium() {
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div></div>" +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +
     '<p class="small muted plan-for-txt">' + (premiumFor === "family" ? "Pour " + FAMILY_SIZE + " personnes : toi + 4 proches. Chacun a son propre compte, ses programmes et son historique ; personne ne voit les données des autres." : "Pour toi seul, sur tous tes appareils.") + "</p>" +
-    '<div class="plans">' +
-    '<div class="card plan-opt best"><span class="tag">2 mois offerts</span><b>Annuel</b><div class="plan-price num">' + PRICES[premiumFor].year + ' <small>/ an</small></div><div class="small muted">soit ' + PRICES[premiumFor].yearMonth + " par mois</div></div>" +
-    '<div class="card plan-opt"><b>Mensuel</b><div class="plan-price num">' + PRICES[premiumFor].month + ' <small>/ mois</small></div><div class="small muted">sans engagement</div></div>' +
+    '<div class="plans" role="radiogroup" aria-label="Durée">' +
+    '<button type="button" role="radio" aria-checked="' + (premiumPick === "year") + '" data-act="planpick" data-val="year" class="card plan-opt best' + (premiumPick === "year" ? " picked" : "") + '"><span class="tag">2 mois offerts</span><b>Annuel</b><div class="plan-price num">' + PRICES[premiumFor].year + ' <small>/ an</small></div><div class="small muted">soit ' + PRICES[premiumFor].yearMonth + " par mois</div></button>" +
+    '<button type="button" role="radio" aria-checked="' + (premiumPick === "month") + '" data-act="planpick" data-val="month" class="card plan-opt' + (premiumPick === "month" ? " picked" : "") + '"><b>Mensuel</b><div class="plan-price num">' + PRICES[premiumFor].month + ' <small>/ mois</small></div><div class="small muted">sans engagement</div></button>' +
     (pr => Date.now() < LIFE_END
-      ? '<div class="card plan-opt life"><span class="tag">Offre de lancement</span><b>À vie</b><div class="plan-price num">' + pr.life + ' <small>en une fois</small></div><div class="small">Prix de lancement, puis ' + pr.lifeAfter + " à partir du " + LIFE_END_TXT + '.</div><div class="small muted">Sans abonnement, ' + pr.lifeVs + ".</div></div>"
-      : '<div class="card plan-opt life"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></div>')(PRICES[premiumFor]) + "</div>" +
-    (s === "premium" ? "" : '<button class="btn primary block big" ' + (live ? 'data-act="planbuy"' : "disabled") + ">" + (live ? "S'abonner" : "Paiement bientôt disponible") + "</button>") +
+      ? '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><span class="tag">Offre de lancement</span><b>À vie</b><div class="plan-price num">' + pr.life + ' <small>en une fois</small></div><div class="small">Prix de lancement, puis ' + pr.lifeAfter + " à partir du " + LIFE_END_TXT + '.</div><div class="small muted">Sans abonnement, ' + pr.lifeVs + ".</div></button>"
+      : '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></button>')(PRICES[premiumFor]) + "</div>" +
+    (s === "premium" ? premiumOwned() : '<button class="btn primary block big" ' + (live ? 'data-act="planbuy"' : "disabled") + ">" + (live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
+      '<p class="small muted plan-terms">' + pickTerms() + "</p>") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
     '<p class="small muted" style="margin:10px 2px 0">Essai gratuit d\'un mois à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
     (premiumFor === "family" ? " Formule Famille : tu invites tes proches depuis Réglages › Abonnement ; une personne retirée ne peut être remplacée qu\'après 15 jours. Déjà abonné en Solo ? Résilie-le avant de rejoindre une Famille, pour ne pas payer deux fois." : "") + "</p>" +
@@ -3140,7 +3195,10 @@ function memberBox() {
     '<button class="btn sm danger fam-join" data-act="famleave">Quitter la famille</button>';
 }
 async function famJoin(pre) {
-  if (!planTesting()) { toast("Les invitations Famille arrivent bientôt"); return; }
+  if (!planTesting()) {
+    const raw = pre || await ask({ title: "J'ai une invitation Famille", text: "Tape le code de 8 caractères reçu, ou colle le lien d'invitation.", input: "", code: true, ok: "Continuer" });
+    if (raw) famJoinSrv(raw); return;
+  }
   if (isFamily()) { toast("Tu es déjà titulaire d'un abonnement Famille"); return; }
   const raw = pre || await ask({ title: "J'ai une invitation Famille", text: "Tape le code de 8 caractères reçu, ou colle le lien d'invitation.", input: "", code: true, ok: "Rejoindre" });
   if (!raw) return;
@@ -3178,11 +3236,71 @@ async function famShareCode(m) {
     text: "Envoie-lui ce code ou le lien. Elle l'ouvre avec son compte Fiitday (ou en crée un) et rejoint ta famille.", ok: "Copier l'invitation", cancel: "Fermer" });
   if (copy) { try { await navigator.clipboard.writeText(text); toast("Invitation copiée : envoie-la à " + m.name); } catch (e) { toast("Code d'invitation : " + m.code); } }
 }
+/* ----- Famille sur le serveur (vraies invitations) ; le mode test « Abonné Famille » reste une simulation sur l'appareil ----- */
+let famSrv = null, famLoading = null;
+const famLocal = () => planTesting() && (db.planTest === "family" || db.planTest === "member");
+const famShow = () => !famLocal() && !!db.auth && !!db.plan && (!!db.plan.can_family || !!db.plan.family_role);
+function loadFam(force) {
+  if (!db.auth) return Promise.resolve(null);
+  if (!force && famSrv && Date.now() - famSrv.at_ms < 60000) return Promise.resolve(famSrv);
+  if (famLoading) return famLoading;
+  famLoading = (async () => {
+    try { const r = await rpc("family_status"); famSrv = Object.assign(r || {}, { at_ms: Date.now() }); if (r && r.plan && r.plan.state) { db.plan = Object.assign(r.plan, { at_ms: Date.now() }); saveNow(); } }
+    catch (e) { famSrv = famSrv || { err: e.message === "Failed to fetch" ? "Pas de connexion internet." : e.message, at_ms: Date.now() }; }
+    finally { famLoading = null; }
+    if (route().name === "settings") render();
+    return famSrv;
+  })();
+  return famLoading;
+}
+const famErr = e => e && e.message === "Failed to fetch" ? "Pas de connexion internet : rien n'a changé" : (e && e.message) || "Ça n'a pas marché, réessaie";
+function srvFamilyBox() {
+  const f = famSrv || {}, members = f.members || [], invites = f.invites || [], waits = (f.waits || []).map(t => Date.parse(t)), active = !!(db.plan && db.plan.can_family);
+  const free = f.role === "owner" ? f.free : FAMILY_SIZE - 1, av = n => '<span class="fam-av" aria-hidden="true">' + esc((n || "?").trim().charAt(0).toUpperCase()) + "</span>";
+  let h = (active ? "" : '<p class="msg err" style="margin:10px 0 0">Ton abonnement Famille n\'est plus actif : tes proches n\'ont plus Premium. Réabonne-toi pour le leur rendre.</p>') +
+    (f.blocked ? '<p class="msg err" style="margin:10px 0 0">Les invitations de ta famille sont suspendues. Écris à contact@fiitday.com si tu penses que c\'est une erreur.</p>' : "") +
+    '<div class="section-title">Ta famille · ' + (members.length + 1) + " / " + FAMILY_SIZE + '</div><div class="fam-list">' +
+    '<div class="fam-row">' + av(firstName() || "Toi") + '<div class="fam-t"><b>' + esc(firstName() || "Toi") + ' (toi)</b><div class="small muted">Titulaire de l\'abonnement</div></div></div>';
+  members.forEach(m => { h += '<div class="fam-row">' + av(m.name) + '<div class="fam-t"><b>' + esc(m.name) + '</b><div class="small muted">Membre depuis le ' + esc(fmtDate(Date.parse(m.joined_at))) + '</div></div><button class="btn sm danger" data-act="famsrvremove" data-id="' + esc(m.id) + '" data-name="' + esc(m.name) + '">Retirer</button></div>'; });
+  invites.forEach(i => { h += '<div class="fam-row">' + av(i.label || "?") + '<div class="fam-t"><b>' + esc(i.label || "Invitation") + '</b><div class="small muted">Invitation envoyée · code ' + esc(i.code) + " · valable jusqu'au " + esc(fmtDate(Date.parse(i.expires_at))) + "</div>" +
+    '<div class="row" style="margin-top:6px;flex-wrap:wrap"><button class="btn sm" data-act="famsrvshare" data-code="' + esc(i.code) + '" data-name="' + esc(i.label || "") + '">Renvoyer</button><button class="btn sm" data-act="famsrvcancel" data-code="' + esc(i.code) + '">Annuler</button></div></div></div>'; });
+  waits.forEach(t => { h += '<div class="fam-row wait">' + LOCK + '<div class="fam-t"><b>Place libre le ' + esc(fmtDate(t)) + '</b><div class="small muted">Une personne est partie : sa place se libère ' + FAM_WAIT_DAYS + " jours après.</div></div></div>"; });
+  if (active && !f.blocked) for (let k = free; k > 0; k--) h += '<button class="fam-row add" data-act="famsrvinvite"><span class="fam-av add" aria-hidden="true">+</span><span class="fam-t"><b>Inviter quelqu\'un</b><span class="small muted">Un proche ou un ami, avec son propre compte Fiitday · invitation valable 7 jours</span></span></button>';
+  return h + '</div><div class="small muted" style="margin-top:8px">Chacun garde son compte et ses données : tu ne vois pas les séances des autres, ils ne voient pas les tiennes.</div>';
+}
+function srvMemberBox() {
+  const f = famSrv || {};
+  return (f.owner_active === false ? '<p class="msg err" style="margin:10px 0 0">L\'abonnement Famille de ' + esc(f.owner_name || "ton proche") + " n'est plus actif : Premium partagé est en pause. Tes données restent à toi.</p>" : "") +
+    '<div class="fam-list" style="margin-top:10px"><div class="fam-row"><span class="fam-av" aria-hidden="true">' + esc((f.owner_name || "?").charAt(0).toUpperCase()) + '</span><div class="fam-t"><b>Famille de ' + esc(f.owner_name || "ton proche") + '</b><div class="small muted">Membre depuis le ' + esc(fmtDate(Date.parse(f.joined_at) || Date.now())) + "</div></div></div></div>" +
+    '<button class="btn sm danger fam-join" data-act="famsrvleave">Quitter la famille</button>';
+}
+async function famShareSrv(code, name) {
+  const text = "Rejoins mon abonnement Fiitday Premium Famille : " + famLink(code) + "\nOu dans l'appli : Réglages › Abonnement › « J'ai une invitation Famille », code " + code + " (valable 7 jours).";
+  const copy = await ask({ title: "Invitation" + (name ? " pour " + name : ""), html: '<div class="xfer-code" aria-label="Code ' + esc(code.split("").join(" ")) + '">' + esc(code) + "</div>",
+    text: "Envoie-lui ce code ou le lien : elle l'ouvre avec son compte Fiitday (ou en crée un) et rejoint ta famille. L'invitation est valable 7 jours.", ok: "Copier l'invitation", cancel: "Fermer" });
+  if (copy) { try { await navigator.clipboard.writeText(text); toast("Invitation copiée : envoie-la" + (name ? " à " + name : "")); } catch (e) { toast("Code d'invitation : " + code); } }
+}
+async function famJoinSrv(raw) {
+  if (!db.auth) { toast("Connecte-toi pour rejoindre une famille"); return; }
+  const c = normCode(String(raw).replace(/^.*\/famille\//i, ""));
+  if (!XFER_RE.test(c)) { toast("Code d'invitation non valide : 8 lettres et chiffres"); return; }
+  const p = db.plan || {};
+  if (p.source === "subscription" && p.kind === "solo" && p.renews !== false && !await ask({ title: "Tu as déjà Premium Solo", text: "En rejoignant une famille, tu n'as plus besoin de ton abonnement Solo : pense à le résilier pour ne pas payer deux fois.", ok: "Rejoindre quand même" })) return;
+  if (!await ask({ title: "Rejoindre cette famille ?", text: "Premium est débloqué pour toi tant que l'abonnement Famille est actif. Ton compte, tes programmes et ton historique restent à toi : personne d'autre ne les voit.", ok: "Rejoindre" })) return;
+  let r; try { r = await rpc("family_join", { p_code: c }); } catch (e) { toast(famErr(e)); return; }
+  await Promise.all([loadPlan(true), loadFam(true)]);
+  toast("Tu as rejoint la famille de " + ((r && r.owner_name) || "ton proche") + (planState() === "premium" ? " : Premium débloqué" : ""));
+  render();
+}
 // Réglages : carte Abonnement (une fois lancé) et mode test (compte testeur seulement)
 function planSettings() {
   let h = "";
   const s = planState();
-  if (s !== "off") h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
+  const fsh = famShow(); if (fsh && !famSrv) setTimeout(loadFam, 0);
+  if (fsh && famSrv && !famSrv.err) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (famSrv.role === "member" ? srvMemberBox() : srvFamilyBox()) +
+    (famSrv.role === "member" ? "" : '<a class="btn sm" style="margin-top:8px" href="#/premium">Voir Premium</a>') + "</div>";
+  else if (fsh) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(famSrv && famSrv.err ? "Ta famille n'a pas pu être chargée : " + famSrv.err : "Chargement de ta famille…") + "</div></div>";
+  else if (s !== "off") h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
     : '<div class="row duo"><a class="btn sm' + (s === "premium" ? "" : " primary") + '" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + '</a><button class="btn sm" data-act="famjoin">J\'ai une invitation Famille</button></div>') + "</div>";
   if (isAdmin()) h += '<div class="card"><div class="spread"><b>Administration</b><span class="tag adm-tag">Visible seulement par toi</span></div><div class="small muted" style="margin-top:4px">Inscrits, utilisateurs actifs, séances, résumé de la semaine.</div><a class="btn sm primary" style="margin-top:8px" href="#/admin">Ouvrir le tableau de bord</a></div>';
   if (isPlanTester()) {
@@ -3274,7 +3392,7 @@ async function mfaVerify() {
     const j = await authApi("POST", "factors/" + f.id + "/verify", { challenge_id: ch.id, code });
     if (j && j.access_token && j.user) setSession(j); // la session passe au niveau aal2
     const first = !!mfa.enroll;
-    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = "";
+    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = ""; adminSubs = null; adminSubsErr = "";
     toast(first ? "Double authentification activée" : "Code validé"); render();
   } catch (e) { mfa.err = mfaMessage(e); render(); }
 }
@@ -3353,7 +3471,7 @@ async function loadAdmin(manual) {
     const r = await rpc("admin_kpis");
     const den = admDenied(r);
     if (den) { adminKpi = null; adminErr = den; } // refus noté côté serveur
-    else { adminKpi = r; ok = true; if (!ledger && !ledgerBusy) setTimeout(loadLedger, 0); } // total de l'année pour la carte « Recettes »
+    else { adminKpi = r; ok = true; if (!ledger && !ledgerBusy) setTimeout(loadLedger, 0); if (!adminSubs && !adminSubsBusy) setTimeout(loadAdminSubs, 0); } // cartes « Recettes » et « Abonnements »
   }
   catch (e) { adminErr = admErrText(e, "Les chiffres n'ont pas pu être chargés"); }
   finally {
@@ -3363,7 +3481,7 @@ async function loadAdmin(manual) {
   }
 }
 const fmtTimeSec = t => DF({ hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(t);
-const admTabs = cur => '<div class="seg adm-tabs" role="tablist">' + [["", "Tableau de bord"], ["recettes", "Registre des recettes"]].map(([k, l]) =>
+const admTabs = cur => '<div class="seg adm-tabs" role="tablist">' + [["", "Tableau de bord"], ["abonnements", "Abonnements"], ["recettes", "Registre des recettes"]].map(([k, l]) =>
   '<a role="tab" href="#/admin' + (k ? "/" + k : "") + '" class="' + (cur === k ? "on" : "") + '" aria-selected="' + (cur === k) + '">' + l + "</a>").join("") + "</div>";
 
 // ----- courbes du tableau de bord : valeur par semaine, survol ou toucher pour lire chaque semaine -----
@@ -3455,10 +3573,10 @@ function admBar(atIso, busy, what) {
 function viewAdmin() {
   const back = '<a class="back" href="#/settings">‹ Réglages</a>';
   if (!isAdmin()) return back + '<div class="card empty">Cette page n\'existe pas.</div>';
-  const tab = route().args[0] === "recettes" ? "recettes" : "";
-  const head = back + '<div class="page-head adm-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · ' + (tab ? "registre de ta micro-entreprise" : "des totaux, aucune donnée personnelle") + "</div></div>" + admTabs(tab) + "</div>";
-  if (!isAal2() || adminErr === "mfa" || ledgerErr === "mfa") { adminKpi = null; ledger = null; return head + mfaBox(); } // double authentification d'abord
-  return head + (tab ? viewLedger() : viewAdminDash());
+  const tab = ["recettes", "abonnements"].includes(route().args[0]) ? route().args[0] : "";
+  const head = back + '<div class="page-head adm-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · ' + (tab === "recettes" ? "registre de ta micro-entreprise" : tab ? "Premium offert, familles à surveiller" : "des totaux, aucune donnée personnelle") + "</div></div>" + admTabs(tab) + "</div>";
+  if (!isAal2() || adminErr === "mfa" || ledgerErr === "mfa" || adminSubsErr === "mfa") { adminKpi = null; ledger = null; adminSubs = null; return head + mfaBox(); } // double authentification d'abord
+  return head + (tab === "recettes" ? viewLedger() : tab ? viewAdminSubs() : viewAdminDash());
 }
 function viewAdminDash() {
   if (!adminKpi && !adminErr) { if (!adminBusy) setTimeout(loadAdmin, 0); return '<div class="card empty">Chargement des chiffres…</div>'; }
@@ -3492,8 +3610,54 @@ function viewAdminDash() {
     tile("Séances partagées", k.shares, k.shares30 + " en 30 jours") + tile("Codes de transfert", k.transfers30, "créés en 30 jours") + "</div>" +
     '<div class="section-title">Recettes</div><a class="card adm-link" href="#/admin/recettes"><div><div class="muted small">Registre des recettes</div><div class="v num">' + (yr == null ? "Ouvrir" : esc(eur(yr))) + "</div>" +
     '<div class="muted small">' + (yr == null ? "Tes encaissements, totaux et PDF" : "encaissé en " + new Date().getFullYear()) + "</div></div><span aria-hidden=\"true\">›</span></a>" +
-    '<div class="section-title">Abonnements</div><div class="card"><p class="muted small" style="margin:0">Au lancement : essais en cours, taux de conversion, abonnés Solo / Famille / À vie, revenu mensuel, résiliations et familles signalées.</p></div>' +
+    (sc => '<div class="section-title">Abonnements</div><a class="card adm-link" href="#/admin/abonnements"><div><div class="muted small">' + (sc ? (adminSubs.launch_at ? "Abonnement lancé" : "Pas encore lancé") : "Premium offert, familles") + '</div><div class="v num">' +
+      (sc ? (sc.subscribers || 0) + " abonné" + ((sc.subscribers || 0) > 1 ? "s" : "") : "Ouvrir") + '</div><div class="muted small">' +
+      (sc ? (sc.gifts || 0) + " Premium offert · " + (sc.families || 0) + " famille" + ((sc.families || 0) > 1 ? "s" : "") + ((adminSubs.families || []).length ? " · " + adminSubs.families.length + " à surveiller" : "") : "Offrir Premium, surveiller les familles") + "</div></div><span aria-hidden=\"true\">›</span></a>")(adminSubs && adminSubs.counts) +
     "</div></div>";
+}
+
+/* ---------- Abonnements : Premium offert, familles à surveiller ---------- */
+let adminSubs = null, adminSubsErr = "", adminSubsBusy = false, giftForm = { kind: "solo", days: "30" };
+async function loadAdminSubs(manual) {
+  if (adminSubsBusy || !isAdmin()) return;
+  adminSubsBusy = true; adminSubsErr = ""; if (manual) render();
+  let ok = false;
+  try { const r = await rpc("admin_subs"); const den = admDenied(r); if (den) { adminSubs = null; adminSubsErr = den; } else { adminSubs = r; ok = true; } }
+  catch (e) { adminSubsErr = admErrText(e, "Les abonnements n'ont pas pu être chargés"); }
+  finally { adminSubsBusy = false; if (route().name === "admin") render(); if (manual) toast(ok ? "Abonnements à jour · " + fmtTimeSec(Date.now()) : "Mise à jour impossible"); }
+}
+const GIFT_DAYS = [["30", "1 mois"], ["90", "3 mois"], ["365", "1 an"], ["", "À vie"]];
+function viewAdminSubs() {
+  if (!adminSubs && !adminSubsErr) { if (!adminSubsBusy) setTimeout(loadAdminSubs, 0); return '<div class="card empty">Chargement des abonnements…</div>'; }
+  if (!adminSubs) return '<div class="card"><p class="msg err" style="margin:0">' + esc(adminSubsErr) + '</p><button class="btn sm" style="margin-top:10px" data-act="adminload">Réessayer</button></div>';
+  const a = adminSubs, c = a.counts || {}, launch = Date.parse(a.launch_at || "");
+  const tile = (label, v, sub) => '<div class="card stat"><div class="muted small">' + label + '</div><div class="v num">' + v + "</div>" + (sub ? '<div class="muted small">' + sub + "</div>" : "") + "</div>";
+  const seg = (k, opts) => '<div class="seg adm-per" role="group">' + opts.map(([v, l]) => '<button type="button" class="' + (giftForm[k] === v ? "on" : "") + '" aria-pressed="' + (giftForm[k] === v) + '" data-act="giftopt" data-k="' + k + '" data-v="' + v + '">' + l + "</button>").join("") + "</div>";
+  const gifts = a.gifts || [], fams = a.families || [];
+  return admBar(a.at, adminSubsBusy, "données des abonnements") +
+    '<div class="card adm-launch' + (launch ? " on" : "") + '"><b>' + (launch ? "Abonnement lancé le " + esc(fmtDateLong(launch)) : "Abonnement pas encore lancé") + '</b><div class="small muted">' +
+    (launch ? "Essai d'un mois pour les nouveaux comptes, version gratuite ensuite, synchro réservée à Premium." : "Tant que la date de lancement n'est pas fixée, tout le monde a l'appli complète et la synchro reste ouverte. Premium offert et familles marchent déjà : ils compteront au lancement.") + "</div></div>" +
+    '<div class="stats adm-tiles">' + tile("Abonnés payants", c.subscribers || 0, (c.cancelled || 0) + " résilié" + ((c.cancelled || 0) > 1 ? "s" : "") + " (Premium jusqu'à la fin de leur période)") + tile("Premium à vie", c.lifetime || 0, "achats uniques") +
+    tile("Premium offert", c.gifts || 0, "en cours") + tile("Familles", c.families || 0, (c.members || 0) + " membre" + ((c.members || 0) > 1 ? "s" : "") + " invité" + ((c.members || 0) > 1 ? "s" : "")) + "</div>" +
+    '<div class="adm-grid"><div class="adm-main"><div class="section-title">Offrir Premium</div><div class="card adm-gift">' +
+    '<label class="fl">E-mail du compte Fiitday<input class="f" type="email" data-gf="email" autocomplete="off" placeholder="prenom@exemple.fr" value="' + esc(giftForm.email || "") + '"></label>' +
+    '<div class="fl" style="margin-top:10px">Formule' + seg("kind", [["solo", "Solo"], ["family", "Famille (5 personnes)"]]) + "</div>" +
+    '<div class="fl" style="margin-top:10px">Durée' + seg("days", GIFT_DAYS) + "</div>" +
+    '<label class="fl" style="margin-top:10px">Note pour toi (facultatif)<input class="f" data-gf="note" maxlength="200" placeholder="Ex. premier testeur, partenaire…" value="' + esc(giftForm.note || "") + '"></label>' +
+    '<button class="btn primary" style="margin-top:12px" data-act="giftsend">Offrir Premium</button>' +
+    '<p class="small muted" style="margin:8px 0 0">La personne doit déjà avoir un compte. Offrir à nouveau à la même adresse remplace le cadeau précédent. Pour tester la Famille pour de vrai, offre-toi « Famille » sur ton propre compte.</p></div>' +
+    '<div class="section-title">Premium offert en cours</div>' +
+    (gifts.length ? '<div class="card adm-reg"><table class="adm-table" style="display:table"><thead><tr><th>Compte</th><th>Formule</th><th>Jusqu\'au</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead><tbody>' +
+      gifts.map(g => "<tr><td>" + esc(g.email) + "</td><td>" + (g.kind === "family" ? "Famille" : "Solo") + '</td><td class="nowrap">' + (g.until ? esc(fmtDate(Date.parse(g.until))) : "À vie") + '</td><td class="small">' + esc(g.note || "—") + '</td><td><button class="link del" data-act="giftdel" data-id="' + esc(g.user_id) + '" data-email="' + esc(g.email) + '">Retirer</button></td></tr>').join("") + "</tbody></table></div>"
+      : '<div class="card empty">Aucun Premium offert pour l\'instant.</div>') +
+    '</div><div class="adm-side"><div class="section-title">Familles à surveiller</div>' +
+    (fams.length ? fams.map(x => '<div class="card adm-fam' + (x.blocked ? " blocked" : "") + '"><div class="spread"><b>' + esc(x.owner) + "</b>" + (x.blocked ? '<span class="tag">invitations bloquées</span>' : "") + "</div>" +
+      '<div class="small muted">' + x.members + " membre" + (x.members > 1 ? "s" : "") + " · " + x.pending + " invitation" + (x.pending > 1 ? "s" : "") + " en attente</div>" +
+      ((x.flags || []).length ? '<ul class="small adm-flags">' + x.flags.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul>" : "") + (x.note ? '<div class="small muted">Note : ' + esc(x.note) + "</div>" : "") +
+      '<button class="btn sm' + (x.blocked ? "" : " danger") + '" style="margin-top:8px" data-act="famblock" data-id="' + esc(x.id) + '" data-v="' + (x.blocked ? "0" : "1") + '">' + (x.blocked ? "Débloquer les invitations" : "Bloquer les invitations") + "</button></div>").join("")
+      : '<div class="card empty">Aucune famille à surveiller.</div>') +
+    '<div class="card adm-legal"><b>Règles de surveillance</b><ul class="small muted"><li>Plus de 3 départs (retraits ou départs volontaires) en 60 jours</li><li>Plus de 8 personnes différentes en 6 mois</li><li>3 invitations ou plus jamais acceptées en 6 mois</li><li>Un membre qui a rejoint 3 familles ou plus en 6 mois</li></ul>' +
+    '<div class="small muted" style="margin-top:6px">Calculées à chaque ouverture de cette page. Bloquer les invitations n\'enlève personne : les membres gardent Premium, mais plus personne ne peut rejoindre. Journal effacé après 12 mois.</div></div></div></div>';
 }
 
 /* ---------- Registre des recettes ---------- */
@@ -4071,7 +4235,7 @@ $app.addEventListener("click", async e => {
       if (!await ask({ title: "Se déconnecter ?", text: "Tes données restent enregistrées dans ton compte. Elles seront effacées de cet appareil.", ok: "Se déconnecter", danger: true })) return;
       flushPending(); await sync();
       if (Object.values(db.items).some(x => x.dirty) && !await ask({ title: "Modifications non envoyées", text: "Certaines modifications n'ont pas pu être envoyées (pas de réseau ?). Se déconnecter quand même ?", ok: "Oui", danger: true })) return;
-      db = emptyDb(); dataRev++; consentAsked = nameAsked = false; saveNow(); go("home"); render(); break;
+      db = emptyDb(); dataRev++; consentAsked = nameAsked = false; famSrv = null; saveNow(); go("home"); render(); break;
     }
     case "delaccount": {
       const conf = await ask({ title: "Supprimer ton compte ?", text: "Ton compte et toutes tes données (programmes, séances, historique, séances partagées) seront définitivement effacés, sur tous tes appareils. Cette action est irréversible.\n\nTape SUPPRIMER pour confirmer.", input: "", ok: "Supprimer définitivement", danger: true });
@@ -4330,7 +4494,30 @@ $app.addEventListener("click", async e => {
     } break;
     case "plantestskip": if (planTesting()) { db.planTestEnd = (db.planTestEnd || Date.now()) - 7 * DAY; saveNow(); render(); toast(trialLeft() ? "Encore " + trialLeft() + " jour" + (trialLeft() > 1 ? "s" : "") + " d'essai" : "Essai terminé : version gratuite"); } break;
     case "planbuy": toast("Le paiement arrive bientôt"); break;
-    case "adminload": if (route().args[0] === "recettes") { ledgerErr = ""; loadLedger(true); } else { adminErr = ""; loadAdmin(true); } break;
+    case "adminload": if (route().args[0] === "recettes") { ledgerErr = ""; loadLedger(true); } else if (route().args[0] === "abonnements") { adminSubsErr = ""; loadAdminSubs(true); } else { adminErr = ""; loadAdmin(true); } break;
+    case "giftopt": { document.querySelectorAll("[data-gf]").forEach(x => { giftForm[x.dataset.gf] = x.value; }); giftForm[b.dataset.k] = b.dataset.v; render(); } break;
+    case "giftsend": {
+      document.querySelectorAll("[data-gf]").forEach(x => { giftForm[x.dataset.gf] = x.value; });
+      const em = String(giftForm.email || "").trim(); if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { toast("Indique l'e-mail du compte"); return; }
+      const dl = (GIFT_DAYS.find(x => x[0] === giftForm.days) || GIFT_DAYS[0])[1];
+      if (!await ask({ title: "Offrir Premium " + (giftForm.kind === "family" ? "Famille" : "Solo") + " ?", text: "À " + em + ", " + (giftForm.days ? "pendant " + dl : "à vie") + ".", ok: "Offrir" })) return;
+      try { const r = await rpc("admin_gift", { p_email: em, p_kind: giftForm.kind, p_days: giftForm.days ? +giftForm.days : null, p_note: giftForm.note || "" }); const den = admDenied(r); if (den) { adminSubsErr = den; render(); return; } }
+      catch (err) { toast(famErr(err)); return; }
+      giftForm = { kind: giftForm.kind, days: giftForm.days }; toast("Premium offert à " + em); loadAdminSubs(); if (db.auth && em.toLowerCase() === String(db.auth.user.email || "").toLowerCase()) { loadPlan(true); famSrv = null; }
+    } break;
+    case "giftdel": {
+      if (!await ask({ title: "Retirer le Premium offert ?", text: b.dataset.email + " repasse à son statut normal (essai, abonnement ou version gratuite), sans rien perdre de ses données.", ok: "Retirer", danger: true })) return;
+      try { const r = await rpc("admin_gift_remove", { p_user: b.dataset.id }); const den = admDenied(r); if (den) { adminSubsErr = den; render(); return; } } catch (err) { toast(famErr(err)); return; }
+      toast("Premium offert retiré"); loadAdminSubs();
+    } break;
+    case "famblock": {
+      const blk = b.dataset.v === "1";
+      const note = blk ? await ask({ title: "Bloquer les invitations ?", text: "Les membres actuels gardent Premium, mais plus personne ne peut rejoindre cette famille, et les invitations en attente sont annulées. Note pour toi (facultatif) :", input: "", ok: "Bloquer", danger: true })
+        : (await ask({ title: "Débloquer les invitations ?", text: "La famille pourra de nouveau inviter des proches.", ok: "Débloquer" }) ? "" : null);
+      if (note == null) return;
+      try { const r = await rpc("admin_family_block", { p_family: b.dataset.id, p_block: blk, p_note: note }); const den = admDenied(r); if (den) { adminSubsErr = den; render(); return; } } catch (err) { toast(famErr(err)); return; }
+      toast(blk ? "Invitations bloquées" : "Invitations débloquées"); loadAdminSubs();
+    } break;
     case "admper": adminPeriod = +b.dataset.v || 8; render(); break;
     case "ledgeryear": ledgerYear = +b.dataset.v; render(); break;
     case "ledgernew": { const e = await askLedger(null); if (e) ledgerSave(e); } break;
@@ -4369,6 +4556,29 @@ $app.addEventListener("click", async e => {
       f.members = f.members.filter(x => x !== m); f.removed.push(Date.now()); saveNow(); render(); toast(m.name + " a été retiré(e) de ta famille");
     } break;
     case "famjoin": famJoin(); break;
+    case "famsrvinvite": {
+      const n = await ask({ title: "Inviter quelqu'un", text: "Son prénom, pour t'y retrouver dans la liste (facultatif).", input: "", ok: "Créer l'invitation" });
+      if (n == null) return;
+      let r; try { r = await rpc("family_invite", { p_label: String(n).slice(0, 40) }); } catch (err) { toast(famErr(err)); return; }
+      await loadFam(true); famShareSrv(r.code, String(n).trim());
+    } break;
+    case "famsrvshare": famShareSrv(b.dataset.code, b.dataset.name); break;
+    case "famsrvcancel": {
+      if (!await ask({ title: "Annuler l'invitation ?", text: "Le code ne marchera plus et la place redevient libre tout de suite.", ok: "Annuler l'invitation", cancel: "Garder" })) return;
+      try { await rpc("family_cancel", { p_code: b.dataset.code }); } catch (err) { toast(famErr(err)); return; }
+      await loadFam(true); toast("Invitation annulée : la place est libre");
+    } break;
+    case "famsrvremove": {
+      const nm = b.dataset.name || "ce membre";
+      if (!await ask({ title: "Retirer " + nm + " ?", text: nm + " n'a plus Premium partagé, sans rien perdre de ses données. Sa place ne pourra être donnée à quelqu'un d'autre que dans " + FAM_WAIT_DAYS + " jours.", ok: "Retirer", danger: true })) return;
+      try { await rpc("family_remove", { p_user: b.dataset.id }); } catch (err) { toast(famErr(err)); return; }
+      await loadFam(true); toast(nm + " a été retiré(e) de ta famille");
+    } break;
+    case "famsrvleave": {
+      if (!await ask({ title: "Quitter la famille ?", text: "Tu perds Premium partagé, mais tu gardes toutes tes données. Ta place restera bloquée " + FAM_WAIT_DAYS + " jours pour la famille.", ok: "Quitter", danger: true })) return;
+      try { await rpc("family_leave"); } catch (err) { toast(famErr(err)); return; }
+      await Promise.all([loadPlan(true), loadFam(true)]); toast("Tu as quitté la famille"); render();
+    } break;
     case "famleave": {
       if (!isMember()) return;
       if (!await ask({ title: "Quitter la famille ?", text: "Tu perds Premium partagé, mais tu gardes toutes tes données. Tu pourras t'abonner seul, ou être invité dans une autre famille.", ok: "Quitter", danger: true })) return;
@@ -4376,6 +4586,8 @@ $app.addEventListener("click", async e => {
     } break;
     case "famskip": if (isFamily()) { const f = famData(); f.removed = f.removed.map(t => t - FAM_WAIT); saveNow(); render(); toast(FAM_WAIT_DAYS + " jours plus tard : la place est libre"); } break;
     case "planfor": premiumFor = b.dataset.val === "family" ? "family" : "solo"; render(); break;
+    case "planpick": premiumPick = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; render(); break;
+    case "planmanage": toast("La gestion de l'abonnement par carte arrive avec le paiement sur fiitday.com"); break;
     case "importvar": { const code = await ask({ title: "Importer une séance", text: "Colle le lien de la séance qu'on t'a envoyé.", input: "", ok: "Continuer" }); if (!code) return;
       if (dataLocked() && (/^\s*FIITDAY\d:/.test(code) || (XFER_RE.test(normCode(code)) && code.trim().length <= 12))) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
       if (/^\s*FIITDAY\d:/.test(code)) { if (await ask({ title: "C'est une sauvegarde", text: "Ce texte est une sauvegarde complète (programmes, séances, réglages), pas un lien de séance. La restaurer dans ce compte ?", ok: "Restaurer" })) restoreBackup(code); return; }

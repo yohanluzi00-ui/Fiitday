@@ -1018,3 +1018,19 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .adm-svg text { font-size: 10.5px; }
 @media (min-width: 1100px) { .adm-syn { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); align-items: start; } }
 @media (max-width: 559px) { .adm-mt th:nth-child(3), .adm-mt td:nth-child(3), .adm-mt th:nth-child(4), .adm-mt td:nth-child(4) { display: none; } }
+
+/* Administration › Abonnements */
+.adm-launch { border-left: 4px solid var(--line); margin-bottom: 10px; }
+.adm-launch.on { border-left-color: var(--ok-ink); }
+.adm-launch .small { margin-top: 4px; }
+.adm-gift .seg { margin-top: 6px; }
+.adm-fam { margin-bottom: 10px; }
+.adm-fam.blocked { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+.adm-flags { margin: 8px 0 0; padding-left: 18px; color: var(--danger); display: flex; flex-direction: column; gap: 4px; }
+.seg.adm-tabs { flex-wrap: wrap; }
+
+/* écran Premium : formule choisie */
+button.plan-opt { font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; }
+.plan-opt.picked { outline: 3px solid var(--accent); outline-offset: 0; }
+.plan-opt:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.plan-terms { margin: 8px 2px 0; }

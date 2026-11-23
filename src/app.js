@@ -3274,7 +3274,7 @@ async function mfaVerify() {
     const j = await authApi("POST", "factors/" + f.id + "/verify", { challenge_id: ch.id, code });
     if (j && j.access_token && j.user) setSession(j); // la session passe au niveau aal2
     const first = !!mfa.enroll;
-    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = "";
+    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = "";
     toast(first ? "Double authentification activée" : "Code validé"); render();
   } catch (e) { mfa.err = mfaMessage(e); render(); }
 }
@@ -3338,35 +3338,80 @@ async function changePassword() {
 }
 
 /* ================= Administration (ton compte seulement) ================= */
-// Les chiffres viennent de la fonction Supabase admin_kpis : des totaux, sans aucune donnée personnelle.
+// Deux pages : Tableau de bord (chiffres de la fonction Supabase admin_kpis : des totaux, aucune donnée personnelle)
+// et Registre des recettes (table revenue_ledger, lue et modifiée seulement par ton compte avec le code à 6 chiffres).
 // Le serveur refuse tout autre compte ; ici l'écran n'est même pas proposé aux autres.
 const isAdmin = () => isPlanTester();
-let adminKpi = null, adminErr = "", adminBusy = false;
-async function loadAdmin() {
+let adminKpi = null, adminErr = "", adminBusy = false, adminPeriod = 8;
+const admDenied = r => r && r.denied ? (r.mfa ? "mfa" : "Accès refusé : réservé à l'administrateur.") : "";
+const admErrText = (e, what) => /MFA/.test(e.message) ? "mfa" : e.code === "42501" ? "Accès refusé : réservé à l'administrateur." : e.message === "Failed to fetch" ? "Pas de connexion internet." : what + " (" + e.message + ").";
+async function loadAdmin(manual) {
   if (adminBusy || !isAdmin()) return;
-  adminBusy = true; adminErr = "";
+  adminBusy = true; adminErr = ""; if (manual) render();
+  let ok = false;
   try {
     const r = await rpc("admin_kpis");
-    if (r && r.denied) { adminKpi = null; adminErr = r.mfa ? "mfa" : "Accès refusé : réservé à l'administrateur."; } // refus noté côté serveur
-    else adminKpi = r;
+    const den = admDenied(r);
+    if (den) { adminKpi = null; adminErr = den; } // refus noté côté serveur
+    else { adminKpi = r; ok = true; if (!ledger && !ledgerBusy) setTimeout(loadLedger, 0); } // total de l'année pour la carte « Recettes »
   }
-  catch (e) { adminErr = /MFA/.test(e.message) ? "mfa" : e.code === "42501" ? "Accès refusé : réservé à l'administrateur." : e.message === "Failed to fetch" ? "Pas de connexion internet." : "Les chiffres n'ont pas pu être chargés (" + e.message + ")."; }
-  finally { adminBusy = false; if (route().name === "admin") render(); }
+  catch (e) { adminErr = admErrText(e, "Les chiffres n'ont pas pu être chargés"); }
+  finally {
+    adminBusy = false;
+    if (route().name === "admin") render();
+    if (manual) toast(ok ? "Chiffres à jour · " + fmtTimeSec(Date.now()) : adminErr === "mfa" ? "Code à 6 chiffres demandé" : "Mise à jour impossible");
+  }
 }
-function adminChart(weeks, key, label) {
-  const W = 360, H = 120, top = 16, bw = W / weeks.length, max = Math.max(1, ...weeks.map(x => x[key]));
-  const y = v => H - (v / max) * (H - top);
-  let svg = '<svg class="chart" viewBox="0 0 ' + W + " " + (H + 24) + '" role="img" aria-label="' + esc(label) + ' sur les 8 dernières semaines"><line class="base" x1="0" x2="' + W + '" y1="' + H + '" y2="' + H + '"></line>';
-  weeks.forEach((wk, n) => {
-    const v = wk[key], x = n * bw + bw * 0.22, w = bw * 0.56, d = new Date(wk.w + "T12:00:00"), lab = pad(d.getDate()) + "/" + pad(d.getMonth() + 1), last = n === weeks.length - 1;
-    svg += "<g><title>" + esc("Semaine du " + lab + " : " + v) + "</title>";
-    if (v > 0) { const hh = H - y(v), r = Math.min(4, hh / 2, w / 2); svg += '<path class="bar' + (last ? "" : " dim") + '" d="M' + x + "," + H + "V" + (y(v) + r) + "Q" + x + "," + y(v) + " " + (x + r) + "," + y(v) + "H" + (x + w - r) + "Q" + (x + w) + "," + y(v) + " " + (x + w) + "," + (y(v) + r) + "V" + H + 'Z"></path>'; }
-    svg += '<text x="' + (n * bw + bw / 2) + '" y="' + (H + 17) + '" text-anchor="middle">' + lab + "</text>";
-    if (v > 0) svg += '<text x="' + (n * bw + bw / 2) + '" y="' + (y(v) - 5) + '" text-anchor="middle" style="font-weight:700;fill:var(--ink)">' + v + "</text>";
-    svg += "</g>";
-  });
-  return '<div class="card" style="margin-top:10px"><div class="muted small" style="font-weight:600;margin-bottom:8px">' + esc(label) + "</div>" + svg + "</div>";
+const fmtTimeSec = t => DF({ hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(t);
+const admTabs = cur => '<div class="seg adm-tabs" role="tablist">' + [["", "Tableau de bord"], ["recettes", "Registre des recettes"]].map(([k, l]) =>
+  '<a role="tab" href="#/admin' + (k ? "/" + k : "") + '" class="' + (cur === k ? "on" : "") + '" aria-selected="' + (cur === k) + '">' + l + "</a>").join("") + "</div>";
+
+// ----- courbes du tableau de bord : valeur par semaine, survol ou toucher pour lire chaque semaine -----
+const admSeries = {};
+function admLine(key, label, weeks, field, note) {
+  const pts = weeks.map(w => ({ t: Date.parse(w.w + "T12:00:00"), v: +w[field] || 0 }));
+  const last = pts[pts.length - 1] || { v: 0, t: Date.now() }, prev = pts[pts.length - 2], first = pts[0];
+  const W = 400, H = 170, L = 34, R = 12, T = 16, B = 24, pw = W - L - R, ph = H - T - B;
+  const mx = Math.max(1, ...pts.map(p => p.v)), step = Math.max(1, niceStep(mx / 3)), y1 = Math.max(step, Math.ceil(mx / step) * step);
+  const X = k => L + (pts.length > 1 ? (k / (pts.length - 1)) * pw : pw / 2), Y = v => T + (1 - v / y1) * ph;
+  pts.forEach((p, k) => { p.x = X(k); p.y = Y(p.v); });
+  admSeries[key] = { pts, field, def: "" };
+  let svg = '<svg class="chart adm-svg" data-k="' + key + '" viewBox="0 0 ' + W + " " + H + '" role="img" tabindex="0" aria-label="' + esc(label + " : " + last.v + " cette semaine") + '">' +
+    '<defs><linearGradient id="admG-' + key + '" x1="0" x2="0" y1="0" y2="1"><stop offset="0"></stop><stop offset="1"></stop></linearGradient></defs>';
+  for (let v = 0; v <= y1 + step / 1000; v += step) { const y = Y(v).toFixed(1); svg += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y + '" y2="' + y + '"></line><text x="' + (L - 8) + '" y="' + (+y + 4) + '" text-anchor="end">' + fmtNum(v) + "</text>"; }
+  const dfx = pts.length > 20 ? DF({ month: "short" }) : DF({ day: "2-digit", month: "2-digit" });
+  const xl = pts.length > 2 ? [0, Math.round((pts.length - 1) / 2), pts.length - 1] : pts.map((p, k) => k);
+  xl.forEach((k, n) => { const a = n === 0 && xl.length > 1 ? "start" : n === xl.length - 1 && xl.length > 1 ? "end" : "middle"; svg += '<text x="' + pts[k].x.toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + a + '">' + esc(dfx.format(pts[k].t)) + "</text>"; });
+  if (pts.length > 1) {
+    const line = pts.map((p, k) => (k ? "L" : "M") + p.x.toFixed(1) + "," + p.y.toFixed(1)).join("");
+    svg += '<path class="area" style="fill:url(#admG-' + key + ')" d="' + line + "L" + pts[pts.length - 1].x.toFixed(1) + "," + (T + ph) + "L" + pts[0].x.toFixed(1) + "," + (T + ph) + 'Z"></path><path class="line" d="' + line + '"></path>';
+  }
+  pts.forEach((p, k) => { if (pts.length <= 26 || k === pts.length - 1) svg += '<circle class="dot' + (k === pts.length - 1 ? " last" : "") + '" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + (k === pts.length - 1 ? 5 : 3.2) + '"></circle>'; });
+  svg += '<line class="xhair" x1="0" x2="0" y1="' + T + '" y2="' + (T + ph) + '" visibility="hidden"></line><circle class="focus" r="6" cx="0" cy="0" visibility="hidden"></circle></svg>';
+  const d = prev ? last.v - prev.v : 0, span = first && last !== first ? last.v - first.v : 0;
+  const diff = '<span class="adm-diff ' + (d > 0 ? "up" : d < 0 ? "down" : "") + '">' + (d > 0 ? "+" + d : d < 0 ? "−" + -d : "=") + "</span>";
+  admSeries[key].def = '<b class="num">' + fmtNum(last.v) + "</b> " + diff + '<span class="d muted small">cette semaine · ' + (span >= 0 ? "+" : "−") + Math.abs(span) + " sur la période</span>";
+  return '<div class="card adm-chart"><div class="adm-ch-head"><div class="muted small adm-ch-t">' + esc(label) + "</div>" + (note ? '<div class="muted small">' + esc(note) + "</div>" : "") + "</div>" +
+    '<div class="adm-read" data-k="' + key + '">' + admSeries[key].def + "</div>" + svg + "</div>";
 }
+function admPick(svg, clientX) {
+  const s = admSeries[svg.dataset.k]; if (!s || !s.pts.length) return;
+  const r = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal, x = (clientX - r.left) * (vb.width / r.width);
+  let k = 0; s.pts.forEach((p, n) => { if (Math.abs(p.x - x) < Math.abs(s.pts[k].x - x)) k = n; });
+  const p = s.pts[k], xh = svg.querySelector(".xhair"), f = svg.querySelector(".focus");
+  xh.setAttribute("x1", p.x); xh.setAttribute("x2", p.x); xh.setAttribute("visibility", "visible");
+  f.setAttribute("cx", p.x); f.setAttribute("cy", p.y); f.setAttribute("visibility", "visible");
+  const out = document.querySelector('.adm-read[data-k="' + svg.dataset.k + '"]'); if (!out) return;
+  out.innerHTML = '<b class="num">' + fmtNum(p.v) + '</b><span class="d muted small">semaine du ' + esc(fmtDateLong(p.t)) + "</span>";
+}
+document.addEventListener("pointermove", e => { const svg = e.target.closest && e.target.closest(".adm-svg"); if (svg) admPick(svg, e.clientX); });
+document.addEventListener("pointerdown", e => { const svg = e.target.closest && e.target.closest(".adm-svg"); if (svg) admPick(svg, e.clientX); });
+document.addEventListener("pointerout", e => {
+  const svg = e.target.closest && e.target.closest(".adm-svg"); if (!svg || svg.contains(e.relatedTarget)) return;
+  svg.querySelectorAll(".xhair, .focus").forEach(x => x.setAttribute("visibility", "hidden"));
+  const s = admSeries[svg.dataset.k], out = document.querySelector('.adm-read[data-k="' + svg.dataset.k + '"]'); if (s && out) out.innerHTML = s.def;
+});
+
 // bloc Sécurité : alertes (rouge / orange) puis les chiffres surveillés
 function secAlerts(s) {
   const a = [], pl = (n, w) => n + " " + w + (n > 1 ? "s" : "");
@@ -3401,34 +3446,332 @@ function secBlock(s) {
     row("Comptes bloqués", s.banned) + "</div>" +
     '<div class="small muted" style="margin-top:8px">Les essais de mot de passe ratés ne sont pas comptés ici : Supabase freine automatiquement les essais répétés. Refus gardés 12 mois.</div></div>';
 }
+// barre du haut : Actualiser (avec son état) et l'heure exacte des chiffres
+function admBar(atIso, busy, what) {
+  const at = Date.parse(atIso || "") || 0;
+  return '<div class="adm-bar"><button class="btn sm' + (busy ? " busy" : "") + '" data-act="adminload"' + (busy ? " disabled" : "") + '><span class="adm-spin" aria-hidden="true"></span>' + (busy ? "Actualisation…" : "Actualiser") + "</button>" +
+    '<span class="muted small" role="status">' + (busy ? "Lecture des " + what + " sur le serveur…" : at ? what.charAt(0).toUpperCase() + what.slice(1) + " du " + esc(fmtDateLong(at)) + " à " + esc(fmtTimeSec(at)) : "") + "</span></div>";
+}
 function viewAdmin() {
   const back = '<a class="back" href="#/settings">‹ Réglages</a>';
   if (!isAdmin()) return back + '<div class="card empty">Cette page n\'existe pas.</div>';
-  const head = back + '<div class="page-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · des totaux, aucune donnée personnelle</div></div></div>';
-  if (!isAal2() || adminErr === "mfa") { adminKpi = null; return head + mfaBox(); } // double authentification d'abord
-  if (!adminKpi && !adminErr) { setTimeout(loadAdmin, 0); return head + '<div class="card empty">Chargement des chiffres…</div>'; }
-  if (!adminKpi) return head + '<div class="card"><p class="msg err" style="margin:0">' + esc(adminErr) + '</p><button class="btn sm" style="margin-top:10px" data-act="adminload">Réessayer</button></div>';
-  const k = adminKpi, wk = Array.isArray(k.weeks) ? k.weeks : [], cur = wk[wk.length - 1] || { n: 0, u: 0, i: 0 }, prev = wk[wk.length - 2] || { n: 0, u: 0, i: 0 };
+  const tab = route().args[0] === "recettes" ? "recettes" : "";
+  const head = back + '<div class="page-head adm-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · ' + (tab ? "registre de ta micro-entreprise" : "des totaux, aucune donnée personnelle") + "</div></div>" + admTabs(tab) + "</div>";
+  if (!isAal2() || adminErr === "mfa" || ledgerErr === "mfa") { adminKpi = null; ledger = null; return head + mfaBox(); } // double authentification d'abord
+  return head + (tab ? viewLedger() : viewAdminDash());
+}
+function viewAdminDash() {
+  if (!adminKpi && !adminErr) { if (!adminBusy) setTimeout(loadAdmin, 0); return '<div class="card empty">Chargement des chiffres…</div>'; }
+  if (!adminKpi) return '<div class="card"><p class="msg err" style="margin:0">' + esc(adminErr) + '</p><button class="btn sm" style="margin-top:10px" data-act="adminload">Réessayer</button></div>';
+  const k = adminKpi, all = Array.isArray(k.weeks) ? k.weeks : [], wk = all.slice(-adminPeriod), cur = all[all.length - 1] || { n: 0, u: 0, i: 0 }, prev = all[all.length - 2] || { n: 0, u: 0, i: 0 };
   const pct = (a, b) => b ? Math.round(100 * a / b) + " %" : "—";
-  const diff = (a, b) => { const d = a - b; return '<span class="adm-diff ' + (d > 0 ? "up" : d < 0 ? "down" : "") + '">' + (d > 0 ? "+" + d : d < 0 ? String(d) : "=") + "</span>"; };
+  const diff = (a, b) => { const d = a - b; return '<span class="adm-diff ' + (d > 0 ? "up" : d < 0 ? "down" : "") + '">' + (d > 0 ? "+" + d : d < 0 ? "−" + -d : "=") + "</span>"; };
   const tile = (label, v, sub) => '<div class="card stat"><div class="muted small">' + label + '</div><div class="v num">' + v + "</div>" + (sub ? '<div class="muted small">' + sub + "</div>" : "") + "</div>";
-  return head +
-    secBlock(k.sec) +
+  const per = '<div class="seg adm-per" role="group" aria-label="Période des courbes">' + [[8, "8 semaines"], [26, "6 mois"], [52, "12 mois"]].map(([n, l]) => '<button class="' + (adminPeriod === n ? "on" : "") + '" aria-pressed="' + (adminPeriod === n) + '" data-act="admper" data-v="' + n + '">' + l + "</button>").join("") + "</div>";
+  const yr = ledger && ledger.rows ? ledger.rows.filter(r => r.paid_on.slice(0, 4) === String(new Date().getFullYear())).reduce((s, r) => s + +r.net, 0) : null;
+  return admBar(k.at, adminBusy, "chiffres") +
+    '<div class="adm-grid"><div class="adm-main">' +
+    '<div class="section-title">Utilisateurs</div><div class="stats adm-tiles">' +
+    tile("Comptes inscrits", k.users, "+" + k.users7 + " en 7 jours · +" + k.users30 + " en 30 jours") +
+    tile("Actifs sur 7 jours", k.active7, pct(k.active7, k.users) + " des inscrits") +
+    tile("Actifs sur 30 jours", k.active30, pct(k.active30, k.users) + " des inscrits") +
+    tile("Séances terminées", k.workouts, k.workouts7 + " en 7 jours") + "</div>" +
+    '<div class="spread adm-ev-h"><div class="section-title" style="margin:0">Évolution</div>' + per + "</div>" +
+    '<div class="adm-charts">' +
+    admLine("t", "Comptes inscrits (total)", wk, "t", "à la fin de chaque semaine") + admLine("i", "Inscriptions par semaine", wk, "i") +
+    admLine("u", "Utilisateurs actifs par semaine", wk, "u", "au moins une séance terminée") + admLine("n", "Séances terminées par semaine", wk, "n") + "</div>" +
+    '<div class="small muted adm-hint">Passe la souris ou le doigt sur une courbe pour lire chaque semaine.</div>' +
+    "</div><div class=\"adm-side\">" +
     '<div class="section-title">Résumé de la semaine</div><div class="card adm-week">' +
     "<div><b class=\"num\">" + cur.i + "</b> inscription" + (cur.i > 1 ? "s" : "") + " " + diff(cur.i, prev.i) + "</div>" +
     "<div><b class=\"num\">" + cur.n + "</b> séance" + (cur.n > 1 ? "s" : "") + " terminée" + (cur.n > 1 ? "s" : "") + " " + diff(cur.n, prev.n) + "</div>" +
     "<div><b class=\"num\">" + cur.u + "</b> utilisateur" + (cur.u > 1 ? "s" : "") + " actif" + (cur.u > 1 ? "s" : "") + " " + diff(cur.u, prev.u) + "</div>" +
     '<div class="muted small">Depuis lundi, comparé à la semaine dernière.</div></div>' +
-    '<div class="section-title">Utilisateurs</div><div class="stats">' +
-    tile("Comptes inscrits", k.users, "+" + k.users7 + " en 7 jours · +" + k.users30 + " en 30 jours") +
-    tile("Actifs sur 7 jours", k.active7, pct(k.active7, k.users) + " des inscrits") +
-    tile("Actifs sur 30 jours", k.active30, pct(k.active30, k.users) + " des inscrits") +
-    tile("Séances terminées", k.workouts, k.workouts7 + " en 7 jours") + "</div>" +
-    adminChart(wk, "n", "Séances terminées par semaine") + adminChart(wk, "u", "Utilisateurs actifs par semaine") + adminChart(wk, "i", "Inscriptions par semaine") +
-    '<div class="section-title">Partage et transferts</div><div class="stats">' +
+    secBlock(k.sec) +
+    '<div class="section-title">Partage et transferts</div><div class="stats adm-two">' +
     tile("Séances partagées", k.shares, k.shares30 + " en 30 jours") + tile("Codes de transfert", k.transfers30, "créés en 30 jours") + "</div>" +
+    '<div class="section-title">Recettes</div><a class="card adm-link" href="#/admin/recettes"><div><div class="muted small">Registre des recettes</div><div class="v num">' + (yr == null ? "Ouvrir" : esc(eur(yr))) + "</div>" +
+    '<div class="muted small">' + (yr == null ? "Tes encaissements, totaux et PDF" : "encaissé en " + new Date().getFullYear()) + "</div></div><span aria-hidden=\"true\">›</span></a>" +
     '<div class="section-title">Abonnements</div><div class="card"><p class="muted small" style="margin:0">Au lancement : essais en cours, taux de conversion, abonnés Solo / Famille / À vie, revenu mensuel, résiliations et familles signalées.</p></div>' +
-    '<div class="row" style="margin-top:14px;flex-wrap:wrap;align-items:center;gap:8px 12px"><button class="btn sm" data-act="adminload">' + (adminBusy ? "Mise à jour…" : "Actualiser") + '</button><span class="muted small">Chiffres du ' + esc(fmtDateLong(Date.parse(k.at) || Date.now())) + " à " + esc(fmtTime(Date.parse(k.at) || Date.now())) + "</span></div>";
+    "</div></div>";
+}
+
+/* ---------- Registre des recettes ---------- */
+// Livre des recettes d'une micro-entreprise : chaque encaissement, dans l'ordre des dates, avec le client, la nature,
+// le montant, le mode de paiement et la pièce justificative. Numérotation par année (2026-001…). Toute modification
+// ou suppression est gardée dans un journal côté serveur.
+let ledger = null, ledgerErr = "", ledgerBusy = false, ledgerYear = null;
+const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
+const eur = v => EUR.format(+v || 0);
+const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const LEDGER_STORES = ["Google Play", "App Store"];
+const LEDGER_METHODS = ["Virement bancaire", "Carte bancaire", "PayPal", "Chèque", "Espèces", "Autre"];
+const isoDay = t => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+const dayFr = s => s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
+const ledgerInfo = () => Object.assign({ name: "", siret: "", addr: "", vat: "" }, settings().ledgerInfo || {});
+async function loadLedger(manual) {
+  if (ledgerBusy || !isAdmin()) return;
+  ledgerBusy = true; ledgerErr = ""; if (manual) render();
+  let ok = false;
+  try { const r = await rpc("admin_ledger"); const den = admDenied(r); if (den) { ledger = null; ledgerErr = den; } else { ledger = r; ok = true; } }
+  catch (e) { ledgerErr = admErrText(e, "Le registre n'a pas pu être chargé"); }
+  finally { ledgerBusy = false; if (route().name === "admin") render(); if (manual) toast(ok ? "Registre à jour · " + fmtTimeSec(Date.now()) : "Mise à jour impossible"); }
+}
+// recettes d'une année, numérotées dans l'ordre chronologique
+function ledgerYearRows(y) {
+  return (ledger && ledger.rows || []).filter(r => r.paid_on.slice(0, 4) === String(y)).map((r, k) => Object.assign({}, r, { num: y + "-" + String(k + 1).padStart(3, "0") }));
+}
+function ledgerMonths(rows) {
+  const m = Array.from({ length: 12 }, () => ({ n: 0, gross: 0, fees: 0, net: 0 }));
+  rows.forEach(r => { const x = m[+r.paid_on.slice(5, 7) - 1]; x.n++; x.gross += +r.gross; x.fees += +r.fees; x.net += +r.net; });
+  return m;
+}
+const sumRows = rows => rows.reduce((s, r) => ({ n: s.n + (r.n != null ? r.n : 1), gross: s.gross + +r.gross, fees: s.fees + +r.fees, net: s.net + +r.net }), { n: 0, gross: 0, fees: 0, net: 0 });
+function viewLedger() {
+  if (!ledger && !ledgerErr) { if (!ledgerBusy) setTimeout(loadLedger, 0); return '<div class="card empty">Chargement du registre…</div>'; }
+  if (!ledger) return '<div class="card"><p class="msg err" style="margin:0">' + esc(ledgerErr) + '</p><button class="btn sm" style="margin-top:10px" data-act="adminload">Réessayer</button></div>';
+  const now = new Date(), thisY = now.getFullYear(), years = [...new Set([thisY].concat((ledger.rows || []).map(r => +r.paid_on.slice(0, 4))))].sort((a, b) => b - a);
+  const y = years.includes(ledgerYear) ? ledgerYear : thisY, rows = ledgerYearRows(y), months = ledgerMonths(rows), tot = sumRows(rows);
+  const isCur = y === thisY, mo = now.getMonth(), q = Math.floor(mo / 3), qTot = sumRows(months.slice(q * 3, q * 3 + 3));
+  const info = ledgerInfo();
+  const tile = (label, v, sub) => '<div class="card stat"><div class="muted small">' + label + '</div><div class="v num">' + v + "</div>" + (sub ? '<div class="muted small">' + sub + "</div>" : "") + "</div>";
+  const yearSeg = '<div class="seg adm-years" role="group" aria-label="Année">' + years.map(v => '<button class="' + (v === y ? "on" : "") + '" aria-pressed="' + (v === y) + '" data-act="ledgeryear" data-v="' + v + '">' + v + "</button>").join("") + "</div>";
+  let h = admBar(ledger.at, ledgerBusy, "données du registre") +
+    '<div class="adm-ltools">' + yearSeg + '<div class="adm-lbtns"><button class="btn sm" data-act="ledgerinfo">Infos du registre</button><button class="btn sm" data-act="ledgerpdf"' + (rows.length ? "" : " disabled") + '>Exporter en PDF</button><button class="btn sm primary" data-act="ledgernew">+ Nouvelle recette</button></div></div>';
+  h += '<div class="stats adm-tiles">' +
+    tile("Encaissé en " + y, esc(eur(tot.net)), tot.n + " recette" + (tot.n > 1 ? "s" : "")) +
+    (isCur ? tile("Ce mois-ci", esc(eur(months[mo].net)), MOIS[mo] + " " + y) + tile("Trimestre en cours", esc(eur(qTot.net)), "T" + (q + 1) + " · " + MOIS_C[q * 3] + " – " + MOIS_C[q * 3 + 2])
+      : tile("Meilleur mois", esc(eur(Math.max(...months.map(m => m.net)))), MOIS[months.reduce((b, m, k) => m.net > months[b].net ? k : b, 0)]) + tile("Moyenne par mois", esc(eur(tot.net / 12)), "sur 12 mois")) +
+    tile("Commissions des stores", esc(eur(tot.fees)), tot.gross ? Math.round(100 * tot.fees / tot.gross) + " % du brut" : "—") + "</div>";
+  // registre (tableau sur ordinateur, cartes sur téléphone)
+  const act = r => '<span class="adm-racts"><button class="link" data-act="ledgeredit" data-id="' + r.id + '">Modifier</button><button class="link del" data-act="ledgerdel" data-id="' + r.id + '">Supprimer</button></span>';
+  const edited = r => +r.edits ? ' <span class="tag" title="Modifiée ' + r.edits + ' fois, l\'historique est gardé dans le journal">modifiée</span>' : "";
+  let reg;
+  if (!rows.length) reg = '<div class="card adm-empty"><b>Aucune recette en ' + y + '</b><p class="muted small">Note ici chaque somme encaissée : un versement de Google Play ou de l\'App Store (ils te paient chaque mois, commission déduite), ou toute autre vente. Garde la pièce justificative (relevé de paiement, facture) et sa référence.</p><button class="btn primary sm" data-act="ledgernew">+ Ajouter la première recette</button></div>';
+  else {
+    reg = '<div class="card adm-reg"><table class="adm-table"><thead><tr><th>N°</th><th>Date</th><th>Client / payeur</th><th>Nature</th><th>Mode</th><th>Pièce</th><th class="r">Brut</th><th class="r">Commission</th><th class="r">Encaissé</th><th><span class="sr">Actions</span></th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td class="num nowrap">' + r.num + '</td><td class="num nowrap">' + dayFr(r.paid_on) + "</td><td>" + esc(r.payer) + "</td><td>" + esc(r.nature) + edited(r) + (r.note ? '<div class="muted small">' + esc(r.note) + "</div>" : "") + "</td><td>" + esc(r.method) + '</td><td class="small nowrap">' + esc(r.ref || "—") +
+        '</td><td class="r num nowrap">' + esc(eur(r.gross)) + '</td><td class="r num nowrap">' + (+r.fees ? "−" + esc(eur(r.fees)) : "—") + '</td><td class="r num nowrap"><b>' + esc(eur(r.net)) + "</b></td><td>" + act(r) + "</td></tr>").join("") +
+      '</tbody><tfoot><tr><td colspan="6">Total ' + y + '</td><td class="r num nowrap">' + esc(eur(tot.gross)) + '</td><td class="r num nowrap">' + (tot.fees ? "−" + esc(eur(tot.fees)) : "—") + '</td><td class="r num nowrap">' + esc(eur(tot.net)) + "</td><td></td></tr></tfoot></table>" +
+      '<div class="adm-cards">' + rows.slice().reverse().map(r => '<div class="adm-rc"><div class="spread"><b class="num">' + esc(eur(r.net)) + '</b><span class="muted small num">' + r.num + " · " + dayFr(r.paid_on) + "</span></div>" +
+        "<div>" + esc(r.payer) + " · " + esc(r.nature) + edited(r) + "</div>" + '<div class="muted small">' + esc(r.method) + (r.ref ? " · pièce " + esc(r.ref) : "") + (+r.fees ? " · brut " + esc(eur(r.gross)) + ", commission " + esc(eur(r.fees)) : "") + "</div>" + (r.note ? '<div class="muted small">' + esc(r.note) + "</div>" : "") + act(r) + "</div>").join("") + "</div></div>";
+  }
+  // totaux par mois et par trimestre + graphique
+  const W = 360, H = 130, T = 18, bw = W / 12, mx = Math.max(1, ...months.map(m => m.net));
+  let svg = '<svg class="chart" viewBox="0 0 ' + W + " " + (H + 22) + '" role="img" aria-label="Encaissé par mois en ' + y + '"><line class="base" x1="0" x2="' + W + '" y1="' + H + '" y2="' + H + '"></line>';
+  months.forEach((m, k) => { const v = m.net, yy = H - (v / mx) * (H - T), x = k * bw + bw * 0.2, w = bw * 0.6;
+    svg += "<g><title>" + esc(MOIS[k] + " " + y + " : " + eur(v)) + "</title>";
+    if (v > 0) { const r = Math.min(3, (H - yy) / 2); svg += '<path class="bar' + (isCur && k === mo ? "" : " dim") + '" d="M' + x + "," + H + "V" + (yy + r) + "Q" + x + "," + yy + " " + (x + r) + "," + yy + "H" + (x + w - r) + "Q" + (x + w) + "," + yy + " " + (x + w) + "," + (yy + r) + "V" + H + 'Z"></path>'; }
+    svg += '<text x="' + (k * bw + bw / 2) + '" y="' + (H + 15) + '" text-anchor="middle">' + MOIS[k].charAt(0).toUpperCase() + "</text></g>"; });
+  svg += "</svg>";
+  const mrow = (l, m, cls) => '<tr class="' + (cls || "") + '"><td>' + l + '</td><td class="r num">' + (m.n || "—") + '</td><td class="r num nowrap">' + (m.gross ? esc(eur(m.gross)) : "—") + '</td><td class="r num nowrap">' + (m.fees ? "−" + esc(eur(m.fees)) : "—") + '</td><td class="r num nowrap">' + (m.net ? esc(eur(m.net)) : "—") + "</td></tr>";
+  let mt = '<table class="adm-table adm-mt"><thead><tr><th>Mois</th><th class="r">Nb</th><th class="r">Brut</th><th class="r">Commissions</th><th class="r">Encaissé</th></tr></thead><tbody>';
+  for (let qq = 0; qq < 4; qq++) { for (let k = qq * 3; k < qq * 3 + 3; k++) mt += mrow(MOIS[k].charAt(0).toUpperCase() + MOIS[k].slice(1), months[k]); mt += mrow("T" + (qq + 1) + " · " + MOIS_C[qq * 3] + " – " + MOIS_C[qq * 3 + 2], sumRows(months.slice(qq * 3, qq * 3 + 3)), "q"); }
+  mt += "</tbody><tfoot>" + mrow("Année " + y, tot) + "</tfoot></table>";
+  const side = '<div class="adm-syn-a"><div class="card"><div class="muted small" style="font-weight:600;margin-bottom:8px">Encaissé par mois</div>' + svg + "</div>" +
+    '<div class="card adm-legal"><b>À savoir</b><ul class="small muted"><li>Chaque recette est notée à la date où l\'argent arrive sur ton compte, dans l\'ordre des dates.</li>' +
+    "<li>Garde les pièces justificatives (relevés de paiement Google / Apple, factures) : registre et pièces se conservent 10 ans.</li>" +
+    "<li>Pour Google Play et l'App Store, le registre garde le brut, la commission et le net encaissé : vérifie avec ton comptable ou l'URSSAF lequel déclarer.</li>" +
+    "<li>TVA : " + (info.vat === "franchise" ? "franchise en base, la mention « TVA non applicable, art. 293 B du CGI » figure sur le PDF." : "régime pas encore choisi (Infos du registre).") + "</li>" +
+    "<li>Chaque modification ou suppression est gardée dans un journal" + (+ledger.deleted ? " (" + ledger.deleted + " suppression" + (ledger.deleted > 1 ? "s" : "") + " notée" + (ledger.deleted > 1 ? "s" : "") + ")" : "") + ".</li></ul></div></div>" +
+    '<div class="card adm-syn-b"><div class="muted small" style="font-weight:600;margin-bottom:6px">Totaux par mois et par trimestre</div>' + mt + "</div>";
+  return h + '<div class="section-title">Registre ' + y + "</div>" + reg + '<div class="section-title">Synthèse ' + y + '</div><div class="adm-syn">' + side + "</div>";
+}
+// fenêtre de saisie d'une recette
+const parseAmt = s => { const t = String(s == null ? "" : s).replace(/[\s  €]/g, "").replace(",", "."); return /^\d{1,7}(\.\d{1,2})?$/.test(t) ? Math.round(+t * 100) / 100 : NaN; };
+const amtStr = v => v == null || v === "" ? "" : String(Math.round(+v * 100) / 100).replace(".", ",");
+function askLedger(cur) {
+  return new Promise(res => {
+    const prevMonth = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return MOIS[d.getMonth()] + " " + d.getFullYear(); })();
+    const v = cur ? { paid_on: cur.paid_on, payer: cur.payer, nature: cur.nature, method: cur.method, ref: cur.ref || "", gross: amtStr(cur.gross), fees: +cur.fees ? amtStr(cur.fees) : "", note: cur.note || "" }
+      : { paid_on: isoDay(Date.now()), payer: "Google Play", nature: "Ventes d'abonnements Fiitday (" + prevMonth + ")", method: "Virement bancaire", ref: "", gross: "", fees: "", note: "" };
+    let who = LEDGER_STORES.includes(v.payer) ? v.payer : "autre";
+    const d = document.createElement("div"); d.className = "modal sheet";
+    const netTxt = () => { const g = parseAmt(v.gross), f = v.fees === "" ? 0 : parseAmt(v.fees); return isNaN(g) || isNaN(f) ? "—" : eur(g - f); };
+    const draw = () => {
+      d.innerHTML = '<div class="modal-box own-box adm-form" role="dialog" aria-modal="true" aria-label="' + (cur ? "Modifier la recette" : "Nouvelle recette") + '"><h3>' + (cur ? "Modifier la recette " + esc(cur.num || "") : "Nouvelle recette") + "</h3>" +
+        '<label class="fl">Date d\'encaissement<input class="f" type="date" data-f="paid_on" max="' + isoDay(Date.now() + 86400000) + '" value="' + esc(v.paid_on) + '"></label>' +
+        '<div class="fl" style="margin-top:10px">Client / payeur<div class="seg adm-who" role="group">' + LEDGER_STORES.concat(["autre"]).map(p => '<button type="button" data-who="' + p + '" class="' + (who === p ? "on" : "") + '" aria-pressed="' + (who === p) + '">' + (p === "autre" ? "Autre" : p) + "</button>").join("") + "</div>" +
+        (who === "autre" ? '<input class="f" data-f="payer" maxlength="120" placeholder="Nom du client" value="' + esc(LEDGER_STORES.includes(v.payer) ? "" : v.payer) + '">' : "") + "</div>" +
+        '<label class="fl" style="margin-top:10px">Nature de la recette<input class="f" data-f="nature" maxlength="200" value="' + esc(v.nature) + '"></label>' +
+        '<div class="adm-frow"><label class="fl">Mode de paiement<select class="f" data-f="method">' + LEDGER_METHODS.map(m => "<option" + (m === v.method ? " selected" : "") + ">" + m + "</option>").join("") + "</select></label>" +
+        '<label class="fl">Pièce justificative<input class="f" data-f="ref" maxlength="80" placeholder="N° du relevé ou de la facture" value="' + esc(v.ref) + '"></label></div>' +
+        '<div class="adm-frow"><label class="fl">Montant brut (€)<input class="f num" data-f="gross" inputmode="decimal" placeholder="0,00" value="' + esc(v.gross) + '"></label>' +
+        '<label class="fl">Commission du store (€)<input class="f num" data-f="fees" inputmode="decimal" placeholder="0,00" value="' + esc(v.fees) + '"></label></div>' +
+        '<div class="adm-net"><span class="muted small">Encaissé (net)</span><b class="num" data-net>' + esc(netTxt()) + "</b></div>" +
+        '<label class="fl">Note (facultatif)<input class="f" data-f="note" maxlength="500" value="' + esc(v.note) + '"></label>' +
+        '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">' + (cur ? "Enregistrer" : "Ajouter au registre") + "</button></div></div>";
+    };
+    draw(); document.body.appendChild(d);
+    d.addEventListener("input", e => { const f = e.target.dataset && e.target.dataset.f; if (!f) return; v[f] = e.target.value; if (f === "gross" || f === "fees") d.querySelector("[data-net]").textContent = netTxt(); });
+    d.addEventListener("change", e => { const f = e.target.dataset && e.target.dataset.f; if (f) v[f] = e.target.value; });
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const w = e.target.closest("[data-who]");
+      if (w) { who = w.dataset.who; if (who !== "autre") { v.payer = who; if (!v.nature) v.nature = "Ventes d'abonnements Fiitday (" + prevMonth + ")"; } else if (LEDGER_STORES.includes(v.payer)) v.payer = ""; draw(); if (who === "autre") d.querySelector('[data-f="payer"]').focus(); return; }
+      const b = e.target.closest("[data-r]"); if (!b) return;
+      if (b.dataset.r !== "1") { d.remove(); res(null); return; }
+      const m = d.querySelector("[data-m]"), g = parseAmt(v.gross), f = v.fees === "" ? 0 : parseAmt(v.fees);
+      const payer = (who === "autre" ? v.payer : who).replace(/\s+/g, " ").trim(), nature = v.nature.replace(/\s+/g, " ").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v.paid_on || "")) { m.textContent = "Indique la date à laquelle l'argent est arrivé."; return; }
+      if (v.paid_on > isoDay(Date.now() + 86400000)) { m.textContent = "La date ne peut pas être dans le futur."; return; }
+      if (!payer) { m.textContent = "Indique qui t'a payé."; return; }
+      if (!nature) { m.textContent = "Décris la recette (ex. ventes d'abonnements d'octobre)."; return; }
+      if (isNaN(g) || g <= 0) { m.textContent = "Montant brut invalide (ex. 125,40)."; return; }
+      if (isNaN(f) || f > g) { m.textContent = "La commission doit être un montant inférieur au brut."; return; }
+      d.remove(); res({ id: cur ? cur.id : null, paid_on: v.paid_on, payer, nature, method: v.method, ref: v.ref.trim(), gross: g.toFixed(2), fees: f.toFixed(2), note: v.note.trim() });
+    });
+  });
+}
+function askLedgerInfo() {
+  return new Promise(res => {
+    const v = ledgerInfo(), d = document.createElement("div"); d.className = "modal sheet";
+    const draw = () => {
+      d.innerHTML = '<div class="modal-box own-box adm-form" role="dialog" aria-modal="true" aria-label="Infos du registre"><h3>Infos du registre</h3><p class="small muted" style="margin:0 0 10px">Elles apparaissent en tête du PDF. Tout est facultatif.</p>' +
+        '<label class="fl">Nom ou dénomination<input class="f" data-f="name" maxlength="120" placeholder="Prénom Nom (EI) ou nom commercial" value="' + esc(v.name) + '"></label>' +
+        '<label class="fl" style="margin-top:10px">SIRET<input class="f num" data-f="siret" inputmode="numeric" maxlength="17" placeholder="14 chiffres" value="' + esc(v.siret) + '"></label>' +
+        '<label class="fl" style="margin-top:10px">Adresse<input class="f" data-f="addr" maxlength="200" value="' + esc(v.addr) + '"></label>' +
+        '<div class="fl" style="margin-top:10px">TVA<div class="stack" style="gap:8px">' +
+        [["", "Pas encore défini", "Aucune mention de TVA sur le PDF"], ["franchise", "Franchise en base", "« TVA non applicable, art. 293 B du CGI » sur le PDF"]].map(([k, l, s]) => '<button type="button" class="btn block choice' + (v.vat === k ? " on" : "") + '" data-vat="' + k + '" aria-pressed="' + (v.vat === k) + '"><b>' + l + '</b><span class="small muted">' + s + "</span></button>").join("") + "</div></div>" +
+        '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">Enregistrer</button></div></div>';
+    };
+    draw(); document.body.appendChild(d);
+    d.addEventListener("input", e => { const f = e.target.dataset && e.target.dataset.f; if (f) v[f] = e.target.value; });
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const t = e.target.closest("[data-vat]"); if (t) { v.vat = t.dataset.vat; draw(); return; }
+      const b = e.target.closest("[data-r]"); if (!b) return;
+      if (b.dataset.r !== "1") { d.remove(); res(null); return; }
+      const siret = v.siret.replace(/\s/g, "");
+      if (siret && !/^\d{14}$/.test(siret)) { d.querySelector("[data-m]").textContent = "Le SIRET compte 14 chiffres."; return; }
+      d.remove(); res({ name: v.name.trim(), siret, addr: v.addr.trim(), vat: v.vat });
+    });
+  });
+}
+async function ledgerSave(entry) {
+  try {
+    const r = await rpc("admin_ledger_save", { entry });
+    const den = admDenied(r); if (den) { ledgerErr = den; render(); return false; }
+    toast(entry.id ? "Recette modifiée" : "Recette ajoutée au registre"); ledgerYear = +entry.paid_on.slice(0, 4);
+  } catch (e) { toast(e.message === "Failed to fetch" ? "Pas de connexion internet : rien n'a été enregistré" : "Enregistrement impossible : " + e.message); return false; }
+  await loadLedger(); return true;
+}
+
+/* ---------- PDF du registre (A4 paysage, police Helvetica, sans bibliothèque) ---------- */
+const HELV = [[278,278,355,556,556,889,667,222,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,222,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,278,556,278,222,556,333,1000,556,556,333,1000,667,333,1000,278,611,278,278,222,222,333,333,350,556,1000,333,1000,500,333,944,278,500,667,278,333,556,556,556,556,260,556,333,737,370,556,584,333,737,333,400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500],
+  [278,333,474,556,556,889,722,278,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,278,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584,278,556,278,278,556,500,1000,556,556,333,1000,667,333,1000,278,611,278,278,278,278,500,500,350,556,1000,333,1000,556,333,944,278,500,667,278,333,556,556,556,556,280,556,333,737,370,556,584,333,737,333,400,584,333,333,333,611,556,278,333,333,365,556,834,834,834,611,722,722,722,722,722,722,1000,722,667,667,667,667,278,278,278,278,722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,556,556,556,556,556,556,889,556,556,556,556,556,278,278,278,278,611,611,611,611,611,611,611,584,611,611,611,611,611,556,611,556]];
+const WIN = { "€": 128, "‚": 130, "„": 132, "…": 133, "‘": 145, "’": 146, "“": 147, "”": 148, "•": 149, "–": 150, "—": 151, "™": 153, "œ": 156, "Œ": 140, "−": 45, " ": 32, " ": 32, " ": 32 };
+const winChar = ch => { const c = ch.charCodeAt(0); if (WIN[ch] != null) return WIN[ch]; if (c >= 32 && c < 127) return c; if (c >= 160 && c < 256) return c; return 63; };
+function pdfDoc() {
+  const PW = 841.89, PH = 595.28, pages = []; let ops = null;
+  const tw = (s, size, bold) => { let w = 0; for (const ch of String(s)) { const c = winChar(ch); w += (HELV[bold ? 1 : 0][c - 32] || 556); } return w * size / 1000; };
+  const lit = s => { let o = ""; for (const ch of String(s)) { const c = winChar(ch); o += c === 40 || c === 41 || c === 92 ? "\\" + String.fromCharCode(c) : String.fromCharCode(c); } return "(" + o + ")"; };
+  const col = c => c.map(x => (x / 255).toFixed(3)).join(" ");
+  const fit = (s, w, size, bold) => { s = String(s); if (tw(s, size, bold) <= w) return s; while (s.length > 1 && tw(s + "…", size, bold) > w) s = s.slice(0, -1); return s.replace(/\s+$/, "") + "…"; };
+  return {
+    PW, PH, tw, fit,
+    page() { ops = []; pages.push(ops); },
+    text(x, y, s, o) { o = o || {}; const size = o.size || 9, bold = !!o.bold; let tx = x; if (o.align === "right") tx = x - tw(s, size, bold); else if (o.align === "center") tx = x - tw(s, size, bold) / 2;
+      ops.push("BT /" + (bold ? "F2" : "F1") + " " + size + " Tf " + col(o.color || [22, 19, 31]) + " rg " + tx.toFixed(2) + " " + (PH - y).toFixed(2) + " Td " + lit(s) + " Tj ET"); },
+    rect(x, y, w, h, c) { ops.push(col(c) + " rg " + x.toFixed(2) + " " + (PH - y - h).toFixed(2) + " " + w.toFixed(2) + " " + h.toFixed(2) + " re f"); },
+    line(x1, y1, x2, y2, c, w) { ops.push(col(c || [200, 196, 210]) + " RG " + (w || 0.6) + " w " + x1.toFixed(2) + " " + (PH - y1).toFixed(2) + " m " + x2.toFixed(2) + " " + (PH - y2).toFixed(2) + " l S"); },
+    count: () => pages.length,
+    each(fn) { pages.forEach((p, k) => { ops = p; fn(k); }); },
+    bytes(title) {
+      const objs = [], add = s => { objs.push(s); return objs.length; };
+      const cat = add(""), pg = add(""), f1 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"), f2 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+      const kids = pages.map(p => { const body = p.join("\n"), c = add("<< /Length " + body.length + " >>\nstream\n" + body + "\nendstream"); return add("<< /Type /Page /Parent " + pg + " 0 R /MediaBox [0 0 " + PW + " " + PH + "] /Resources << /Font << /F1 " + f1 + " 0 R /F2 " + f2 + " 0 R >> >> /Contents " + c + " 0 R >>"); });
+      objs[cat - 1] = "<< /Type /Catalog /Pages " + pg + " 0 R >>";
+      objs[pg - 1] = "<< /Type /Pages /Kids [" + kids.map(k => k + " 0 R").join(" ") + "] /Count " + kids.length + " >>";
+      const info = add("<< /Title " + lit(title) + " /Producer (Fiitday) /CreationDate (D:" + new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14) + ") >>");
+      let out = "%PDF-1.4\n%âãÏÓ\n"; const off = [];
+      objs.forEach((o, k) => { off.push(out.length); out += (k + 1) + " 0 obj\n" + o + "\nendobj\n"; });
+      const xref = out.length;
+      out += "xref\n0 " + (objs.length + 1) + "\n0000000000 65535 f \n" + off.map(o => String(o).padStart(10, "0") + " 00000 n \n").join("") +
+        "trailer\n<< /Size " + (objs.length + 1) + " /Root " + cat + " 0 R /Info " + info + " 0 R >>\nstartxref\n" + xref + "\n%%EOF\n";
+      const b = new Uint8Array(out.length); for (let k = 0; k < out.length; k++) b[k] = out.charCodeAt(k) & 255; return b;
+    }
+  };
+}
+function ledgerPdf(year) {
+  const rows = ledgerYearRows(year), months = ledgerMonths(rows), tot = sumRows(rows), info = ledgerInfo(), P = pdfDoc(), M = 36, now = Date.now();
+  const MUT = [93, 88, 107], ACC = [200, 30, 100], INK = [22, 19, 31], WHITE = [255, 255, 255], ZEB = [246, 244, 249], SUB = [236, 232, 244];
+  const C = [["N°", 54], ["Date", 58], ["Client / payeur", 104], ["Nature de la recette", 192], ["Mode de paiement", 84], ["Pièce justificative", 92], ["Brut", 60, 1], ["Commission", 68, 1], ["Encaissé", 60, 1]];
+  const X = []; let right = M; C.forEach(c => { X.push(right); right += c[1]; });
+  const FOOT = P.PH - 40; let y = 0;
+  const money = v => eur(v), neg = v => +v ? "−" + eur(v) : "—";
+  const header = () => {
+    P.page();
+    P.rect(0, 0, P.PW, 6, ACC);
+    P.text(M, 42, "Registre des recettes " + year, { size: 18, bold: true });
+    const who = [info.name, info.siret ? "SIRET " + info.siret.replace(/(\d{3})(\d{3})(\d{3})(\d{5})/, "$1 $2 $3 $4") : "", info.addr].filter(Boolean).join("  ·  ");
+    P.text(M, 58, who || "Micro-entreprise", { size: 9.5, color: MUT });
+    P.text(P.PW - M, 42, "Édité le " + dayFr(isoDay(now)) + " à " + fmtTime(now), { size: 9, color: MUT, align: "right" });
+    P.text(P.PW - M, 58, "Montants en euros · encaissements dans l'ordre des dates", { size: 9, color: MUT, align: "right" });
+    y = 76;
+  };
+  const head = (cols, xs, w) => { P.rect(M, y, w, 20, INK); cols.forEach((c, k) => P.text(c[2] ? xs[k] + c[1] - 6 : xs[k] + 6, y + 13.5, c[0], { size: 8.5, bold: true, color: WHITE, align: c[2] ? "right" : "left" })); y += 20; };
+  const ensure = h => { if (y + h > FOOT - 8) { header(); head(C, X, right - M); } };
+  const cellsRow = (vals, h, o) => vals.forEach((v, k) => { const c = C[k]; if (v == null) return; P.text(c[2] ? X[k] + c[1] - 6 : X[k] + 6, y + h / 2 + 3.2, c[2] || o.nofit ? v : P.fit(v, c[1] - 12, o.size || 8.5, o.bold || k === 8), { size: o.size || 8.5, bold: o.bold || (k === 8 && !o.light), color: o.color, align: c[2] ? "right" : "left" }); });
+  header();
+  // synthèse de l'année
+  const bw = (right - M - 30) / 4;
+  [["Total encaissé " + year, money(tot.net)], ["Montant brut", money(tot.gross)], ["Commissions des stores", neg(tot.fees)], ["Nombre de recettes", String(tot.n)]].forEach(([l, v], k) => {
+    const x = M + k * (bw + 10); P.rect(x, y, bw, 42, ZEB); P.text(x + 10, y + 15, l, { size: 8.5, color: MUT }); P.text(x + 10, y + 33, v, { size: 13, bold: true }); });
+  y += 56;
+  head(C, X, right - M);
+  if (!rows.length) { P.text(M + 6, y + 16, "Aucune recette enregistrée pour " + year + ".", { size: 9.5, color: MUT }); y += 26; }
+  for (let m = 0; m < 12; m++) {
+    const rs = rows.filter(r => +r.paid_on.slice(5, 7) === m + 1); if (!rs.length) continue;
+    rs.forEach((r, k) => {
+      ensure(18); if (k % 2) P.rect(M, y, right - M, 18, ZEB);
+      cellsRow([r.num, dayFr(r.paid_on), r.payer, r.nature + (r.note ? " — " + r.note : ""), r.method, r.ref || "—", money(r.gross), neg(r.fees), money(r.net)], 18, {});
+      y += 18;
+    });
+    ensure(18); const s = sumRows(rs);
+    P.rect(M, y, right - M, 18, SUB);
+    P.text(X[0] + 6, y + 12.2, "Total " + MOIS[m] + " " + year + " · " + s.n + " recette" + (s.n > 1 ? "s" : ""), { size: 8.5, bold: true });
+    cellsRow([null, null, null, null, null, null, money(s.gross), neg(s.fees), money(s.net)], 18, { bold: true });
+    y += 24;
+  }
+  ensure(24);
+  P.rect(M, y, right - M, 22, INK);
+  P.text(X[0] + 6, y + 14.5, "TOTAL DE L'ANNÉE " + year, { size: 9, bold: true, color: WHITE });
+  cellsRow([null, null, null, null, null, null, money(tot.gross), neg(tot.fees), money(tot.net)], 22, { bold: true, color: WHITE, size: 9 });
+  y += 36;
+  // récapitulatif par mois et par trimestre (sur une page à part s'il ne tient pas)
+  const RC = [["Période", 210], ["Recettes", 80, 1], ["Brut", 120, 1], ["Commissions", 120, 1], ["Encaissé", 120, 1]], RX = []; let rr = M; RC.forEach(c => { RX.push(rr); rr += c[1]; });
+  if (y + 24 + 20 + 16 * 16 + 20 > FOOT - 8) header();
+  P.text(M, y + 6, "Récapitulatif par mois et par trimestre", { size: 12, bold: true }); y += 16;
+  head(RC, RX, rr - M);
+  const rrow = (l, s, bg, bold, color, h) => { h = h || 16; if (bg) P.rect(M, y, rr - M, h, bg);
+    [l, s.n ? String(s.n) : "—", s.gross ? money(s.gross) : "—", neg(s.fees), s.net ? money(s.net) : "—"].forEach((v, k) => P.text(RC[k][2] ? RX[k] + RC[k][1] - 6 : RX[k] + 6, y + h / 2 + 3, v, { size: 8.5, bold, color, align: RC[k][2] ? "right" : "left" })); y += h; };
+  for (let q = 0; q < 4; q++) {
+    for (let k = q * 3; k < q * 3 + 3; k++) rrow(MOIS[k].charAt(0).toUpperCase() + MOIS[k].slice(1) + " " + year, months[k], k % 2 ? ZEB : null, false);
+    rrow("Trimestre " + (q + 1) + " (" + MOIS_C[q * 3] + " – " + MOIS_C[q * 3 + 2] + ")", sumRows(months.slice(q * 3, q * 3 + 3)), SUB, true);
+  }
+  rrow("Année " + year, tot, INK, true, WHITE, 20);
+  // pied de chaque page : mentions et « Page x / n »
+  const n = P.count(), vat = info.vat === "franchise" ? "TVA non applicable, art. 293 B du CGI.  " : "";
+  P.each((k) => {
+    P.line(M, FOOT, P.PW - M, FOOT, [214, 209, 224], 0.6);
+    P.text(M, FOOT + 14, vat + "Registre tenu avec Fiitday · à conserver 10 ans avec les pièces justificatives.", { size: 8, color: MUT });
+    P.text(P.PW - M, FOOT + 14, "Page " + (k + 1) + " / " + n, { size: 8, color: MUT, align: "right" });
+  });
+  return P.bytes("Registre des recettes " + year);
+}
+// fichier : sur le téléphone, choix de l'emplacement ; sur le site, téléchargement
+function saveBytes(name, mime, bytes) {
+  const B = window.AndroidBridge;
+  if (B && typeof B.saveBytes === "function") return new Promise(res => {
+    let bin = ""; for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+    fileCb = st => res(st); B.saveBytes(name, mime, btoa(bin));
+  });
+  if (B && typeof B.saveFile === "function") return Promise.resolve("old-app");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([bytes], { type: mime })); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return Promise.resolve("download");
 }
 
 function viewSettings() {
@@ -3987,7 +4330,25 @@ $app.addEventListener("click", async e => {
     } break;
     case "plantestskip": if (planTesting()) { db.planTestEnd = (db.planTestEnd || Date.now()) - 7 * DAY; saveNow(); render(); toast(trialLeft() ? "Encore " + trialLeft() + " jour" + (trialLeft() > 1 ? "s" : "") + " d'essai" : "Essai terminé : version gratuite"); } break;
     case "planbuy": toast("Le paiement arrive bientôt"); break;
-    case "adminload": adminErr = ""; render(); loadAdmin(); break;
+    case "adminload": if (route().args[0] === "recettes") { ledgerErr = ""; loadLedger(true); } else { adminErr = ""; loadAdmin(true); } break;
+    case "admper": adminPeriod = +b.dataset.v || 8; render(); break;
+    case "ledgeryear": ledgerYear = +b.dataset.v; render(); break;
+    case "ledgernew": { const e = await askLedger(null); if (e) ledgerSave(e); } break;
+    case "ledgeredit": { const cur = ledger && ledgerYearRows(+(ledger.rows.find(r => r.id === b.dataset.id) || { paid_on: "0000" }).paid_on.slice(0, 4)).find(r => r.id === b.dataset.id); if (!cur) return;
+      const e = await askLedger(cur); if (e) ledgerSave(e); } break;
+    case "ledgerdel": {
+      const cur = ledger && ledgerYearRows(+(ledger.rows.find(r => r.id === b.dataset.id) || { paid_on: "0000" }).paid_on.slice(0, 4)).find(r => r.id === b.dataset.id); if (!cur) return;
+      const okDel = await fancyAsk({ title: "Supprimer la recette " + cur.num + " ?", html: '<p class="muted">' + esc(dayFr(cur.paid_on) + " · " + cur.payer + " · " + eur(cur.net)) + "</p><p class=\"small muted\">Elle sort du registre et les numéros suivants se décalent. Une copie reste dans le journal des modifications. Pour corriger un montant, préfère « Modifier ».</p>", ok: "Supprimer", danger: true });
+      if (!okDel) return;
+      try { const r = await rpc("admin_ledger_delete", { entry_id: cur.id }); const den = admDenied(r); if (den) { ledgerErr = den; render(); return; } toast("Recette supprimée"); }
+      catch (err) { toast(err.message === "Failed to fetch" ? "Pas de connexion internet : rien n'a été supprimé" : "Suppression impossible : " + err.message); return; }
+      loadLedger();
+    } break;
+    case "ledgerinfo": { const v = await askLedgerInfo(); if (v) { setSetting("ledgerInfo", v); toast("Infos du registre enregistrées"); } } break;
+    case "ledgerpdf": {
+      const yy = ledgerYear || new Date().getFullYear(), st = await saveBytes("registre-des-recettes-" + yy + ".pdf", "application/pdf", ledgerPdf(yy));
+      toast(st === "ok" ? "PDF enregistré" : st === "download" ? "PDF téléchargé" : st === "old-app" ? "Mets à jour l'appli pour enregistrer le PDF (ou utilise fiitday.com)" : st === "cancel" ? "Enregistrement annulé" : "Le PDF n'a pas pu être enregistré");
+    } break;
     case "mfaenroll": mfaEnroll(); break;
     case "mfaverify": mfaVerify(); break;
     case "mfacancel": { const id = mfa.enroll && mfa.enroll.id; mfa.enroll = null; mfa.err = ""; render(); if (id) authApi("DELETE", "factors/" + id).catch(() => { }); } break;

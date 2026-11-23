@@ -47,6 +47,8 @@ public class MainActivity extends Activity {
     private static final int REQ_SAVE = 41, REQ_OPEN = 42;
     private static final long MAX_FILE = 20L * 1024 * 1024;
     private static String pendingSave = null;
+    /** fichier binaire en attente d'enregistrement (registre des recettes en PDF) */
+    private static byte[] pendingBytes = null;
     /** appli ouverte (pour lui transmettre les boutons « Passer » / « Terminer » des notifications) */
     private static WeakReference<MainActivity> currentActivity = new WeakReference<>(null);
 
@@ -201,12 +203,29 @@ public class MainActivity extends Activity {
         public void saveFile(final String name, final String content) {
             runOnUiThread(() -> {
                 pendingSave = content;
+                pendingBytes = null;
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
                 i.setType("text/plain");
                 i.putExtra(Intent.EXTRA_TITLE, name);
                 try { startActivityForResult(i, REQ_SAVE); }
                 catch (Exception e) { pendingSave = null; fileResult("save", "error", null); }
+            });
+        }
+
+        /** Administration › Registre des recettes › PDF : même choix de l'emplacement, contenu binaire en base64 */
+        @JavascriptInterface
+        public void saveBytes(final String name, final String mime, final String base64) {
+            runOnUiThread(() -> {
+                try { pendingBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT); }
+                catch (Exception e) { pendingBytes = null; fileResult("save", "error", null); return; }
+                pendingSave = null;
+                Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType(mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
+                i.putExtra(Intent.EXTRA_TITLE, name);
+                try { startActivityForResult(i, REQ_SAVE); }
+                catch (Exception e) { pendingBytes = null; fileResult("save", "error", null); }
             });
         }
 
@@ -244,9 +263,11 @@ public class MainActivity extends Activity {
         Uri uri = resultCode == RESULT_OK && data != null ? data.getData() : null;
         if (requestCode == REQ_SAVE) {
             String content = pendingSave;
+            byte[] bin = pendingBytes;
             pendingSave = null;
-            if (uri == null || content == null) { fileResult("save", "cancel", null); return; }
-            fileResult("save", writeText(uri, content) ? "ok" : "error", null);
+            pendingBytes = null;
+            if (uri == null || (content == null && bin == null)) { fileResult("save", "cancel", null); return; }
+            fileResult("save", (bin != null ? writeBytes(uri, bin) : writeText(uri, content)) ? "ok" : "error", null);
         } else {
             if (uri == null) { fileResult("open", "cancel", null); return; }
             String text = readText(uri);
@@ -255,7 +276,10 @@ public class MainActivity extends Activity {
     }
 
     private boolean writeText(Uri uri, String content) {
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        return writeBytes(uri, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean writeBytes(Uri uri, byte[] bytes) {
         for (String mode : new String[]{"wt", "w"}) { // certains services (Drive…) refusent « wt »
             try (OutputStream out = getContentResolver().openOutputStream(uri, mode)) {
                 if (out == null) continue;

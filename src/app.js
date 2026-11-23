@@ -1336,6 +1336,9 @@ function setActions(idx, count, word, extra) {
 }
 // séance : ajouter / retirer un dégressif (exercices poids × reps)
 const dropBtn = (e, i) => (e.type === "reps" || !e.type) ? '<button class="btn sm' + (dropsOf(e) ? " on-drop" : "") + '" data-act="wdrop" data-i="' + i + '">' + (dropsOf(e) ? "Dégressif ✎" : "+ Dégressif") + "</button>" : "";
+// superset / biset / triset : un seul bouton, puis choix de l'exercice (A, B…) qui reçoit le dégressif
+const groupDropBtn = blk => { const ok = blk.items.filter(x => x.e.type === "reps" || !x.e.type); if (!ok.length) return ""; const on = ok.some(x => dropsOf(x.e));
+  return '<button class="btn sm' + (on ? " on-drop" : "") + '" data-act="wdrop" data-g="' + ok.map(x => x.i).join(",") + '">' + (on ? "Dégressif ✎" : "+ Dégressif") + "</button>"; };
 // baisses des séries pas encore validées : n par série (toutes, ou seulement la dernière) ; les séries validées ne bougent pas
 function applyDrops(e, n, scope) {
   e.drops = n; e.dropScope = scope === "last" ? "last" : "all";
@@ -1404,7 +1407,7 @@ function groupCard(w, blk) {
   const fk = "w:" + w.id + ":" + (first.groupId || gi), fo = folded.has(fk);
   let h = '<section class="card ex group' + (fo ? " folded" : "") + '">' + foldTitle(fk, '<span class="group-tag">' + esc(GROUP_LABEL[first.groupKind] || "Enchaînement") + " · " + rounds + " tour" + (rounds > 1 ? "s" : "") +
     (live ? "" : " · repos " + esc(fmtRest(first.rest)) + " après chaque tour") + "</span>", fo);
-  if (fo) return h + '<div class="fold-sum muted small">' + blk.items.map((x, n) => LETTERS[n] + ". " + esc(x.e.name)).join(" · ") + "</div></section>";
+  if (fo) return h + '<div class="fold-members">' + blk.items.map((x, n) => '<div class="ex-name"><span class="letter">' + LETTERS[n] + "</span>" + esc(x.e.name) + "</div>").join("") + "</div></section>";
   h += '<div class="blk-body">' +
     (live ? '<div class="ex-chips"><button class="chip-mini" data-act="sesspick" data-sf="grest" data-i="' + gi + '" title="Repos après chaque tour">Repos ' + esc(fmtShort(num(first.rest) || 0)) + " ✎</button>" + nextChip(w, blk.items.map(x => x.e), gi) + "</div>" : "");
   blk.items.forEach((x, n) => { h += '<div class="member">' + exHead(w, x.e, x.i, LETTERS[n]) + "</div>"; });
@@ -1413,7 +1416,7 @@ function groupCard(w, blk) {
     blk.items.forEach((x, n) => { if (x.e.sets[k]) h += setRows(w, x.e, x.i, k, LETTERS[n]); });
     h += "</div>";
   }
-  h += setActions(blk.items.map(x => x.i), rounds, "Tour");
+  h += setActions(blk.items.map(x => x.i), rounds, "Tour", live ? groupDropBtn(blk) : "");
   if (live) h += '<div class="row link-row">' + linkNext(w, blk.items[blk.items.length - 1].i, true) + '<button type="button" class="link" data-act="wungroup" data-i="' + gi + '">Séparer</button></div>';
   blk.items.forEach((x, n) => { h += noteBox(w, x.e, x.i, LETTERS[n]); });
   return h + "</div></section>";
@@ -1470,7 +1473,7 @@ function sessionTable(w) {
         '<div class="spread" style="align-items:flex-start"><b style="font-size:15px">' + esc(e.name) + '</b><span class="ex-links"><button class="link" data-act="rename" data-i="' + i + '">Renommer</button><button class="link del" data-act="wdelex" data-i="' + i + '">Retirer</button></span></div>' +
         (exLib(e) ? '<button class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir</button>" : "") +
         (dropsOf(e) ? '<div class="muted small">Dégressif · ' + dropsOf(e) + " baisse" + (dropsOf(e) > 1 ? "s" : "") + "</div>" : "") +
-        (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série", grouped ? "" : dropBtn(e, i)) : "") + "</td>" +
+        (!grouped || lastOfGroup ? setActions(grouped ? idx : [i], e.sets.length, grouped ? "Tour" : "Série", grouped ? (w.endedAt ? "" : groupDropBtn({ items: idx.map(k => ({ e: w.exercises[k], i: k })) })) : dropBtn(e, i)) : "") + "</td>" +
         "<td>" + e.sets.length + "</td><td>" + (isDist ? esc(fmtNum(num(e.target) || 0)) + " m" : time && !w.endedAt ? '<button class="chip-mini" data-act="sesspick" data-sf="target" data-i="' + i + '">' + esc(fmtSecs(num(e.target) || 0)) + " ✎</button>" : time ? esc(fmtHold(e.target) || "—") : esc(e.target || "—")) + "</td><td>" +
         (grouped && !lastOfGroup ? "enchaîné" : !w.endedAt ? '<button class="chip-mini" data-act="sesspick" data-sf="' + (grouped ? "grest" : "rest") + '" data-i="' + (grouped ? idx[0] : i) + '">' + esc(fmtSecs(num(e.rest) || 0)) + " ✎</button>" : esc(fmtRest(e.rest))) + "</td>";
       for (let k = 0; k < max; k++) {
@@ -2099,7 +2102,7 @@ function viewProgress() {
     const v = vals[n], x = n * bw + bw * 0.22, w = bw * 0.56, d = new Date(k), lab = pad(d.getDate()) + "/" + pad(d.getMonth() + 1);
     const tip = "Semaine du " + lab + " : " + (SM === "n" ? v + " séance" + (v > 1 ? "s" : "") : fmtV(v));
     svg += "<g><title>" + esc(tip) + "</title>" + '<rect class="hit" x="' + n * bw + '" y="0" width="' + bw + '" height="' + H + '"></rect>';
-    if (v > 0) { const hh = H - y(v), r = Math.min(4, hh / 2, w / 2); svg += '<path class="bar' + (SM === "n" && v >= goal ? " ok" : "") + (k === cur ? "" : " dim") + '" d="M' + x + "," + H + "V" + (y(v) + r) + "Q" + x + "," + y(v) + " " + (x + r) + "," + y(v) + "H" + (x + w - r) + "Q" + (x + w) + "," + y(v) + " " + (x + w) + "," + (y(v) + r) + "V" + H + 'Z"></path>'; }
+    if (v > 0) { const hh = H - y(v), r = Math.min(4, hh / 2, w / 2); svg += '<path class="bar' + ((perWeek[k] || 0) >= goal ? " ok" : "") + (k === cur ? "" : " dim") + '" d="M' + x + "," + H + "V" + (y(v) + r) + "Q" + x + "," + y(v) + " " + (x + r) + "," + y(v) + "H" + (x + w - r) + "Q" + (x + w) + "," + y(v) + " " + (x + w) + "," + (y(v) + r) + "V" + H + 'Z"></path>'; }
     svg += '<text x="' + (n * bw + bw / 2) + '" y="' + (H + 18) + '" text-anchor="middle">' + lab + "</text></g>";
     // valeur au-dessus de chaque barre ; en « Séances », pas de chiffre quand l'objectif est pile atteint (barre verte)
     if (v > 0 && !(SM === "n" && v === goal)) svg += '<text class="bar-v' + (k === cur ? " cur" : "") + '" x="' + (n * bw + bw / 2) + '" y="' + (y(v) - 6) + '" text-anchor="middle">' + esc(barLab(v)) + "</text>";
@@ -3746,8 +3749,17 @@ $app.addEventListener("click", async e => {
 
     /* séance */
     case "done": if (w) markDone(w, i, s); break;
-    case "wdrop": if (w && w.exercises[i]) {
-      const e = w.exercises[i], cur = dropsOf(e), last = e.dropScope === "last";
+    case "wdrop": if (w && (w.exercises[i] || b.dataset.g)) {
+      let wi = i;
+      if (b.dataset.g) { // dans un enchaînement : sur quel exercice ?
+        const g = b.dataset.g.split(",").map(Number).filter(k => w.exercises[k]);
+        const k0 = w.exercises.findIndex(x => x === w.exercises[g[0]]), grp = w.exercises.filter(x => x.groupId && x.groupId === w.exercises[g[0]].groupId);
+        const letter = k => LETTERS[Math.max(0, grp.indexOf(w.exercises[k]))];
+        if (g.length > 1) { const c = await choose("Dégressif sur quel exercice ?", g.map(k => { const d = dropsOf(w.exercises[k]); return [String(k), letter(k) + ". " + w.exercises[k].name, d ? "Dégressif : " + d + " baisse" + (d > 1 ? "s" : "") : "Pas de dégressif"]; })); if (!c) return; wi = +c; }
+        else wi = g[0];
+        if (k0 < 0) return;
+      }
+      const e = w.exercises[wi], cur = dropsOf(e), last = e.dropScope === "last";
       const opts = cur ? [["more", "Ajouter une baisse", (cur + 1) + " baisses " + (last ? "sur la dernière série" : "après chaque série")], ["off", "Retirer le dégressif", "Les baisses déjà validées restent notées"]].filter(o => o[0] !== "more" || cur < 3)
         : [["all", "Sur chaque série", "Une baisse de charge juste après chaque série"], ["last", "Sur la dernière série", "Une baisse seulement après la dernière série"]];
       const c = await choose(cur ? "Dégressif · " + cur + " baisse" + (cur > 1 ? "s" : "") + (last ? " sur la dernière série" : " après chaque série") : "Ajouter un dégressif", opts); if (!c) return;

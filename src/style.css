@@ -929,3 +929,8 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .cal-key.goal { background: var(--ok-ink); }
 .cal-legend .lg { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
 @media (max-width: 389px) { .evo-seg.seg-evometric { gap: 4px; } .evo-seg.seg-evometric button { padding: 0 6px; font-size: 12.5px; } }
+
+/* séance : titre d'un superset / biset / triset à la taille d'un exercice seul ; replié, un exercice par ligne */
+.card.ex.group > .fold-t .group-tag { font-size: 18px; letter-spacing: 0; text-transform: none; }
+.card.ex.group .fold-members { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.card.ex.group .fold-members .ex-name { display: flex; align-items: center; min-width: 0; overflow-wrap: anywhere; }

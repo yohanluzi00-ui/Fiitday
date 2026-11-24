@@ -3583,7 +3583,8 @@ function viewAdminDash() {
   if (!adminKpi) return '<div class="card"><p class="msg err" style="margin:0">' + esc(adminErr) + '</p><button class="btn sm" style="margin-top:10px" data-act="adminload">Réessayer</button></div>';
   const k = adminKpi, all = Array.isArray(k.weeks) ? k.weeks : [], wk = all.slice(-adminPeriod), cur = all[all.length - 1] || { n: 0, u: 0, i: 0 }, prev = all[all.length - 2] || { n: 0, u: 0, i: 0 };
   const pct = (a, b) => b ? Math.round(100 * a / b) + " %" : "—";
-  const diff = (a, b) => { const d = a - b; return '<span class="adm-diff ' + (d > 0 ? "up" : d < 0 ? "down" : "") + '">' + (d > 0 ? "+" + d : d < 0 ? "−" + -d : "=") + "</span>"; };
+  // écart avec la semaine d'avant (bad : une hausse est une mauvaise nouvelle, comme pour les résiliations)
+  const diff = (a, b, f, bad) => { const d = Math.round((a - b) * 100) / 100, v = f ? f(Math.abs(d)) : Math.abs(d), g = bad ? -d : d; return '<span class="adm-diff ' + (g > 0 ? "up" : g < 0 ? "down" : "") + '">' + (d > 0 ? "+" + v : d < 0 ? "−" + v : "=") + "</span>"; };
   const tile = (label, v, sub) => '<div class="card stat"><div class="muted small">' + label + '</div><div class="v num">' + v + "</div>" + (sub ? '<div class="muted small">' + sub + "</div>" : "") + "</div>";
   const per = '<div class="seg adm-per" role="group" aria-label="Période des courbes">' + [[8, "8 semaines"], [26, "6 mois"], [52, "12 mois"]].map(([n, l]) => '<button class="' + (adminPeriod === n ? "on" : "") + '" aria-pressed="' + (adminPeriod === n) + '" data-act="admper" data-v="' + n + '">' + l + "</button>").join("") + "</div>";
   const yr = ledger && ledger.rows ? ledger.rows.filter(r => r.paid_on.slice(0, 4) === String(new Date().getFullYear())).reduce((s, r) => s + +r.net, 0) : null;
@@ -3604,7 +3605,14 @@ function viewAdminDash() {
     "<div><b class=\"num\">" + cur.i + "</b> inscription" + (cur.i > 1 ? "s" : "") + " " + diff(cur.i, prev.i) + "</div>" +
     "<div><b class=\"num\">" + cur.n + "</b> séance" + (cur.n > 1 ? "s" : "") + " terminée" + (cur.n > 1 ? "s" : "") + " " + diff(cur.n, prev.n) + "</div>" +
     "<div><b class=\"num\">" + cur.u + "</b> utilisateur" + (cur.u > 1 ? "s" : "") + " actif" + (cur.u > 1 ? "s" : "") + " " + diff(cur.u, prev.u) + "</div>" +
-    '<div class="muted small">Depuis lundi, comparé à la semaine dernière.</div></div>' +
+    // abonnement (journal anonyme des achats) : rien avant la date de lancement
+    (w => !w ? "" : !w.launched ? '<div class="muted small">Essais, nouveaux abonnés, résiliations et ventes s\'afficheront ici dès le lancement.</div>' :
+      '<div><b class="num">' + w.trials[0] + "</b> essai" + (w.trials[0] > 1 ? "s" : "") + " commencé" + (w.trials[0] > 1 ? "s" : "") + " " + diff(w.trials[0], w.trials[1]) + ' <span class="muted small">· ' + w.trialsNow + " en cours</span></div>" +
+      '<div><b class="num">' + w.subs[0] + "</b> " + (w.subs[0] > 1 ? "nouveaux abonnés" : "nouvel abonné") + " " + diff(w.subs[0], w.subs[1]) + "</div>" +
+      (w.life[0] || w.life[1] ? '<div><b class="num">' + w.life[0] + "</b> achat" + (w.life[0] > 1 ? "s" : "") + " à vie " + diff(w.life[0], w.life[1]) + "</div>" : "") +
+      '<div><b class="num">' + w.cancels[0] + "</b> résiliation" + (w.cancels[0] > 1 ? "s" : "") + " " + diff(w.cancels[0], w.cancels[1], null, true) + "</div>" +
+      '<div><b class="num">' + esc(eur(w.sales[0])) + "</b> de ventes " + diff(+w.sales[0], +w.sales[1], eur) + (w.other ? ' <span class="muted small">+ ' + w.other + " vente" + (w.other > 1 ? "s" : "") + " dans une autre monnaie</span>" : "") + "</div>")(adminSubs && adminSubs.week) +
+    '<div class="muted small">Depuis lundi, comparé à la semaine dernière.' + (adminSubs && adminSubs.week && adminSubs.week.launched ? " Ventes : prix payés par les clients, avant la commission des stores ; les achats de test ne comptent pas." : "") + "</div></div>" +
     secBlock(k.sec) +
     '<div class="section-title">Partage et transferts</div><div class="stats adm-two">' +
     tile("Séances partagées", k.shares, k.shares30 + " en 30 jours") + tile("Codes de transfert", k.transfers30, "créés en 30 jours") + "</div>" +

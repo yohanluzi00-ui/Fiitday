@@ -3194,7 +3194,7 @@ function planStatus() {
     if (p.source === "subscription") return "Abonné Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " · prochain renouvellement le " + until : "") + ". Merci de soutenir Fiitday !";
   }
   if (s === "off" && p.would === "premium") return "L'abonnement n'est pas encore ouvert : tu as toute l'appli." + (p.source === "family-member" ? " Tu fais déjà partie de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + "." : p.source === "gift" ? " Premium " + (p.kind === "family" ? "Famille " : "") + "t'est offert" + (until ? " jusqu'au " + until : " à vie") + "."
-    : p.source === "subscription" ? " Achat de test reçu : abonnement Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " jusqu'au " + until : "") + "."
+    : p.source === "subscription" ? " Achat de test reçu : abonnement Premium " + (p.kind === "family" ? "Famille" : "Solo") + (p.renews === false ? " résilié, Premium" : "") + (until ? " jusqu'au " + until + " à " + new Date(p.until).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "") + (p.renews === false ? ", puis fin." : ".")
     : p.source === "lifetime" ? " Achat de test reçu : Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + "." : "");
   return s === "trial" ? "Essai Premium : encore " + d + " jour" + (d > 1 ? "s" : "") + ". À la fin, tu passes en version gratuite sans rien perdre."
     : s === "free" ? "Version gratuite. Toutes tes données sont gardées : tout se débloque dès que tu t'abonnes."
@@ -3225,7 +3225,8 @@ function viewPremium() {
     ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
   const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
-    '<div class="card"><div class="small">' + esc(planStatus()) + "</div></div>" +
+    '<div class="card"><div class="small">' + esc(planStatus()) + "</div>" +
+    (s !== "premium" && !Native && billingMode() === "test" && ((!planTesting() && db.plan) || {}).source === "subscription" ? '<button class="btn sm" style="margin-top:8px" data-act="planmanage">Gérer mon abonnement (test)</button>' : "") + "</div>" +
     (billingMode() === "test" ? (Native ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>'
       : '<div class="card plan-testapp"><b>Paiement de test</b><div class="small muted">Visible seulement par toi. Carte de test Stripe : 4242 4242 4242 4242, une date future, n\'importe quel code : aucun paiement réel. Seul le compte administrateur reçoit Premium.</div></div>') : "") +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +

@@ -3062,6 +3062,8 @@ window.__fiitdayBilling = (id, st, txt) => { const f = billingCbs[id]; delete bi
 const billingCall = (fn, ...args) => new Promise(res => { const id = "b" + (++billingSeq); billingCbs[id] = res; try { Native[fn](id, ...args); } catch (e) { delete billingCbs[id]; res({ st: "error", txt: e.message }); } });
 // après un achat : le serveur reçoit le message de RevenueCat en quelques secondes ; on relit le statut jusqu'à le voir
 function billingLogout() { try { if (billingMode() && Native.billingLogout) Native.billingLogout(); } catch (e) { } }
+// après un vrai achat (ou une restauration), on quitte le mode test pour que l'appli montre ce que dit le serveur
+function planTestOff() { if (!planTesting()) return false; db.planTest = ""; saveNow(); render(); return true; }
 async function waitPlan() {
   for (let i = 0; i < 8; i++) {
     await new Promise(r => setTimeout(r, 2500));
@@ -4575,7 +4577,8 @@ $app.addEventListener("click", async e => {
       buying = false; render();
       if (r.st === "cancel") { toast("Achat annulé"); break; }
       if (r.st !== "ok") { toast("L'achat n'a pas abouti" + (r.txt ? " : " + r.txt : "")); break; }
-      toast(billingMode() === "test" ? "Achat de test réussi, Premium arrive…" : "Merci ! Premium arrive…");
+      const offTest = planTestOff(); // le mode test (simulation) cacherait le vrai achat
+      toast(offTest ? (billingMode() === "test" ? "Achat de test réussi · " : "Merci ! ") + "Mode test désactivé pour afficher ton achat" : billingMode() === "test" ? "Achat de test réussi, Premium arrive…" : "Merci ! Premium arrive…");
       toast(await waitPlan() ? "Premium est activé sur ton compte" : "Achat enregistré : Premium s'affichera d'ici quelques minutes");
       render();
     } break;
@@ -4583,7 +4586,7 @@ $app.addEventListener("click", async e => {
       if (!billingMode() || !db.auth) { toast("Connecte-toi d'abord"); break; }
       const r = await billingCall("billingRestore", db.auth.user.id);
       if (r.st !== "ok") { toast("Restauration impossible" + (r.txt ? " : " + r.txt : "")); break; }
-      toast(r.txt ? "Achats retrouvés, mise à jour…" : "Aucun achat trouvé sur ce compte Google");
+      toast(r.txt ? (planTestOff() ? "Achats retrouvés · Mode test désactivé pour les afficher" : "Achats retrouvés, mise à jour…") : "Aucun achat trouvé sur ce compte Google");
       if (r.txt) { await waitPlan(); render(); }
     } break;
     case "adminload": if (route().args[0] === "recettes") { ledgerErr = ""; loadLedger(true); } else if (route().args[0] === "abonnements") { adminSubsErr = ""; loadAdminSubs(true); } else { adminErr = ""; loadAdmin(true); } break;

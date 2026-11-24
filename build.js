@@ -31,13 +31,16 @@ if (EXO_INDEX.length < 50) throw new Error("Index des exercices incomplet (" + E
 const bootJs = `window.APP_BUILD = ${JSON.stringify(VERSION)}; window.APP_VERSION = ${JSON.stringify(process.env.VERSION_NAME || "")}; window.EXO_INDEX = ${JSON.stringify(EXO_INDEX)};`;
 const appJs = "\n" + src("app.js") + "\n";
 if (!src("app.js").includes(SUPABASE)) throw new Error("Adresse Supabase différente dans app.js : mettre à jour SUPABASE dans build.js");
+// paiement par carte sur fiitday.com : module RevenueCat (purchases.js, servi par le site) qui charge le formulaire de carte de Stripe
+const STRIPE_JS = "https://js.stripe.com https://*.js.stripe.com", RC_ASSETS = "https://da08ctfrofx1b.cloudfront.net"; // icône et police de la page de paiement RevenueCat
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' " + sha(bootJs) + " " + sha(appJs), // 'self' : onglet Exercices (exercices.js + three.js, chargés à la demande)
+  "script-src 'self' " + sha(bootJs) + " " + sha(appJs) + " " + STRIPE_JS, // 'self' : onglet Exercices (exercices.js + three.js) et paiement (purchases.js), chargés à la demande
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self' data:",
-  "connect-src 'self' " + SUPABASE,
+  "img-src 'self' data: https://*.stripe.com " + RC_ASSETS,
+  "font-src 'self' data: " + RC_ASSETS,
+  "connect-src 'self' " + SUPABASE + " https://api.revenuecat.com https://e.revenue.cat https://api.stripe.com https://*.stripe.com",
+  "frame-src 'self' " + STRIPE_JS + " https://hooks.stripe.com", // formulaire de carte et 3D Secure : cadres de Stripe
   "manifest-src 'self'",
   "worker-src 'self'",
   "base-uri 'none'",
@@ -78,6 +81,8 @@ fs.writeFileSync(path.join(dist, "index.html"), html);
 for (const f of ["icon-192.png", "icon-512.png"]) fs.copyFileSync(path.join(__dirname, "src", "icons", f), path.join(dist, f));
 // onglet Exercices : module chargé à la demande + three.js (affichage 3D, licence MIT)
 for (const f of ["exercices.js", "three.module.min.js"]) fs.copyFileSync(path.join(__dirname, "src", f), path.join(dist, f));
+// paiement par carte (site web seulement, pas dans l'appli Android) : SDK RevenueCat purchases-js 1.73.2 (licence MIT), chargé au moment de payer
+fs.copyFileSync(path.join(__dirname, "src", "vendor", "purchases-js.umd.js"), path.join(dist, "purchases.js"));
 fs.writeFileSync(path.join(dist, "manifest.webmanifest"), JSON.stringify({
   name: "Fiitday", short_name: "Fiitday", description: "Suivi de mes séances de musculation",
   start_url: "./", scope: "./", display: "standalone", lang: "fr",

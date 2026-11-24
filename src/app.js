@@ -3053,15 +3053,52 @@ const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 202
 const FAMILY_SIZE = 5;
 let premiumFor = "solo", premiumPick = "year";
 // achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
-// « store » quand le paiement Google sera branché, « » sinon (appli Obtainium, site web)
-const billingMode = () => { try { return (Native && typeof Native.billing === "function" && Native.billing()) || ""; } catch (e) { return ""; } };
+// « store » quand le paiement Google sera branché, « » sinon (appli Obtainium).
+// Sur fiitday.com : paiement par carte (RevenueCat Web Billing + Stripe). Clé publique de test (rcb_sb_, carte factice) :
+// seul le compte testeur peut acheter ; avec la clé de production (rcb_), tout le monde, une fois le lancement fait.
+const RC_WEB_KEY = "rcb_sb_AJtnkAvLFuwukArFjHEwFvDNF";
+const billingMode = () => {
+  if (Native) { try { return (typeof Native.billing === "function" && Native.billing()) || ""; } catch (e) { return ""; } }
+  if (!RC_WEB_KEY) return "";
+  if (RC_WEB_KEY.startsWith("rcb_sb_")) return isPlanTester() ? "test" : "";
+  return MONETIZATION ? "store" : "";
+};
 // identifiants des produits (les mêmes dans RevenueCat) : « famil » = Famille, « vie » = achat à vie, lus aussi par le serveur
 const PRODUCTS = { solo: { year: "fiitday_solo_annuel", month: "fiitday_solo_mensuel", life: "fiitday_vie_solo" }, family: { year: "fiitday_famille_annuel", month: "fiitday_famille_mensuel", life: "fiitday_vie_famille" } };
 const billingCbs = {}; let billingSeq = 0, buying = false;
 window.__fiitdayBilling = (id, st, txt) => { const f = billingCbs[id]; delete billingCbs[id]; if (f) f({ st, txt: txt || "" }); };
 const billingCall = (fn, ...args) => new Promise(res => { const id = "b" + (++billingSeq); billingCbs[id] = res; try { Native[fn](id, ...args); } catch (e) { delete billingCbs[id]; res({ st: "error", txt: e.message }); } });
 // après un achat : le serveur reçoit le message de RevenueCat en quelques secondes ; on relit le statut jusqu'à le voir
-function billingLogout() { try { if (billingMode() && Native.billingLogout) Native.billingLogout(); } catch (e) { } }
+function billingLogout() { try { if (Native && billingMode() && Native.billingLogout) Native.billingLogout(); if (rcWeb) { rcWeb.p.close(); rcWeb = null; } } catch (e) { rcWeb = null; } }
+// --- paiement par carte sur le site : module RevenueCat chargé seulement au moment de payer (1 Mo), lié au compte Fiitday ---
+let rcWeb = null;
+function webPurchases() {
+  const uid = db.auth.user.id;
+  if (rcWeb && rcWeb.uid === uid) return Promise.resolve(rcWeb.p);
+  return (window.Purchases ? Promise.resolve() : new Promise((res, rej) => {
+    const sc = document.createElement("script"); sc.src = "purchases.js"; sc.onload = res;
+    sc.onerror = () => { sc.remove(); rej(new Error("le module de paiement n'a pas pu se charger (connexion ?)")); }; document.head.appendChild(sc);
+  })).then(() => {
+    const P = window.Purchases.Purchases;
+    if (rcWeb) { try { rcWeb.p.close(); } catch (e) { } }
+    rcWeb = { uid, p: P.configure({ apiKey: RC_WEB_KEY, appUserId: uid }) };
+    return rcWeb.p;
+  });
+}
+// même réponse que l'appli Android : { st: "ok" | "cancel" | "error", txt }
+async function webBuy(pid) {
+  try {
+    const p = await webPurchases(), offs = await p.getOfferings();
+    let pkg = null;
+    Object.values(offs.all || {}).forEach(o => (o.availablePackages || []).forEach(k => { if (!pkg && (k.webBillingProduct || k.rcBillingProduct || k.product || {}).identifier === pid) pkg = k; }));
+    if (!pkg) return { st: "error", txt: "produit introuvable : " + pid };
+    await p.purchase({ rcPackage: pkg, customerEmail: db.auth.user.email || undefined, selectedLocale: "fr", defaultLocale: "fr" });
+    return { st: "ok", txt: pid };
+  } catch (e) {
+    if (e && e.errorCode === 1) return { st: "cancel", txt: "" }; // UserCancelledError : fenêtre de paiement fermée
+    return { st: "error", txt: (e && e.message) || "erreur inconnue" };
+  }
+}
 // après un vrai achat (ou une restauration), on quitte le mode test pour que l'appli montre ce que dit le serveur
 function planTestOff() { if (!planTesting()) return false; db.planTest = ""; saveNow(); render(); return true; }
 async function waitPlan() {
@@ -3189,7 +3226,8 @@ function viewPremium() {
   const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div></div>" +
-    (billingMode() === "test" ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>' : "") +
+    (billingMode() === "test" ? (Native ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>'
+      : '<div class="card plan-testapp"><b>Paiement de test</b><div class="small muted">Visible seulement par toi. Carte de test Stripe : 4242 4242 4242 4242, une date future, n\'importe quel code : aucun paiement réel. Seul le compte administrateur reçoit Premium.</div></div>') : "") +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +
     '<p class="small muted plan-for-txt">' + (premiumFor === "family" ? "Pour " + FAMILY_SIZE + " personnes : toi + 4 proches. Chacun a son propre compte, ses programmes et son historique ; personne ne voit les données des autres." : "Pour toi seul, sur tous tes appareils.") + "</p>" +
     '<div class="plans" role="radiogroup" aria-label="Durée">' +
@@ -3200,7 +3238,7 @@ function viewPremium() {
       : '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></button>')(PRICES[premiumFor]) + "</div>" +
     (s === "premium" ? premiumOwned() : '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
       '<p class="small muted plan-terms">' + pickTerms() + "</p>") +
-    (billingMode() ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
+    (billingMode() && Native ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
     '<p class="small muted" style="margin:10px 2px 0">Essai gratuit d\'un mois à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
     (premiumFor === "family" ? " Formule Famille : tu invites tes proches depuis Réglages › Abonnement ; une personne retirée ne peut être remplacée qu\'après 15 jours. Déjà abonné en Solo ? Résilie-le avant de rejoindre une Famille, pour ne pas payer deux fois." : "") + "</p>" +
@@ -4573,7 +4611,7 @@ $app.addEventListener("click", async e => {
       if (buying) break;
       const pid = PRODUCTS[premiumFor][premiumPick];
       buying = true; render();
-      const r = await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life");
+      const r = Native ? await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life") : await webBuy(pid);
       buying = false; render();
       if (r.st === "cancel") { toast("Achat annulé"); break; }
       if (r.st !== "ok") { toast("L'achat n'a pas abouti" + (r.txt ? " : " + r.txt : "")); break; }
@@ -4583,7 +4621,7 @@ $app.addEventListener("click", async e => {
       render();
     } break;
     case "planrestore": {
-      if (!billingMode() || !db.auth) { toast("Connecte-toi d'abord"); break; }
+      if (!billingMode() || !Native || !db.auth) { toast("Connecte-toi d'abord"); break; }
       const r = await billingCall("billingRestore", db.auth.user.id);
       if (r.st !== "ok") { toast("Restauration impossible" + (r.txt ? " : " + r.txt : "")); break; }
       toast(r.txt ? (planTestOff() ? "Achats retrouvés · Mode test désactivé pour les afficher" : "Achats retrouvés, mise à jour…") : "Aucun achat trouvé sur ce compte Google");
@@ -4682,7 +4720,11 @@ $app.addEventListener("click", async e => {
     case "famskip": if (isFamily()) { const f = famData(); f.removed = f.removed.map(t => t - FAM_WAIT); saveNow(); render(); toast(FAM_WAIT_DAYS + " jours plus tard : la place est libre"); } break;
     case "planfor": premiumFor = b.dataset.val === "family" ? "family" : "solo"; render(); break;
     case "planpick": premiumPick = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; render(); break;
-    case "planmanage": toast("La gestion de l'abonnement par carte arrive avec le paiement sur fiitday.com"); break;
+    case "planmanage": { // abonnement payé par carte : page de gestion de RevenueCat (résilier, changer de carte, factures)
+      if (Native || !billingMode() || !db.auth) { toast("Gère ton abonnement sur fiitday.com, connecté à ton compte"); break; }
+      try { const ci = await (await webPurchases()).getCustomerInfo(); if (ci && ci.managementURL) openOut(ci.managementURL); else toast("Aucun abonnement par carte trouvé sur ce compte"); }
+      catch (err) { toast("Page de gestion indisponible : " + ((err && err.message) || "réessaie plus tard")); }
+    } break;
     case "importvar": { const code = await ask({ title: "Importer une séance", text: "Colle le lien de la séance qu'on t'a envoyé.", input: "", ok: "Continuer" }); if (!code) return;
       if (dataLocked() && (/^\s*FIITDAY\d:/.test(code) || (XFER_RE.test(normCode(code)) && code.trim().length <= 12))) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
       if (/^\s*FIITDAY\d:/.test(code)) { if (await ask({ title: "C'est une sauvegarde", text: "Ce texte est une sauvegarde complète (programmes, séances, réglages), pas un lien de séance. La restaurer dans ce compte ?", ok: "Restaurer" })) restoreBackup(code); return; }

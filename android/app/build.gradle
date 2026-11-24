@@ -16,6 +16,11 @@ android {
         targetSdk 34
         versionCode vCode
         versionName vName
+        manifestPlaceholders = [appLabel: 'Fiitday']
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     signingConfigs {
@@ -33,10 +38,25 @@ android {
             minifyEnabled false
             signingConfig signingConfigs.release
         }
+        // appli « Fiitday Test » : installée à côté de la vraie, achats factices du magasin de test RevenueCat.
+        // La clé du magasin de test est publique (elle est dans l'appli) : variable GitHub RC_TEST_KEY.
+        debug {
+            applicationIdSuffix '.test'
+            versionNameSuffix '-test'
+            manifestPlaceholders = [appLabel: 'Fiitday Test']
+            buildConfigField 'String', 'RC_KEY', '"' + (System.getenv('RC_TEST_KEY') ?: '').replaceAll('[^A-Za-z0-9_]', '') + '"'
+            // même signature d'une version à l'autre (mises à jour sans désinstaller), si la clé de signature est là
+            if (file('../release.p12').exists() && System.getenv('KEYSTORE_PASSWORD')) signingConfig signingConfigs.release
+        }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    // achats RevenueCat : dans l'appli de test seulement, jusqu'au branchement du paiement Google
+    debugImplementation 'com.revenuecat.purchases:purchases:11.4.3'
 }

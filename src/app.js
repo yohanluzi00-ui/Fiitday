@@ -3052,6 +3052,24 @@ const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028";
 const FAMILY_SIZE = 5;
 let premiumFor = "solo", premiumPick = "year";
+// achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
+// « store » quand le paiement Google sera branché, « » sinon (appli Obtainium, site web)
+const billingMode = () => { try { return (Native && typeof Native.billing === "function" && Native.billing()) || ""; } catch (e) { return ""; } };
+// identifiants des produits (les mêmes dans RevenueCat) : « famil » = Famille, « vie » = achat à vie, lus aussi par le serveur
+const PRODUCTS = { solo: { year: "fiitday_solo_annuel", month: "fiitday_solo_mensuel", life: "fiitday_vie_solo" }, family: { year: "fiitday_famille_annuel", month: "fiitday_famille_mensuel", life: "fiitday_vie_famille" } };
+const billingCbs = {}; let billingSeq = 0, buying = false;
+window.__fiitdayBilling = (id, st, txt) => { const f = billingCbs[id]; delete billingCbs[id]; if (f) f({ st, txt: txt || "" }); };
+const billingCall = (fn, ...args) => new Promise(res => { const id = "b" + (++billingSeq); billingCbs[id] = res; try { Native[fn](id, ...args); } catch (e) { delete billingCbs[id]; res({ st: "error", txt: e.message }); } });
+// après un achat : le serveur reçoit le message de RevenueCat en quelques secondes ; on relit le statut jusqu'à le voir
+function billingLogout() { try { if (billingMode() && Native.billingLogout) Native.billingLogout(); } catch (e) { } }
+async function waitPlan() {
+  for (let i = 0; i < 8; i++) {
+    await new Promise(r => setTimeout(r, 2500));
+    const p = await loadPlan(true);
+    if (p && (p.source === "subscription" || p.source === "lifetime")) return true;
+  }
+  return false;
+}
 const isPlanTester = () => !!(db.auth && PLAN_TESTERS.includes(db.auth.user.id));
 const planTesting = () => isPlanTester() && ["trial", "free", "premium", "family", "member"].includes(db.planTest);
 const trialLeft = () => Math.max(0, Math.ceil(((planTesting() ? db.planTestEnd : db.plan && Date.parse(db.plan.trial_ends)) - Date.now()) / DAY) || 0);
@@ -3136,7 +3154,9 @@ function planStatus() {
     if (p.source === "subscription" && p.renews === false) return "Abonnement résilié : Premium jusqu'au " + until + ", puis version gratuite sans rien perdre.";
     if (p.source === "subscription") return "Abonné Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " · prochain renouvellement le " + until : "") + ". Merci de soutenir Fiitday !";
   }
-  if (s === "off" && p.would === "premium") return "L'abonnement n'est pas encore ouvert : tu as toute l'appli." + (p.source === "family-member" ? " Tu fais déjà partie de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + "." : p.source === "gift" ? " Premium " + (p.kind === "family" ? "Famille " : "") + "t'est offert" + (until ? " jusqu'au " + until : " à vie") + "." : "");
+  if (s === "off" && p.would === "premium") return "L'abonnement n'est pas encore ouvert : tu as toute l'appli." + (p.source === "family-member" ? " Tu fais déjà partie de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + "." : p.source === "gift" ? " Premium " + (p.kind === "family" ? "Famille " : "") + "t'est offert" + (until ? " jusqu'au " + until : " à vie") + "."
+    : p.source === "subscription" ? " Achat de test reçu : abonnement Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " jusqu'au " + until : "") + "."
+    : p.source === "lifetime" ? " Achat de test reçu : Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + "." : "");
   return s === "trial" ? "Essai Premium : encore " + d + " jour" + (d > 1 ? "s" : "") + ". À la fin, tu passes en version gratuite sans rien perdre."
     : s === "free" ? "Version gratuite. Toutes tes données sont gardées : tout se débloque dès que tu t'abonnes."
     : s === "premium" && isMember() ? "Membre de la famille de " + ((db.planTestJoined || {}).owner || "ton proche") + " : Premium partagé, sans rien payer."
@@ -3148,14 +3168,14 @@ const isNativeApp = () => !!Native;
 const pickPrice = () => { const pr = PRICES[premiumFor]; return premiumPick === "month" ? pr.month + " / mois" : premiumPick === "life" ? (Date.now() < LIFE_END ? pr.life : pr.lifeAfter) + " en une fois" : pr.year + " / an"; };
 const pickLabel = () => (premiumPick === "life" ? "Acheter Premium à vie · " : "S'abonner · ") + pickPrice();
 function pickTerms() {
-  const store = isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
+  const store = billingMode() === "test" ? "Achat de test, sans paiement réel" : isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
   return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte."
     : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation au moins 24 h avant la fin de la période. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Abonnement") + ". Tu as 14 jours pour te rétracter.";
 }
 // déjà Premium : d'où il vient, et comment le gérer
 function premiumOwned() {
   const p = (!planTesting() && db.plan) || {};
-  if (p.source === "subscription" && p.store === "PLAY_STORE") return '<a class="btn block" href="https://play.google.com/store/account/subscriptions?package=com.fiitday.app" target="_blank" rel="noopener">Gérer mon abonnement dans Google Play</a>';
+  if (p.source === "subscription" && p.store === "PLAY_STORE") return '<a class="btn block" href="' + PLAY_SUBS + '" target="_blank" rel="noopener">Gérer mon abonnement dans Google Play</a>';
   if (p.source === "subscription") return '<button class="btn block" data-act="planmanage">Gérer mon abonnement</button>';
   return "";
 }
@@ -3164,9 +3184,10 @@ function viewPremium() {
   const rows = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
     ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
     ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
-  const live = MONETIZATION && s !== "premium";
+  const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div></div>" +
+    (billingMode() === "test" ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>' : "") +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +
     '<p class="small muted plan-for-txt">' + (premiumFor === "family" ? "Pour " + FAMILY_SIZE + " personnes : toi + 4 proches. Chacun a son propre compte, ses programmes et son historique ; personne ne voit les données des autres." : "Pour toi seul, sur tous tes appareils.") + "</p>" +
     '<div class="plans" role="radiogroup" aria-label="Durée">' +
@@ -3175,8 +3196,9 @@ function viewPremium() {
     (pr => Date.now() < LIFE_END
       ? '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><span class="tag">Offre de lancement</span><b>À vie</b><div class="plan-price num">' + pr.life + ' <small>en une fois</small></div><div class="small">Prix de lancement, puis ' + pr.lifeAfter + " à partir du " + LIFE_END_TXT + '.</div><div class="small muted">Sans abonnement, ' + pr.lifeVs + ".</div></button>"
       : '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></button>')(PRICES[premiumFor]) + "</div>" +
-    (s === "premium" ? premiumOwned() : '<button class="btn primary block big" ' + (live ? 'data-act="planbuy"' : "disabled") + ">" + (live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
+    (s === "premium" ? premiumOwned() : '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
       '<p class="small muted plan-terms">' + pickTerms() + "</p>") +
+    (billingMode() ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
     '<p class="small muted" style="margin:10px 2px 0">Essai gratuit d\'un mois à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
     (premiumFor === "family" ? " Formule Famille : tu invites tes proches depuis Réglages › Abonnement ; une personne retirée ne peut être remplacée qu\'après 15 jours. Déjà abonné en Solo ? Résilie-le avant de rejoindre une Famille, pour ne pas payer deux fois." : "") + "</p>" +
@@ -3254,6 +3276,42 @@ function loadFam(force) {
   return famLoading;
 }
 const famErr = e => e && e.message === "Failed to fetch" ? "Pas de connexion internet : rien n'a changé" : (e && e.message) || "Ça n'a pas marché, réessaie";
+
+// suppression du compte : ce qui sera perdu (statut lu sur le serveur, sinon le dernier connu). Supprimer le compte
+// n'arrête pas un abonnement : il se résilie dans Google Play (ou sur fiitday.com), d'où « stop » pour proposer de le faire d'abord.
+const PLAY_SUBS = "https://play.google.com/store/account/subscriptions?package=com.fiitday.app";
+async function deleteWarnings() {
+  let fam = null;
+  try { fam = await rpc("family_status"); } catch (e) { }
+  const p = (fam && fam.plan) || db.plan || {}, w = [], until = p.until ? fmtDateLong(Date.parse(p.until)) : "";
+  let stop = null;
+  if (p.source === "subscription" && p.renews !== false) {
+    stop = p.store === "PLAY_STORE" ? "play" : "web";
+    w.push("Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements. Résilie-le d'abord " + (stop === "play" ? "dans Google Play (Abonnements)." : "dans Réglages › Abonnement."));
+  } else if (p.source === "subscription") w.push("Il te reste du Premium jusqu'au " + until + " : il sera perdu.");
+  if (p.source === "lifetime") w.push("Ton Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + " est lié à ce compte : il sera perdu.");
+  if (p.source === "gift") w.push("Ton Premium offert sera perdu.");
+  const mem = fam && fam.role === "owner" && Array.isArray(fam.members) ? fam.members : [];
+  if (mem.length) {
+    const names = mem.map(m => m.name).filter(Boolean);
+    w.push((mem.length > 1 ? "Les " + mem.length + " membres" : "Le membre") + " de ta famille" + (names.length ? " (" + names.join(", ") + ")" : "") + (mem.length > 1 ? " perdront" : " perdra") + " Premium.");
+  }
+  if (!fam && !db.plan && MONETIZATION) w.push("Si tu as un abonnement, résilie-le d'abord : supprimer ton compte n'arrête pas les paiements.");
+  return { w, stop };
+}
+// ouvre un lien hors de l'appli (le navigateur, ou Google Play sur Android)
+function openOut(url) { const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); }
+// suppression côté serveur : la fonction « delete-account » efface aussi le client chez RevenueCat (RGPD) avant le compte ;
+// si elle échoue (panne, réseau), suppression directe du compte comme avant (le serveur vérifie toujours qui la demande)
+async function deleteAccountSrv() {
+  await ensureToken();
+  const call = () => fetch(SUPABASE_URL + "/functions/v1/delete-account", { method: "POST", body: "{}",
+    headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + db.auth.access_token, "Content-Type": "application/json" } });
+  let r = null;
+  try { r = await call(); if (r.status === 401) { await ensureToken(true); r = await call(); } } catch (e) { r = null; }
+  if (r && r.ok) return;
+  await rest("POST", "rpc/delete_my_account", {}, { Prefer: "return=minimal" });
+}
 function srvFamilyBox() {
   const f = famSrv || {}, members = f.members || [], invites = f.invites || [], waits = (f.waits || []).map(t => Date.parse(t)), active = !!(db.plan && db.plan.can_family);
   const free = f.role === "owner" ? f.free : FAMILY_SIZE - 1, av = n => '<span class="fam-av" aria-hidden="true">' + esc((n || "?").trim().charAt(0).toUpperCase()) + "</span>";
@@ -4243,19 +4301,25 @@ $app.addEventListener("click", async e => {
       if (!await ask({ title: "Se déconnecter ?", text: "Tes données restent enregistrées dans ton compte. Elles seront effacées de cet appareil.", ok: "Se déconnecter", danger: true })) return;
       flushPending(); await sync();
       if (Object.values(db.items).some(x => x.dirty) && !await ask({ title: "Modifications non envoyées", text: "Certaines modifications n'ont pas pu être envoyées (pas de réseau ?). Se déconnecter quand même ?", ok: "Oui", danger: true })) return;
-      db = emptyDb(); dataRev++; consentAsked = nameAsked = false; famSrv = null; saveNow(); go("home"); render(); break;
+      billingLogout(); db = emptyDb(); dataRev++; consentAsked = nameAsked = false; famSrv = null; saveNow(); go("home"); render(); break;
     }
     case "delaccount": {
-      const conf = await ask({ title: "Supprimer ton compte ?", text: "Ton compte et toutes tes données (programmes, séances, historique, séances partagées) seront définitivement effacés, sur tous tes appareils. Cette action est irréversible.\n\nTape SUPPRIMER pour confirmer.", input: "", ok: "Supprimer définitivement", danger: true });
+      const pre = await deleteWarnings();
+      if (pre.stop) {
+        const c = await choose("Ton abonnement est toujours actif", [["manage", pre.stop === "play" ? "Résilier dans Google Play" : "Gérer mon abonnement", "Supprimer ton compte n'arrête pas les paiements : résilie d'abord"], ["go", "Supprimer quand même", "Les paiements continueront tant que tu n'auras pas résilié"]]);
+        if (!c) return;
+        if (c === "manage") { if (pre.stop === "play") openOut(PLAY_SUBS); else toast("La gestion de l'abonnement par carte arrive avec le paiement sur fiitday.com"); return; }
+      }
+      const conf = await ask({ title: "Supprimer ton compte ?", text: "Ton compte et toutes tes données (programmes, séances, historique, séances partagées) seront définitivement effacés, sur tous tes appareils. Cette action est irréversible." + (pre.w.length ? "\n\n" + pre.w.map(x => "• " + x).join("\n") : "") + "\n\nTape SUPPRIMER pour confirmer.", input: "", ok: "Supprimer définitivement", danger: true });
       if (conf == null) return;
       if (conf.trim().toUpperCase() !== "SUPPRIMER") { toast("Suppression annulée : tape SUPPRIMER pour confirmer"); return; }
       try {
-        await rest("POST", "rpc/delete_my_account", {}, { Prefer: "return=minimal" });
+        await deleteAccountSrv();
       } catch (err) {
         toast(err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous (voir Informations légales)." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
         return;
       }
-      db = emptyDb(); dataRev++; consentAsked = nameAsked = false; saveNow(); toast("Ton compte a été supprimé"); go("home"); render();
+      billingLogout(); db = emptyDb(); dataRev++; consentAsked = nameAsked = false; saveNow(); toast("Ton compte a été supprimé"); go("home"); render();
     } break;
     case "syncnow": flushPending(); await sync(); if (syncState.status === "ok") toast("Synchronisé"); break;
 
@@ -4501,7 +4565,27 @@ $app.addEventListener("click", async e => {
       toast(val === "trial" ? "Mode test : essai en cours (30 jours)" : val === "free" ? "Mode test : essai terminé, version gratuite" : val === "premium" ? "Mode test : abonné Premium" : val === "family" ? "Mode test : abonné Premium Famille" : "Mode test désactivé");
     } break;
     case "plantestskip": if (planTesting()) { db.planTestEnd = (db.planTestEnd || Date.now()) - 7 * DAY; saveNow(); render(); toast(trialLeft() ? "Encore " + trialLeft() + " jour" + (trialLeft() > 1 ? "s" : "") + " d'essai" : "Essai terminé : version gratuite"); } break;
-    case "planbuy": toast("Le paiement arrive bientôt"); break;
+    case "planbuy": {
+      if (!billingMode()) { toast("Le paiement arrive bientôt"); break; }
+      if (!db.auth) { toast("Connecte-toi d'abord : l'achat est lié à ton compte"); break; }
+      if (buying) break;
+      const pid = PRODUCTS[premiumFor][premiumPick];
+      buying = true; render();
+      const r = await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life");
+      buying = false; render();
+      if (r.st === "cancel") { toast("Achat annulé"); break; }
+      if (r.st !== "ok") { toast("L'achat n'a pas abouti" + (r.txt ? " : " + r.txt : "")); break; }
+      toast(billingMode() === "test" ? "Achat de test réussi, Premium arrive…" : "Merci ! Premium arrive…");
+      toast(await waitPlan() ? "Premium est activé sur ton compte" : "Achat enregistré : Premium s'affichera d'ici quelques minutes");
+      render();
+    } break;
+    case "planrestore": {
+      if (!billingMode() || !db.auth) { toast("Connecte-toi d'abord"); break; }
+      const r = await billingCall("billingRestore", db.auth.user.id);
+      if (r.st !== "ok") { toast("Restauration impossible" + (r.txt ? " : " + r.txt : "")); break; }
+      toast(r.txt ? "Achats retrouvés, mise à jour…" : "Aucun achat trouvé sur ce compte Google");
+      if (r.txt) { await waitPlan(); render(); }
+    } break;
     case "adminload": if (route().args[0] === "recettes") { ledgerErr = ""; loadLedger(true); } else if (route().args[0] === "abonnements") { adminSubsErr = ""; loadAdminSubs(true); } else { adminErr = ""; loadAdmin(true); } break;
     case "giftopt": { document.querySelectorAll("[data-gf]").forEach(x => { giftForm[x.dataset.gf] = x.value; }); giftForm[b.dataset.k] = b.dataset.v; render(); } break;
     case "giftsend": {

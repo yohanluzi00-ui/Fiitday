@@ -38,6 +38,7 @@ jobs:
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          RC_TEST_KEY: ${{ vars.RC_TEST_KEY }}
         run: |
           set -o pipefail
           if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEYSTORE_B64" ]; then
@@ -45,7 +46,18 @@ jobs:
             exit 1
           fi
           echo "$KEYSTORE_B64" | base64 -d > android/release.p12
-          cd android && gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee ../build.log
+          cd android && gradle assembleRelease assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
+      # appli « Fiitday Test » (achats factices) : pré-version à part, publiée AVANT la vraie pour que la vraie
+      # reste la plus récente ; Obtainium ignore les pré-versions
+      - name: Publier l'appli de test
+        continue-on-error: true # un souci ici ne doit jamais bloquer la vraie version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk Fiitday-Test.apk
+          gh release delete appli-test --cleanup-tag --yes 2>/dev/null || true
+          printf 'Appli « Fiitday Test » %s : installée à côté de Fiitday, achats factices du magasin de test RevenueCat (aucun paiement). Pas pour Obtainium.\n' "$VERSION_NAME" > test-notes.md
+          gh release create appli-test Fiitday-Test.apk --prerelease --title "Fiitday Test $VERSION_NAME" --notes-file test-notes.md --target "$GITHUB_SHA"
       - name: Publier la Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,6 +65,7 @@ jobs:
           apk="Fiitday-$VERSION_NAME.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$apk"
           git log -1 --pretty=%B > notes.md
+          if gh release view "v$VERSION_NAME" >/dev/null 2>&1; then echo "v$VERSION_NAME existe déjà (relance manuelle) : seule l'appli de test est mise à jour"; exit 0; fi
           gh release create "v$VERSION_NAME" "$apk" --title "Fiitday $VERSION_NAME" --notes-file notes.md --target "$GITHUB_SHA"
       - name: Garder le journal en cas d'échec
         if: failure()

@@ -94,6 +94,7 @@ public class MainActivity extends Activity {
             }
         });
         web.setWebChromeClient(new WebChromeClient());
+        Billing.setup(this); // achats : seulement dans l'appli de test pour l'instant
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
@@ -246,6 +247,30 @@ public class MainActivity extends Activity {
             try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
             catch (Exception e) { return ""; }
         }
+
+        /* achats (RevenueCat) : actifs seulement dans l'appli « Fiitday Test » pour l'instant, voir Billing */
+        @JavascriptInterface
+        public String billing() { return Billing.mode(); }
+
+        @JavascriptInterface
+        public void billingBuy(final String cb, final String uid, final String productId, final boolean subscription) {
+            runOnUiThread(() -> Billing.buy(MainActivity.this, uid, productId, subscription, (st, txt) -> billingResult(cb, st, txt)));
+        }
+
+        @JavascriptInterface
+        public void billingRestore(final String cb, final String uid) {
+            runOnUiThread(() -> Billing.restore(uid, (st, txt) -> billingResult(cb, st, txt)));
+        }
+
+        @JavascriptInterface
+        public void billingLogout() { runOnUiThread(Billing::logout); }
+    }
+
+    /** renvoie le résultat d'un achat à l'appli web : window.__fiitdayBilling(id, "ok" | "cancel" | "error", texte) */
+    private void billingResult(String cb, String status, String text) {
+        if (web == null) return;
+        final String js = "window.__fiitdayBilling&&window.__fiitdayBilling(" + JSONObject.quote(cb) + "," + JSONObject.quote(status) + "," + JSONObject.quote(text == null ? "" : text) + ")";
+        web.post(() -> { if (web != null) web.evaluateJavascript(js, null); });
     }
 
     /** bouton « Passer » / « Terminer » : gardé jusqu'à ce que l'appli le prenne, et l'appli ouverte est prévenue tout de suite */

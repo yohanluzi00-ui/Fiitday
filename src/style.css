@@ -52,7 +52,7 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 @media (min-width: 900px) {
   .shell { display: flex; }
   .nav { position: sticky; top: 0; height: 100vh; width: 220px; flex: none; flex-direction: column; border-top: 0; border-right: 1px solid var(--line); padding: 24px 12px; gap: 4px; }
-  .nav .brand { display: block; font-size: 20px; font-weight: 800; padding: 0 12px 20px; }
+  .nav .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; padding: 0 12px 20px; }
   .nav a { flex: none; flex-direction: row; justify-content: flex-start; min-height: 44px; padding: 0 12px; border-radius: 10px; font-size: 15px; gap: 10px; }
   .nav a.on { background: var(--soft); }
   .hide-nav .nav { display: flex; }
@@ -233,7 +233,8 @@ h1, .page-head h1, .ex-name, .tpl h2, .rp-time, .rp-end, .stat .v, .nav .brand, 
 .btn.primary { background: var(--grad); color: var(--on-grad); box-shadow: var(--glow); font-weight: 700; }
 .btn.strong { box-shadow: none; }
 .nav { background: var(--nav-bg); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
-.nav .brand { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: .04em; }
+.nav .brand span { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: .04em; }
+.nav .brand img { width: 32px; height: 32px; border-radius: 9px; flex: none; } /* logo 6 à côté du nom */
 .nav a.on { color: var(--accent); }
 @media (min-width: 900px) { .nav a.on { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); } }
 .hero { background: radial-gradient(500px 220px at 100% 0%, rgba(var(--a2-rgb), .35), transparent 70%), linear-gradient(135deg, var(--hero1), var(--hero2)); color: #fff; border: 1px solid rgba(var(--a2-rgb), .35); box-shadow: var(--glow); }
@@ -306,7 +307,8 @@ h1, .page-head h1, .ex-name, .tpl h2, .rp-time, .rp-end, .stat .v, .nav .brand, 
 @keyframes recIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .recordpop { animation: none; } }
 .login input.code { font-family: var(--display); font-size: 28px; letter-spacing: .4em; text-align: center; }
-.credit .appver { font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 2px; }
+.credit .appver { font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--ink); margin-bottom: 2px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.credit .appver img { width: 24px; height: 24px; border-radius: 7px; flex: none; } /* logo 6 à gauche de « Fiitday V… » */
 .consent { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); text-align: left; line-height: 1.45; }
 .consent input { width: 20px; height: 20px; flex: none; margin-top: 1px; accent-color: var(--accent); }
 .consent a { color: var(--accent); }

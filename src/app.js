@@ -704,7 +704,7 @@ function renderNow() {
     default: body = viewHome();
   }
   const tab = { guide: "settings", faq: "settings", premium: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
-  $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand">Fiitday</div>' +
+  $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand"><img src="icon-192.png" alt="" width="32" height="32"><span>Fiitday</span></div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
     '</nav><main class="main r-' + esc(r.name) + (wide ? " wide" : "") + '">' + body + "</main></div>";
   keepScreen(immersive);
@@ -4121,7 +4121,7 @@ function viewSettings() {
     '<div class="card"><b>Informations légales</b><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
     '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div></div>' +
-    '<div class="credit"><div class="credit-msg">L\'équipe Fiitday te souhaite de belles séances</div><div class="appver">' + esc(ver) + "</div></div></div>";
+    '<div class="credit"><div class="credit-msg">L\'équipe Fiitday te souhaite de belles séances</div><div class="appver"><img src="icon-192.png" alt="" width="24" height="24">' + esc(ver) + "</div></div></div>";
 }
 
 /* ================= Minuteurs ================= */

@@ -61,7 +61,7 @@ const html = `<!doctype html>
 <meta name="theme-color" content="#F4F2F8">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <style>
 @font-face { font-family: "Space Grotesk"; src: url(data:font/woff2;base64,${FONT}) format("woff2"); font-weight: 300 700; font-display: swap; }
 ${src("style.css")}
@@ -78,7 +78,8 @@ ${src("style.css")}
 const dist = path.join(__dirname, "dist");
 fs.mkdirSync(dist, { recursive: true });
 fs.writeFileSync(path.join(dist, "index.html"), html);
-for (const f of ["icon-192.png", "icon-512.png"]) fs.copyFileSync(path.join(__dirname, "src", "icons", f), path.join(dist, f));
+// logo 6 « Haltère épuré » (src/icons/logo.svg) : icônes du site, de l'écran d'accueil (Android, iPhone) et de l'appli
+for (const f of ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"]) fs.copyFileSync(path.join(__dirname, "src", "icons", f), path.join(dist, f));
 // onglet Exercices : module chargé à la demande + three.js (affichage 3D, licence MIT)
 for (const f of ["exercices.js", "three.module.min.js"]) fs.copyFileSync(path.join(__dirname, "src", f), path.join(dist, f));
 // paiement par carte (site web seulement, pas dans l'appli Android) : SDK RevenueCat purchases-js 1.73.2 (licence MIT), chargé au moment de payer
@@ -90,7 +91,7 @@ fs.writeFileSync(path.join(dist, "manifest.webmanifest"), JSON.stringify({
   icons: [
     { src: "icon-192.png", sizes: "192x192", type: "image/png" },
     { src: "icon-512.png", sizes: "512x512", type: "image/png" },
-    { src: "icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    { src: "icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
   ],
 }, null, 2));
 fs.writeFileSync(path.join(dist, "sw.js"), `// Cache hors ligne de la version web

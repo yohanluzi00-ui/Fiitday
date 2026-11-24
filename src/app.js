@@ -3491,7 +3491,7 @@ async function mfaVerify() {
     const j = await authApi("POST", "factors/" + f.id + "/verify", { challenge_id: ch.id, code });
     if (j && j.access_token && j.user) setSession(j); // la session passe au niveau aal2
     const first = !!mfa.enroll;
-    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = ""; adminSubs = null; adminSubsErr = "";
+    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = ""; ledgerAuto = null; ledgerAutoTried = false; adminSubs = null; adminSubsErr = "";
     toast(first ? "Double authentification activée" : "Code validé"); render();
   } catch (e) { mfa.err = mfaMessage(e); render(); }
 }
@@ -3772,6 +3772,8 @@ function viewAdminSubs() {
 // le montant, le mode de paiement et la pièce justificative. Numérotation par année (2026-001…). Toute modification
 // ou suppression est gardée dans un journal côté serveur.
 let ledger = null, ledgerErr = "", ledgerBusy = false, ledgerYear = null;
+// registre automatique : la fonction « ledger-stripe » lit Stripe et prépare une ligne par mois, à valider ici
+let ledgerAuto = null, ledgerAutoBusy = false, ledgerAutoTried = false;
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const eur = v => EUR.format(+v || 0);
 const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -3785,9 +3787,51 @@ async function loadLedger(manual) {
   if (ledgerBusy || !isAdmin()) return;
   ledgerBusy = true; ledgerErr = ""; if (manual) render();
   let ok = false;
-  try { const r = await rpc("admin_ledger"); const den = admDenied(r); if (den) { ledger = null; ledgerErr = den; } else { ledger = r; ok = true; } }
+  try { const r = await rpc("admin_ledger"); const den = admDenied(r); if (den) { ledger = null; ledgerErr = den; } else { ledger = r; ok = true; loadLedgerAuto(); } }
   catch (e) { ledgerErr = admErrText(e, "Le registre n'a pas pu être chargé"); }
   finally { ledgerBusy = false; if (route().name === "admin") render(); if (manual) toast(ok ? "Registre à jour · " + fmtTimeSec(Date.now()) : "Mise à jour impossible"); }
+}
+async function loadLedgerAuto() {
+  try {
+    const r = await rpc("admin_ledger_auto"); if (!r || r.denied) return;
+    ledgerAuto = r; if (route().name === "admin") render();
+    // lecture de Stripe toute seule à l'ouverture du registre, au plus une fois toutes les 6 heures
+    const sy = r.sync; if (!ledgerAutoTried && (!sy || Date.now() - Date.parse(sy.at) > 6 * 3600e3)) { ledgerAutoTried = true; syncStripe(false); }
+  } catch (e) { }
+}
+async function syncStripe(manual) {
+  if (ledgerAutoBusy || !db.auth) return;
+  ledgerAutoBusy = true; if (route().name === "admin") render();
+  let res = null;
+  try {
+    await ensureToken();
+    const call = () => fetch(SUPABASE_URL + "/functions/v1/ledger-stripe", { method: "POST", body: "{}", headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + db.auth.access_token, "Content-Type": "application/json" } });
+    let r = await call(); if (r.status === 401) { await ensureToken(true); r = await call(); }
+    res = await r.json().catch(() => null);
+  } catch (e) { res = { ok: false, reason: e.message === "Failed to fetch" ? "pas de connexion internet" : e.message }; }
+  ledgerAutoBusy = false;
+  await loadLedgerAuto();
+  if (manual) toast(res && res.ok ? "Stripe lu · " + fmtTimeSec(Date.now()) : "Lecture de Stripe impossible" + (res && res.reason && res.reason !== "no_key" ? " : " + res.reason : ""));
+  if (route().name === "admin") render();
+}
+const draftNet = d => { const g = Math.max(+d.gross - +d.refunds, 0); return g - Math.min(+d.fees, g); };
+const monthName = p => { const m = +p.slice(5, 7) - 1; return MOIS[m].charAt(0).toUpperCase() + MOIS[m].slice(1) + " " + p.slice(0, 4); };
+function ledgerAutoCard() {
+  const a = ledgerAuto; if (!a) return "";
+  const sy = a.sync, drafts = a.drafts || [];
+  const when = t => fmtDateLong(Date.parse(t)) + " à " + new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const nextM = p => { const y = +p.slice(0, 4), m = +p.slice(5, 7); return "1er " + MOIS[m % 12] + " " + (m === 12 ? y + 1 : y); };
+  let h = '<div class="card adm-auto"><div class="spread"><b>Paiements par carte (Stripe)</b><button class="btn sm" data-act="ledgersync"' + (ledgerAutoBusy ? " disabled" : "") + ">" + (ledgerAutoBusy ? "Lecture…" : "Relire Stripe") + "</button></div>";
+  if (!sy) h += '<p class="small muted">Stripe n\'a pas encore été lu.</p>';
+  else if (!sy.ok) h += '<p class="small msg err">' + esc(sy.message || "Lecture impossible") + "</p>";
+  else h += '<p class="small muted">Lu le ' + esc(when(sy.at)) + (sy.livemode ? "." : " · <b>mode test</b> : paiements d'essai, montrés pour exemple, ils ne vont pas dans le registre.") + "</p>";
+  if (sy && sy.ok && !drafts.length) h += '<p class="small muted">Rien à ajouter au registre pour l\'instant.</p>';
+  h += drafts.map(d => '<div class="adm-draft"><div class="spread"><b>' + esc(monthName(d.period)) + "</b>" + (d.livemode ? "" : '<span class="tag">Test</span>') + "</div>" +
+    '<div class="small">' + d.n + " paiement" + (d.n > 1 ? "s" : "") + " · payé " + esc(eur(d.gross)) + (+d.refunds ? " · remboursé " + esc(eur(d.refunds)) : "") + " · frais Stripe " + esc(eur(d.fees)) + " · encaissé <b>" + esc(eur(draftNet(d))) + "</b></div>" +
+    (d.note ? '<div class="small muted">' + esc(d.note) + "</div>" : "") +
+    (!d.livemode ? "" : !d.closed ? '<div class="small muted">Mois en cours : à ajouter au registre à partir du ' + esc(nextM(d.period)) + ".</div>"
+      : '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm primary" data-act="ledgerok" data-id="' + esc(d.id) + '">Ajouter au registre</button><button class="btn sm" data-act="ledgerskip" data-id="' + esc(d.id) + '">Ignorer</button></div>') + "</div>").join("");
+  return h + "</div>";
 }
 // recettes d'une année, numérotées dans l'ordre chronologique
 function ledgerYearRows(y) {
@@ -3847,7 +3891,7 @@ function viewLedger() {
     "<li>TVA : " + (info.vat === "franchise" ? "franchise en base, la mention « TVA non applicable, art. 293 B du CGI » figure sur le PDF." : "régime pas encore choisi (Infos du registre).") + "</li>" +
     "<li>Chaque modification ou suppression est gardée dans un journal" + (+ledger.deleted ? " (" + ledger.deleted + " suppression" + (ledger.deleted > 1 ? "s" : "") + " notée" + (ledger.deleted > 1 ? "s" : "") + ")" : "") + ".</li></ul></div></div>" +
     '<div class="card adm-syn-b"><div class="muted small" style="font-weight:600;margin-bottom:6px">Totaux par mois et par trimestre</div>' + mt + "</div>";
-  return h + '<div class="section-title">Registre ' + y + "</div>" + reg + '<div class="section-title">Synthèse ' + y + '</div><div class="adm-syn">' + side + "</div>";
+  return h + ledgerAutoCard() + '<div class="section-title">Registre ' + y + "</div>" + reg + '<div class="section-title">Synthèse ' + y + '</div><div class="adm-syn">' + side + "</div>";
 }
 // fenêtre de saisie d'une recette
 const parseAmt = s => { const t = String(s == null ? "" : s).replace(/[\s  €]/g, "").replace(",", "."); return /^\d{1,7}(\.\d{1,2})?$/.test(t) ? Math.round(+t * 100) / 100 : NaN; };
@@ -4657,6 +4701,19 @@ $app.addEventListener("click", async e => {
     case "ledgernew": { const e = await askLedger(null); if (e) ledgerSave(e); } break;
     case "ledgeredit": { const cur = ledger && ledgerYearRows(+(ledger.rows.find(r => r.id === b.dataset.id) || { paid_on: "0000" }).paid_on.slice(0, 4)).find(r => r.id === b.dataset.id); if (!cur) return;
       const e = await askLedger(cur); if (e) ledgerSave(e); } break;
+    case "ledgersync": syncStripe(true); break;
+    case "ledgerok": case "ledgerskip": {
+      const d = ledgerAuto && (ledgerAuto.drafts || []).find(x => x.id === b.dataset.id); if (!d) return;
+      const ok = a === "ledgerok";
+      if (!await ask(ok ? { title: "Ajouter " + monthName(d.period).toLowerCase() + " au registre ?", text: eur(draftNet(d)) + " encaissés (" + d.n + " paiement" + (d.n > 1 ? "s" : "") + " par carte). La ligne prend la date du dernier jour du mois, avec le relevé Stripe comme pièce justificative.", ok: "Ajouter" }
+        : { title: "Ignorer " + monthName(d.period).toLowerCase() + " ?", text: "Cette ligne ne sera plus proposée. Tu pourras toujours ajouter la recette à la main.", ok: "Ignorer" })) return;
+      try {
+        const r = await rpc(ok ? "admin_ledger_draft_validate" : "admin_ledger_draft_dismiss", { p_id: d.id }); const den = admDenied(r); if (den) { ledgerErr = den; render(); return; }
+        if (!r.ok) { toast(r.reason || "Impossible"); return; }
+        toast(ok ? "Ajouté au registre" : "Ligne ignorée");
+      } catch (err) { toast("Impossible : " + err.message); return; }
+      await loadLedger();
+    } break;
     case "ledgerdel": {
       const cur = ledger && ledgerYearRows(+(ledger.rows.find(r => r.id === b.dataset.id) || { paid_on: "0000" }).paid_on.slice(0, 4)).find(r => r.id === b.dataset.id); if (!cur) return;
       const okDel = await fancyAsk({ title: "Supprimer la recette " + cur.num + " ?", html: '<p class="muted">' + esc(dayFr(cur.paid_on) + " · " + cur.payer + " · " + eur(cur.net)) + "</p><p class=\"small muted\">Elle sort du registre et les numéros suivants se décalent. Une copie reste dans le journal des modifications. Pour corriger un montant, préfère « Modifier ».</p>", ok: "Supprimer", danger: true });

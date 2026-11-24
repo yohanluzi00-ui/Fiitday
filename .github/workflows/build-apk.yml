@@ -5,6 +5,11 @@ on:
     branches: [main]
     paths-ignore: ['README.md', 'supabase/**', '.github/workflows/pages.yml']
   workflow_dispatch:
+    inputs:
+      appli_test_seule:
+        description: "Ne publier que l'appli de test (pas de nouvelle version de Fiitday)"
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -59,6 +64,7 @@ jobs:
           printf 'Appli « Fiitday Test » %s : installée à côté de Fiitday, achats factices du magasin de test RevenueCat (aucun paiement). Pas pour Obtainium.\n' "$VERSION_NAME" > test-notes.md
           gh release create appli-test Fiitday-Test.apk --prerelease --title "Fiitday Test $VERSION_NAME" --notes-file test-notes.md --target "$GITHUB_SHA"
       - name: Publier la Release
+        if: ${{ !inputs.appli_test_seule }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

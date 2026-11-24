@@ -39,12 +39,13 @@ android {
             signingConfig signingConfigs.release
         }
         // appli « Fiitday Test » : installée à côté de la vraie, achats factices du magasin de test RevenueCat.
-        // La clé du magasin de test est publique (elle est dans l'appli) : variable GitHub RC_TEST_KEY.
+        // La clé du magasin de test est publique (elle est dans l'appli) : gradle.properties (fiitdayRcTestKey),
+        // ou la variable d'environnement RC_TEST_KEY si elle est remplie.
         debug {
             applicationIdSuffix '.test'
             versionNameSuffix '-test'
             manifestPlaceholders = [appLabel: 'Fiitday Test']
-            buildConfigField 'String', 'RC_KEY', '"' + (System.getenv('RC_TEST_KEY') ?: '').replaceAll('[^A-Za-z0-9_]', '') + '"'
+            buildConfigField 'String', 'RC_KEY', '"' + (System.getenv('RC_TEST_KEY') ?: project.findProperty('fiitdayRcTestKey') ?: '').replaceAll('[^A-Za-z0-9_]', '') + '"'
             // même signature d'une version à l'autre (mises à jour sans désinstaller), si la clé de signature est là
             if (file('../release.p12').exists() && System.getenv('KEYSTORE_PASSWORD')) signingConfig signingConfigs.release
         }

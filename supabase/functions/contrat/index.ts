@@ -105,7 +105,23 @@ async function demande(token: string, b: any) {
   return json(200, { ok: true, kind, at: sv.at, end_at: sv.end_at, refund: Number(sv.refund), refund_all: sv.refund_all, label: sv.label, mail_sent: mail.startsWith("envoyé") });
 }
 
+// Brevo : une clé restreinte n'a parfois accès qu'aux e-mails transactionnels ; elle expire après 90 jours sans
+// utilisation, d'où ce petit appel quotidien (lancé par la tâche des rappels) qui la garde active
+async function brevoPing(): Promise<string> {
+  const bk = (Deno.env.get("BREVO_API_KEY") || "").trim();
+  if (bk.length < 20) return "clé BREVO_API_KEY absente";
+  try {
+    for (const path of ["/account", "/smtp/templates?limit=1"]) {
+      const r = await fetch("https://api.brevo.com/v3" + path, { headers: { "api-key": bk, accept: "application/json" } });
+      if (r.ok) return "ok";
+      if (r.status !== 401 && r.status !== 403) return "Brevo a répondu " + r.status;
+    }
+    return "Brevo a refusé la clé (vérifie qu'elle a l'autorisation « Emails transactionnels », et les IP autorisées)";
+  } catch { return "Brevo injoignable"; }
+}
+
 async function rappels() {
+  await brevoPing();
   const sb = srv();
   const { data, error } = await sb.rpc("renewal_due");
   if (error) return json(500, { ok: false, reason: error.message });
@@ -126,12 +142,7 @@ async function verifier(token: string) {
   if (!chk || chk.denied) return json(403, { denied: true });
   let revenuecat = "clé RC_V2_SECRET_KEY absente";
   if (rcKey().length >= 20) { try { await project(); revenuecat = "ok"; } catch (e) { revenuecat = String((e as Error).message || e); } }
-  let brevo = "clé BREVO_API_KEY absente";
-  const bk = (Deno.env.get("BREVO_API_KEY") || "").trim();
-  if (bk.length >= 20) {
-    try { const r = await fetch("https://api.brevo.com/v3/account", { headers: { "api-key": bk, accept: "application/json" } }); brevo = r.ok ? "ok" : "Brevo a refusé la clé (" + r.status + ")"; }
-    catch { brevo = "Brevo injoignable"; }
-  }
+  const brevo = await brevoPing();
   let cron = "inconnu";
   try { const { data } = await srv().rpc("cron_status"); cron = data || "inconnu"; } catch { /* rien */ }
   return json(200, { ok: true, revenuecat, brevo, cron });

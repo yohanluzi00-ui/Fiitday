@@ -947,10 +947,10 @@ function viewLanding() {
     '<section class="lp-sec lp-alt" id="lp-ecrans"><div class="lp-in"><h2>Un coup d\'œil à l\'appli</h2>' +
       '<div class="lp-shots">' + LP_SHOTS.slice(1).map(([k, alt]) => "<figure>" + shot(k, alt, true) + "<figcaption>" + esc(alt) + "</figcaption></figure>").join("") + "</div></div></section>" +
     '<section class="lp-sec" id="lp-tarifs"><div class="lp-in"><h2>Gratuit pour commencer</h2>' +
-      '<p class="lp-lead">À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire. Ensuite, tu continues en version gratuite, sans rien perdre, ou tu passes à Premium.</p>' +
+      '<p class="lp-lead">À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
       (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
       '<div class="lp-prices">' +
-        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et 2 séances actives</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des 30 derniers jours</li><li>Stats de la semaine</li></ul></div>' +
+        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et 2 séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des 30 derniers jours</li><li>Stats de la semaine</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
         [["solo", "Premium Solo", "Pour toi, sur tous tes appareils"], ["family", "Premium Famille", "Toi et 4 proches, chacun avec son compte et ses données"]].map(([k, t, d]) => { const pr = PRICES[k];
           return '<div class="lp-price' + (k === "solo" ? " best" : "") + '"><h3>' + t + '</h3><div class="amt num">' + pr.month + " <small>/ mois</small></div>" +
             '<div class="lp-small">ou ' + pr.year + " par an (soit " + pr.yearMonth + " par mois)<br>" + esc(lifeTxt(pr)) + "</div><ul><li>" + esc(d) + "</li><li>Tout illimité, toutes les stats</li><li>Synchro téléphone et ordinateur</li><li>Les programmes Fiitday</li></ul></div>"; }).join("") +
@@ -1862,10 +1862,10 @@ const ADD_CHOICES = [
   ["biset", "Biset", "2 exercices enchaînés sans repos pour le même muscle"],
   ["triset", "Triset", "3 exercices enchaînés sans repos"],
 ];
-function choose(title, opts) {
+function choose(title, opts, text) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + '</h3><div class="stack" style="gap:8px">' +
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + "</h3>" + (text ? '<p class="small muted" style="margin:0">' + esc(text) + "</p>" : "") + '<div class="stack" style="gap:8px">' +
       opts.map(o => '<button class="btn block choice" data-c="' + o[0] + '"><b>' + esc(o[1]) + "</b>" + (o[2] ? '<span class="choice-desc">' + esc(o[2]) + "</span>" : "") + "</button>").join("") +
       '</div><div class="modal-btns"><button class="btn" data-c="">Annuler</button></div></div>';
     document.body.appendChild(d);
@@ -3173,12 +3173,12 @@ function viewGuide() {
 }
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
-  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
-  ["gratuit", "Que garde la version gratuite ?", "1 programme et 2 séances actives (tu choisis lesquelles), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. <b>Rien n'est supprimé</b> : tes autres programmes, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes. La synchro entre tes appareils est réservée à Premium."],
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et 2 séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les 30 jours), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : 1,99 € par mois ou 19,90 € par an. <b>Famille</b> (toi + 4 proches, chacun son compte) : 6,99 € par mois ou 69,90 € par an. <b>À vie</b>, en un seul paiement : 49,90 € en Solo ou 149,90 € en Famille jusqu'au 31 décembre 2027, puis 79,90 € et 229,90 €. Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
-  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Abonnement › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite sans rien perdre."],
-  ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite sans rien perdre."],
+  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Abonnement › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
+  ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite, plus limitée, et gardent leurs données."],
   ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Abonnement › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
@@ -3222,7 +3222,7 @@ $app.addEventListener("input", e => {
 // Le compte testeur voit seulement le mode test (Réglages) pour essayer l'essai, la version gratuite et Premium sur son appareil.
 const MONETIZATION = false;
 const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
-const TRIAL_DAYS = 30, FREE_VARIANTS = 2, FREE_OWN = 5, FREE_HIST_DAYS = 30, DAY = 86400000;
+const TRIAL_DAYS = 30, FREE_VARIANTS = 2, FREE_OWN = 5, FREE_HIST_DAYS = 30, FREE_SWITCH_DAYS = 30, DAY = 86400000;
 // Solo : 1 compte · Famille : l'acheteur + 4 personnes, chacune avec son propre compte (invitées depuis Réglages › Abonnement)
 const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 €", life: "49,90 €", lifeAfter: "79,90 €", lifeVs: "moins cher que 3 ans d'abonnement annuel (59,70 €)" },
   family: { year: "69,90 €", month: "6,99 €", yearMonth: "5,83 €", life: "149,90 €", lifeAfter: "229,90 €", lifeVs: "moins cher que 3 ans d'abonnement annuel (209,70 €)" } };
@@ -3231,7 +3231,7 @@ const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028";
 const FAMILY_SIZE = 5;
 // Premium ou gratuit : écran Premium et page de présentation du site
-const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
+const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives (changement tous les " + FREE_SWITCH_DAYS + " jours)"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
   ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
   ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
 let premiumFor = "solo", premiumPick = "year", premiumConsent = false; // case à cocher avant le paiement : demande expresse que Premium commence avant la fin du délai de rétractation (Code de la consommation, L221-25)
@@ -3345,20 +3345,67 @@ function freeActive() {
 const progLocked = tid => isFree() && freeActive().t !== tid;
 const varLocked = (tid, vid) => isFree() && !(freeActive().t === tid && freeActive().v.includes(vid));
 const LOCK = '<svg class="lock-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>';
-// séance verrouillée touchée : la rendre active (à la place d'une autre), voir ses exercices, ou Premium
+// changer de programme ou de séances actifs : une fois tous les 30 jours (le premier changement après l'essai ou
+// après Premium est libre), sinon il suffirait d'avoir plusieurs programmes et de passer de l'un à l'autre
+const freeNextSwitch = () => { const a = Number((settings().freeActive || {}).at) || 0; return a ? a + FREE_SWITCH_DAYS * DAY : 0; };
+const freeCanSwitch = () => Date.now() >= freeNextSwitch();
+const freeSwitchTxt = () => freeCanSwitch() ? "Tu peux changer tes séances actives maintenant ; ensuite, une fois tous les " + FREE_SWITCH_DAYS + " jours."
+  : "Tu changes tes séances actives une fois tous les " + FREE_SWITCH_DAYS + " jours : prochain changement possible le " + ctrDate(freeNextSwitch()) + ".";
+// séance verrouillée touchée : changer ses séances actives (si le délai est passé), voir ses exercices, ou Premium
 async function lockedChoice(tid, vid) {
   const t = getItem(tid), v = t && t.variants.find(x => x.id === vid); if (!v) return;
-  const fa = freeActive(), at = getItem(fa.t), opts = [];
-  if (fa.t === tid) fa.v.forEach(id => { const o = t.variants.find(x => x.id === id); if (o) opts.push(["swap:" + id, "Activer à la place de « " + vLabel(o.name) + " »", "« " + vLabel(o.name) + " » sera verrouillée, sans rien perdre"]); });
-  else opts.push(["prog", "Rendre ce programme actif", "« " + t.name + " » devient ton programme actif" + (at ? " à la place de « " + at.name + " »" : "") + ", avec cette séance"]);
+  const can = freeCanSwitch(), opts = [];
+  if (can) opts.push(["pick", "Changer mes séances actives", "Choisis ton programme et tes 2 séances ; prochain changement possible " + FREE_SWITCH_DAYS + " jours après"]);
   opts.push(["peek", "Voir ses exercices", ""], ["premium", "Passer à Premium", "Toutes tes séances, sans limite"]);
-  const c = await choose("« " + vLabel(v.name) + " » est verrouillée", opts);
+  const c = await choose("« " + vLabel(v.name) + " » est verrouillée", opts, can ? "" : freeSwitchTxt());
   if (!c) return;
   if (c === "peek") { peekVariant(tid, vid); return; }
   if (c === "premium") { go("premium"); return; }
-  const nv = c === "prog" ? [vid] : fa.v.map(id => id === c.slice(5) ? vid : id);
-  setSetting("freeActive", { t: tid, v: nv });
-  toast("« " + vLabel(v.name) + " » est maintenant active");
+  changeActive(tid, vid);
+}
+// choisir en une fois le programme actif et ses séances actives (2 au plus), puis confirmer avec la date du prochain changement
+function changeActive(tid, vid) {
+  if (!isFree()) return;
+  if (!freeCanSwitch()) { toast("Prochain changement possible le " + ctrDate(freeNextSwitch())); return; }
+  const fa = freeActive(), ts = templates(); if (!ts.length) return;
+  let pt = tid || fa.t, sel = vid ? [vid] : pt === fa.t ? fa.v.slice() : [];
+  const need = () => Math.min(FREE_VARIANTS, ((getItem(pt) || {}).variants || []).length);
+  const row = (t, v) => '<label class="pk-row"><input type="checkbox" data-pa-t="' + t.id + '"' + (v ? ' data-pa-v="' + v.id + '"' : "") + (t.id === pt && (!v || sel.includes(v.id)) ? " checked" : "") + "><span><b>" +
+    (v ? esc(vLabel(v.name)) + '</b><span class="muted small">' + v.exercises.length + " exo" + (v.exercises.length > 1 ? "s" : "") : "Ce programme</b><span class=\"muted small\">Pas encore de séance : tu pourras en créer 2") + "</span></span></label>";
+  const d = document.createElement("div"); d.className = "modal sheet";
+  d.innerHTML = '<div class="modal-box pk" role="dialog" aria-modal="true" aria-label="Tes séances actives"><h3>Tes séances actives</h3>' +
+    '<p class="small muted" style="margin:0">Version gratuite : 1 programme et 2 séances actives. Après ce choix, tu pourras en changer de nouveau dans ' + FREE_SWITCH_DAYS + " jours.</p>" +
+    '<div class="pk-list"></div><p class="small pa-hint" role="status" style="margin:0"></p>' +
+    '<div class="modal-btns"><button class="btn" data-r="">Annuler</button><button class="btn primary" data-r="ok">Valider</button></div></div>';
+  const paint = () => {
+    const box = d.querySelector(".pk-list"), top = box.scrollTop;
+    box.innerHTML = ts.map(t => '<div class="pk-h">' + esc(t.name) + "</div>" + (t.variants.length ? t.variants.map(v => row(t, v)).join("") : row(t, null))).join("");
+    box.scrollTop = top;
+    const left = need() - sel.length, ok = left === 0;
+    d.querySelector('[data-r="ok"]').disabled = !ok;
+    d.querySelector(".pa-hint").textContent = ok ? "" : "Choisis encore " + left + " séance" + (left > 1 ? "s" : "") + " dans « " + getItem(pt).name + " »";
+  };
+  document.body.appendChild(d); paint();
+  d.addEventListener("change", e => {
+    const i = e.target; if (!i.dataset || !i.dataset.paT) return;
+    const t = i.dataset.paT, v = i.dataset.paV;
+    if (t !== pt) { pt = t; sel = v ? [v] : []; }
+    else if (v && i.checked) { sel.push(v); if (sel.length > need()) sel.shift(); }
+    else if (v) sel = sel.filter(x => x !== v);
+    paint();
+  });
+  d.addEventListener("click", async e => {
+    if (e.target === d) { d.remove(); return; }
+    const b = e.target.closest("[data-r]"); if (!b || b.disabled) return;
+    d.remove();
+    if (b.dataset.r !== "ok") return;
+    if (pt === fa.t && sel.length === fa.v.length && sel.every(x => fa.v.includes(x))) { toast("Ce sont déjà tes séances actives"); return; }
+    const t = getItem(pt), names = sel.map(id => "« " + vLabel(t.variants.find(x => x.id === id).name) + " »");
+    const ok = await ask({ title: "Activer ces séances ?", text: "Programme « " + t.name + " »" + (names.length ? " : " + names.join(" et ") : "") + ".\nLes autres restent gardées, avec un cadenas. Prochain changement possible le " + ctrDate(Date.now() + FREE_SWITCH_DAYS * DAY) + ".", ok: "Activer" });
+    if (!ok) return;
+    setSetting("freeActive", { t: pt, v: sel.slice(), at: Date.now() });
+    toast(names.length > 1 ? names.join(" et ") + " sont maintenant actives" : names.length ? names[0] + " est maintenant active" : "« " + t.name + " » est maintenant ton programme actif");
+  });
 }
 function planBanner() {
   const s = planState();
@@ -3373,13 +3420,13 @@ function planStatus() {
     if (p.source === "family-member") return "Membre de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + " : Premium partagé, sans rien payer.";
     if (p.source === "gift") return "Premium " + (p.kind === "family" ? "Famille " : "") + "offert" + (until ? " jusqu'au " + until : " à vie") + ". Profite bien !";
     if (p.source === "lifetime") return "Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + ". Merci de soutenir Fiitday !";
-    if (p.source === "subscription" && p.renews === false) return "Abonnement résilié : Premium jusqu'au " + until + ", puis version gratuite sans rien perdre.";
+    if (p.source === "subscription" && p.renews === false) return "Abonnement résilié : Premium jusqu'au " + until + ", puis version gratuite, plus limitée (tes données sont gardées).";
     if (p.source === "subscription") return "Abonné Premium " + (p.kind === "family" ? "Famille" : "Solo") + (until ? " · prochain renouvellement le " + until : "") + ". Merci de soutenir Fiitday !";
   }
   if (s === "off" && p.would === "premium") return "L'abonnement n'est pas encore ouvert : tu as toute l'appli." + (p.source === "family-member" ? " Tu fais déjà partie de la famille de " + ((famSrv && famSrv.owner_name) || "ton proche") + "." : p.source === "gift" ? " Premium " + (p.kind === "family" ? "Famille " : "") + "t'est offert" + (until ? " jusqu'au " + until : " à vie") + "."
     : p.source === "subscription" ? " Achat de test reçu : abonnement Premium " + (p.kind === "family" ? "Famille" : "Solo") + (p.renews === false ? " résilié, Premium" : "") + (until ? " jusqu'au " + until + " à " + new Date(p.until).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "") + (p.renews === false ? ", puis fin." : ".")
     : p.source === "lifetime" ? " Achat de test reçu : Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + "." : "");
-  return s === "trial" ? "Essai Premium : encore " + d + " jour" + (d > 1 ? "s" : "") + ". À la fin, tu passes en version gratuite sans rien perdre."
+  return s === "trial" ? "Essai Premium : encore " + d + " jour" + (d > 1 ? "s" : "") + ". À la fin, tu passes en version gratuite, plus limitée (tes données sont gardées)."
     : s === "free" ? "Version gratuite. Toutes tes données sont gardées : tout se débloque dès que tu t'abonnes."
     : s === "premium" && isMember() ? "Membre de la famille de " + ((db.planTestJoined || {}).owner || "ton proche") + " : Premium partagé, sans rien payer."
     : s === "premium" && isFamily() ? "Abonné Premium Famille : tu partages Premium avec jusqu'à " + (FAMILY_SIZE - 1) + " proches."
@@ -3574,9 +3621,9 @@ function viewContract(kind) {
   if (ctr.step === "done" && ctr.res) {
     const d = ctr.res;
     return head + '<div class="card ctr-done"><b>' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</b><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
-      (res ? "<p>Ton abonnement " + esc(d.label) + " prend fin le <b>" + esc(ctrWhen(d.end_at)) + "</b>. Plus rien ne sera prélevé ; ensuite, ton compte passe en version gratuite et tu gardes toutes tes données.</p>" +
+      (res ? "<p>Ton abonnement " + esc(d.label) + " prend fin le <b>" + esc(ctrWhen(d.end_at)) + "</b>. Plus rien ne sera prélevé ; ensuite, ton compte passe en version gratuite, plus limitée, et tu gardes toutes tes données.</p>" +
           (+d.refund > 0 ? "<p>La part non utilisée, <b>" + esc(ctrEur(d.refund)) + "</b>, te sera remboursée avec ton moyen de paiement au plus tard 14 jours après aujourd'hui.</p>" : "")
-        : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, sans rien perdre. Tu es remboursé intégralement, avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
+        : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, plus limitée ; tes données sont gardées. Tu es remboursé intégralement, avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
       "<p>" + (d.mail_sent ? "Une confirmation t'a été envoyée par e-mail à <b>" + esc(ctr.email) + "</b>." : "L'e-mail de confirmation n'a pas pu partir pour l'instant : garde cet écran (par exemple en capture d'écran), il fait foi. Nous t'écrirons à " + esc(ctr.email) + ".") + "</p>" +
       '<a class="btn" href="#/settings">Retour aux réglages</a></div>';
   }
@@ -3700,6 +3747,10 @@ function planSettings() {
   else if (fsh) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(famSrv && famSrv.err ? "Ta famille n'a pas pu être chargée : " + famSrv.err : "Chargement de ta famille…") + "</div></div>";
   else if (s !== "off") h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
     : '<div class="row duo"><a class="btn sm' + (s === "premium" ? "" : " primary") + '" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + '</a><button class="btn sm" data-act="famjoin">J\'ai une invitation Famille</button></div>') + "</div>";
+  if (s === "free") { const fa = freeActive(), t = getItem(fa.t);
+    if (t) { const more = templates().length > 1 || t.variants.length > FREE_VARIANTS;
+      h += '<div class="card"><b>Séances actives</b><div class="small muted" style="margin-top:4px">Programme « ' + esc(t.name) + " »" + (fa.v.length ? " : " + fa.v.map(id => { const v = t.variants.find(x => x.id === id); return v ? esc(vLabel(v.name)) : ""; }).filter(Boolean).join(", ") : "") + "." +
+        (more ? "<br>" + esc(freeSwitchTxt()) : "") + "</div>" + (more && freeCanSwitch() ? '<button class="btn sm" style="margin-top:8px" data-act="freepick">Changer mes séances actives</button>' : "") + "</div>"; } }
   h += contractsCard();
   if (isAdmin()) h += '<div class="card"><div class="spread"><b>Administration</b><span class="tag adm-tag">Visible seulement par toi</span></div><div class="small muted" style="margin-top:4px">Inscrits, utilisateurs actifs, séances, résumé de la semaine.</div><a class="btn sm primary" style="margin-top:8px" href="#/admin">Ouvrir le tableau de bord</a></div>';
   if (isPlanTester()) {
@@ -3709,7 +3760,8 @@ function planSettings() {
       '<div class="seg seg-wrap" role="group" style="margin-top:10px">' + [["", "Désactivé"], ["trial", "Essai en cours"], ["free", "Essai terminé"], ["premium", "Abonné"], ["family", "Abonné Famille"]].map(o =>
         '<button class="' + (cur === o[0] ? "on" : "") + '" aria-pressed="' + (cur === o[0]) + '" data-act="plantest" data-val="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>" +
       (cur === "trial" ? '<div class="row" style="margin-top:10px;flex-wrap:wrap;align-items:center"><span class="small">' + (trialLeft() ? "Encore " + trialLeft() + " jour" + (trialLeft() > 1 ? "s" : "") + " d'essai" : "Essai terminé") + '</span><button class="btn sm" data-act="plantestskip">Avancer d\'une semaine</button></div>' : "") +
-      (s === "free" ? '<div class="small muted" style="margin-top:8px">En vrai, la synchro s\'arrête en version gratuite. En mode test, tes données continuent de se synchroniser.</div>' : "") + "</div>";
+      (s === "free" ? '<div class="small muted" style="margin-top:8px">En vrai, la synchro s\'arrête en version gratuite. En mode test, tes données continuent de se synchroniser.</div>' +
+        (freeCanSwitch() ? "" : '<button class="btn sm" style="margin-top:8px" data-act="freereset">Permettre de changer les séances actives tout de suite</button>') : "") + "</div>";
   }
   return h;
 }
@@ -4963,7 +5015,8 @@ $app.addEventListener("click", async e => {
     case "delex": { const { t, v } = currentProgram(); if (!v) return; const ex = v.exercises[+b.dataset.e]; if (!await ask({ title: (ex.groupId ? "Retirer" : "Supprimer") + " « " + ex.name + " » ?", ok: ex.groupId ? "Retirer" : "Supprimer", danger: true })) return; v.exercises.splice(+b.dataset.e, 1); cleanGroups(v); put("template", t); render(); } break;
     case "up": case "down": { const { t, v } = currentProgram(); if (!v) return; if (moveBlock(v, +b.dataset.b, a === "up" ? -1 : 1)) { put("template", t); render(); } } break;
     case "sharevar": { const { t, v } = currentProgram(); if (!v) return; if (isFree()) { premiumGate("En version gratuite, tu peux recevoir des séances, mais pas partager les tiennes."); return; } shareVariant(t, v); } break;
-    case "lockpick": lockedChoice(b.dataset.t, b.dataset.v); break;
+    case "freepick": changeActive(b.dataset.t, b.dataset.v); break;
+    case "freereset": if (planTesting()) { setSetting("freeActive", Object.assign({}, settings().freeActive || {}, { at: 0 })); toast("Mode test : changement de séances actives possible tout de suite"); } break;
     case "plantest": {
       if (!isPlanTester()) return;
       const val = b.dataset.val || "";
@@ -5329,8 +5382,8 @@ const pvRows = v => blocks(v.exercises).map(b => b.groupId
 function viewLockedProgram(t, v) {
   let h = '<a class="back" href="#/home">‹ Accueil</a><h1 class="locked-h">' + LOCK + esc(t.name) + "</h1>";
   if (t.variants.length > 1) h += '<div class="tabs">' + t.variants.map(x => '<button class="' + (v && x.id === v.id ? "on" : "") + '" data-act="tab" data-v="' + x.id + '">' + (varLocked(t.id, x.id) ? LOCK : "") + "<span>" + esc(vLabel(x.name)) + "</span></button>").join("") + "</div>";
-  h += '<div class="card plan-lock">' + LOCK + "<div><b>" + (v ? "« " + esc(vLabel(v.name)) + " » est verrouillée" : "Ce programme est verrouillé") + '</b><div class="small muted">En version gratuite, 1 programme et 2 séances sont actifs. Tu peux consulter celle-ci, mais pas la lancer ni la modifier. Rien n\'est perdu.</div>' +
-    '<div class="row" style="margin-top:8px;flex-wrap:wrap">' + (v ? '<button class="btn sm" data-act="lockpick" data-t="' + t.id + '" data-v="' + v.id + '">Rendre active</button>' : "") + '<a class="btn sm primary" href="#/premium">Voir Premium</a></div></div></div>';
+  h += '<div class="card plan-lock">' + LOCK + "<div><b>" + (v ? "« " + esc(vLabel(v.name)) + " » est verrouillée" : "Ce programme est verrouillé") + '</b><div class="small muted">En version gratuite, 1 programme et 2 séances sont actifs. Tu peux consulter ' + (v ? "celle-ci" : "ce programme") + ", mais pas la lancer ni la modifier ; rien n'est supprimé. " + esc(freeSwitchTxt()) + "</div>" +
+    '<div class="row" style="margin-top:8px;flex-wrap:wrap">' + (freeCanSwitch() ? '<button class="btn sm" data-act="freepick" data-t="' + t.id + '"' + (v ? ' data-v="' + v.id + '"' : "") + ">Changer mes séances actives</button>" : "") + '<a class="btn sm primary" href="#/premium">Voir Premium</a></div></div></div>';
   if (v) h += '<div class="section-title">Exercices (' + v.exercises.length + ")</div>" + (v.exercises.length ? '<div class="card"><ol class="pv-list">' + pvRows(v) + "</ol></div>" : '<div class="card empty">Pas encore d\'exercice dans cette séance.</div>');
   return h;
 }

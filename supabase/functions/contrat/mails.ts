@@ -6,7 +6,7 @@ export function mailResiliation(d: { name: string; label: string; store: string;
   const corps = p("Bonjour " + esc(d.name) + ",") +
     p("Nous avons bien reçu, le <b>" + esc(quand(d.at)) + "</b>, la notification de résiliation de ton abonnement <b>" + esc(d.label) + "</b> (payé par " + esc(boutique(d.store)) + ").") +
     encadre("Ton abonnement prend fin le <b>" + esc(fin) + "</b>.") +
-    p("<b>Effets de la résiliation</b> : plus aucun prélèvement ; tu gardes Premium jusqu'à cette date, puis ton compte passe en version gratuite. Tes programmes, tes séances et ton historique sont conservés, et tout revient si tu te réabonnes.") +
+    p("<b>Effets de la résiliation</b> : plus aucun prélèvement ; tu gardes Premium jusqu'à cette date, puis ton compte passe en version gratuite, plus limitée (1 programme et 2 séances actives, historique des 30 derniers jours). Tes programmes, tes séances et ton historique sont conservés, et tout revient si tu te réabonnes.") +
     (d.refund > 0 ? p("La part de la période payée et non utilisée, <b>" + esc(euros(d.refund)) + "</b>, te sera remboursée avec ton moyen de paiement au plus tard 14 jours après aujourd'hui.") : "") +
     p("Informations que tu as indiquées :") +
     lignes([["Nom", esc(d.name)], ["E-mail", esc(d.email)], ["Contrat", esc(d.label) + " · " + esc(boutique(d.store))], ["Date de fin choisie", d.wish === "maintenant" ? "dès maintenant" : "à la fin de la période déjà payée"]]) +
@@ -20,7 +20,7 @@ export function mailRetractation(d: { name: string; label: string; store: string
     p("Contenu de ta déclaration :") +
     lignes([["Déclaration", "Je me rétracte de mon contrat " + esc(d.label) + "."], ["Nom", esc(d.name)], ["Contrat", esc(d.label) + " · " + esc(boutique(d.store))],
       ["Acheté le", d.bought ? esc(quand(d.bought, false)) : "—"], ["E-mail pour cet accusé", esc(d.email)]]) +
-    p("<b>Effets</b> : le contrat prend fin aujourd'hui et Premium s'arrête ; ton compte passe en version gratuite, sans rien perdre de tes données.") +
+    p("<b>Effets</b> : le contrat prend fin aujourd'hui et Premium s'arrête ; ton compte passe en version gratuite, plus limitée (1 programme et 2 séances actives, historique des 30 derniers jours). Tes données sont conservées, et tout revient si tu te réabonnes.") +
     (d.store === "PLAY_STORE"
       ? p("<b>Remboursement</b> : ton achat a été payé par Google Play ; il t'est remboursé intégralement par Google Play, au plus tard 14 jours après aujourd'hui.")
       : p("<b>Remboursement</b> : tu es remboursé intégralement (" + esc(euros(d.refund)) + "), avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui, sans frais pour toi.")) +
@@ -35,7 +35,7 @@ export function mailRappel(d: { first_name: string; label: string; store: string
     (d.store === "PLAY_STORE"
       ? p("Pour l'arrêter : dans l'appli, Réglages › Abonnement › « Résilier mon abonnement », ou dans le Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier.")
       : p("Pour l'arrêter : sur fiitday.com ou dans l'appli, Réglages › Abonnement › « Résilier mon abonnement ».")) +
-    p("Si tu ne fais rien, il continue au même prix et tu gardes Premium. Si tu l'arrêtes, tu gardes Premium jusqu'à cette date, puis ton compte passe en version gratuite sans rien perdre.");
+    p("Si tu ne fais rien, il continue au même prix et tu gardes Premium. Si tu l'arrêtes, tu gardes Premium jusqu'à cette date, puis ton compte passe en version gratuite, plus limitée ; tes données sont conservées.");
   return ["Ton abonnement Fiitday Premium se renouvelle le " + quand(d.until, false), page("Renouvellement de ton abonnement", corps)];
 }
 

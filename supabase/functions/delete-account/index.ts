@@ -1,6 +1,7 @@
 // Suppression du compte demandée depuis l'appli (Réglages › Compte › Supprimer mon compte).
-// 1. Efface le client chez RevenueCat (RGPD), seulement si la clé secrète RC_SECRET_API_KEY est enregistrée
-//    dans Supabase (Edge Functions › Secrets) : jamais dans le code ni dans le chat.
+// 1. Efface le client chez RevenueCat (RGPD), avec la clé secrète RevenueCat « API v2 » RC_V2_SECRET_KEY (celle de la
+//    fonction contrat : Customer information en lecture et écriture), ou à défaut une clé v1 RC_SECRET_API_KEY,
+//    enregistrée dans Supabase (Edge Functions › Secrets) : jamais dans le code ni dans le chat.
 // 2. Supprime le compte et toutes ses données avec la fonction delete_my_account, appelée au nom de l'utilisateur
 //    (elle ne peut supprimer que le compte connecté).
 // Si cette fonction ne répond pas, l'appli appelle directement delete_my_account (sans l'étape 1).
@@ -29,16 +30,26 @@ Deno.serve(async (req: Request) => {
   const id = u.user.id;
 
   let revenuecat = "sans clé";
-  const key = Deno.env.get("RC_SECRET_API_KEY") || "";
-  if (key.length >= 20) {
+  const v2 = (Deno.env.get("RC_V2_SECRET_KEY") || "").trim();
+  const v1 = (Deno.env.get("RC_SECRET_API_KEY") || "").trim();
+  if (v2.length >= 20 || v1.length >= 20) {
     try {
-      const r = await fetch("https://api.revenuecat.com/v1/subscribers/" + encodeURIComponent(id), {
-        method: "DELETE",
-        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
-      });
+      let r: Response;
+      if (v2.length >= 20) {
+        const h = { Authorization: "Bearer " + v2, "Content-Type": "application/json" };
+        const p = await fetch("https://api.revenuecat.com/v2/projects", { headers: h });
+        const pid = p.ok ? String((await p.json().catch(() => ({})))?.items?.[0]?.id || "") : "";
+        if (!pid) throw new Error("projet " + p.status);
+        r = await fetch("https://api.revenuecat.com/v2/projects/" + pid + "/customers/" + encodeURIComponent(id), { method: "DELETE", headers: h });
+      } else {
+        r = await fetch("https://api.revenuecat.com/v1/subscribers/" + encodeURIComponent(id), {
+          method: "DELETE",
+          headers: { Authorization: "Bearer " + v1, "Content-Type": "application/json" },
+        });
+      }
       revenuecat = r.ok || r.status === 404 ? "effacé" : "erreur " + r.status;
-    } catch {
-      revenuecat = "injoignable";
+    } catch (e) {
+      revenuecat = e instanceof Error && e.message.startsWith("projet") ? "erreur " + e.message : "injoignable";
     }
     // identifiant anonyme seulement : permet de finir l'effacement à la main dans RevenueCat si besoin
     if (revenuecat !== "effacé") console.error("RevenueCat : client non effacé (" + revenuecat + ") " + id);

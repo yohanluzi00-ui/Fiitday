@@ -3547,8 +3547,11 @@ const playSubUrl = i => PLAY_SUBS + "&sku=" + encodeURIComponent(i.product);
 function contractsCard() {
   if (!db.auth) return "";
   if (!contractsAt || Date.now() - contractsAt > 60000) setTimeout(() => loadContracts(), 0);
+  if (!contracts) return "";
   const items = ctrItems(), reqs = ((contracts && contracts.requests) || []).slice(0, 3);
-  if (!items.length && !reqs.length) return "";
+  // rien en cours : la carte reste visible dès que la vente est possible (accès permanent à la résiliation)
+  if (!items.length && !reqs.length) return MONETIZATION || billingMode() ? '<div class="card ctr-card"><b>Tes achats Premium</b><div class="small muted" style="margin-top:4px">Aucun abonnement ni achat en cours. Les boutons « Résilier mon abonnement » et « Renoncer au contrat ici » apparaissent ici dès que tu as un abonnement, ou un achat de moins de 14 jours.</div>' +
+    '<a class="btn sm" style="margin-top:10px" href="#/resilier">Résilier un abonnement</a></div>' : "";
   return '<div class="card ctr-card"><b>Tes achats Premium</b>' +
     items.map(i => '<div class="ctr-item"><div class="ctr-txt"><b>' + esc(i.label) + '</b><div class="small muted">' + esc(STORE_TXT[i.store] || "") +
       (i.type === "sub" ? " · " + (i.renews ? "se renouvelle le " : "résilié, Premium jusqu'au ") + esc(ctrDate(Date.parse(i.until))) : i.at ? " · acheté le " + esc(ctrDate(Date.parse(i.at))) : "") + "</div>" +

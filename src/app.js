@@ -205,7 +205,7 @@ function parseClock(t) {
   return d.length <= 2 ? +d : +d.slice(0, -2) * 60 + Math.min(59, +d.slice(-2));
 }
 const dropsFor = (e, k, n) => (dropsOf(e) && (e.dropScope !== "last" || k === n - 1)) ? dropsOf(e) : 0;
-const GROUP_LABEL = { superset: "Superset", biset: "Biset", triset: "Triset" };
+const GROUP_LABEL = { superset: "Superset", biset: "Biset", triset: "Triset", circuit: "Circuit" }; // circuit : exercices enchaînés en tours (programmes Fiitday)
 const GROUP_SIZE = { superset: 2, biset: 2, triset: 3 };
 const LETTERS = "ABCDEFGH";
 // regroupe les exercices consécutifs d'un même superset / biset / triset
@@ -232,6 +232,7 @@ function cleanGroups(v) {
   v.exercises.forEach(e => {
     if (!e.groupId) return;
     if (cnt[e.groupId] < 2) { delete e.groupId; delete e.groupKind; }
+    else if (e.groupKind === "circuit") return; // un circuit reste un circuit, quel que soit le nombre d'exercices
     else if (cnt[e.groupId] >= 3) e.groupKind = "triset";
     else if (e.groupKind === "triset") e.groupKind = "superset";
   });
@@ -608,7 +609,8 @@ function softRender() {
   render();
 }
 
-const LEGAL = { version: "2026-11-09", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html" };
+const LEGAL = { version: "2026-11-09", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html",
+  cgv: "" }; // cgv : « https://fiitday.com/cgv.html » le jour où les conditions générales de vente sont publiées (lien dans la page de présentation)
 let consentAsked = false, nameAsked = false;
 // un e-mail n'est jamais un prénom (le remplissage automatique du téléphone a pu en glisser un dans le champ Prénom)
 const cleanName = n => (n && !/@/.test(n) ? String(n) : "");
@@ -671,7 +673,8 @@ let localFixed = false; // sans compte : anciens noms et anciennes mesures corri
 function renderNow() {
   applyTheme();
   if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
-  if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = viewLogin(); return; }
+  if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
+  document.title = "Fiitday";
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
   if (!db.auth && !localFixed) { localFixed = true; freezeNotes(); renameVariants(); purgeBody(); }
@@ -697,6 +700,7 @@ function renderNow() {
     case "settings": body = viewSettings(); break;
     case "famille": history.replaceState(history.state, "", "#/settings"); body = viewSettings(); setTimeout(() => famJoin(r.args[0] || ""), 0); break;
     case "premium": body = viewPremium(); break;
+    case "connexion": history.replaceState(history.state, "", "#/home"); body = viewHome(); break; // connecté depuis la page de présentation
     case "admin": body = viewAdmin(); break;
     case "guide": body = viewGuide(); break;
     case "faq": body = viewFaq(r.args[0]); if (r.args[0]) setTimeout(() => { const d = document.getElementById("faq-" + r.args[0]); if (d) d.scrollIntoView({ block: "start" }); }, 60); break;
@@ -880,7 +884,90 @@ function viewLogin() {
     "</form>" +
     '<p class="msg" data-msg role="status"></p>' +
     (up ? '<button class="link" data-act="loginmode" data-m="in">J\'ai déjà un compte : me connecter</button>'
-        : '<button class="link" data-act="forgot">Mot de passe oublié ?</button><button class="link" data-act="loginmode" data-m="up">Créer un compte</button>') + "</div>";
+        : '<button class="link" data-act="forgot">Mot de passe oublié ?</button><button class="link" data-act="loginmode" data-m="up">Créer un compte</button>') +
+    (Native ? "" : '<a class="link lp-back" href="#/home">Découvrir Fiitday</a>') + "</div>";
+}
+
+/* ================= Page de présentation (fiitday.com, visiteur non connecté) ================= */
+// Sur le site sans compte connecté : ce qu'est Fiitday, des captures, les prix et les questions fréquentes, puis « Se connecter »
+// ou « Créer mon compte » (#/connexion). Jamais dans l'appli Android (connexion directe). Les liens internes de la page sont des
+// boutons : un lien « #… » ouvrirait une page de l'appli. Les captures (données d'exemple) sont dans src/landing, clair et sombre.
+const LP_TITLE = "Fiitday · Ton carnet de musculation";
+const showLanding = () => !Native && !db.auth && db.mode !== "local" && !db.verify && !resetStep && route().name === "home";
+const LP_ICON = {
+  cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
+  body: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M4 9l8-1 8 1M12 8v6l-4 7M12 14l4 7"/></svg>',
+  pulse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h4l2.5-6 4 12 2.5-6H22"/></svg>',
+  devices: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M5 18h8" stroke-linecap="round"/><rect x="17.5" y="8" width="4.5" height="12" rx="1"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0112 0"/><circle cx="17.5" cy="9" r="2.4"/><path d="M16 14.6A5 5 0 0121.5 19"/></svg>',
+  phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+  laptop: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19.5h20" stroke-linecap="round"/></svg>'
+};
+const LP_FEATURES = [
+  ["grid", "Programmes prêts ou sur mesure", "Crée tes programmes, ou ajoute en un appui les 16 séances Fiitday : débutant ou intermédiaire, en salle ou à la maison, musculation ou circuit training."],
+  ["dumbbell", "Une séance qui te guide", "Tes charges de la dernière fois s'affichent, une série se valide d'un appui et le repos démarre tout seul. Supersets, dégressifs et circuits compris."],
+  ["clock", "Repos et chronos", "Fin du repos par vibration ou par son. Dans l'appli Android, l'alerte arrive aussi écran verrouillé et sur ta montre connectée."],
+  ["cube", "Plus de 100 exercices en 3D", "Chaque mouvement est animé par un mannequin 3D que tu fais tourner, avec les muscles travaillés, les bons gestes et les erreurs à éviter."],
+  ["body", "Étirements conseillés", "23 étirements guidés en 3D et, après ta séance, ceux qui correspondent aux muscles que tu viens de travailler."],
+  ["chart", "Tes progrès en clair", "La courbe de chaque exercice, tes records, ton temps de sport, le tonnage et le calendrier de tes séances."],
+  ["pulse", "Musculation, cardio, Hyrox", "Poids et répétitions, répétitions seules, temps, distance ou machines de cardio : chaque exercice se note à sa façon."],
+  ["devices", "Téléphone et ordinateur", "Ton compte garde tout à jour entre l'appli Android et fiitday.com. Sans réseau, ta séance continue et s'envoie au retour."]
+];
+const LP_SHOTS = [["seance", "Une séance : charges de la dernière fois, séries validées, repos"], ["exercice", "Chaque exercice en 3D, avec les muscles travaillés"],
+  ["evolution", "La courbe de chaque exercice et tes records"], ["programmes", "Des séances prêtes, pour débutants et intermédiaires"], ["accueil", "Tes programmes, et ta séance en cours"]];
+// questions de la page : celles de l'abonnement et de la synchro (sans les liens vers les pages de l'appli), plus la confidentialité
+const LP_FAQ = () => {
+  const all = FAQ.concat([FAQ_PLAN]).flatMap(c => c[1]), pick = id => all.find(q => q[0] === id);
+  return ["essai", "gratuit", "formules", "souscrire", "resilier", "rembourser", "synchro"].map(pick).filter(Boolean)
+    .map(q => [q[0], q[1], q[2].replace(/<a [^>]*>(.*?)<\/a>/g, "$1")])
+    .concat([["donnees", "Qui voit mes données ?", "Toi seul. Fiitday n'a <b>aucune publicité</b> ni aucun outil de pistage, et tes données ne sont <b>jamais vendues</b>. Tu peux les enregistrer dans un fichier ou supprimer ton compte quand tu veux. Le détail est dans la <a href=\"" + LEGAL.privacy + "\" target=\"_blank\" rel=\"noopener\">politique de confidentialité</a>."]]);
+};
+function viewLanding() {
+  const dark = document.documentElement.dataset.theme === "dark";
+  const shot = (k, alt, lazy) => '<div class="lp-phone"><img src="presentation/' + k + (dark ? "-sombre" : "") + '.webp" width="600" height="1298" alt="' + esc(alt) + '"' + (lazy ? ' loading="lazy"' : "") + "></div>";
+  const ic = k => '<span class="lp-ic">' + (LP_ICON[k] || ICON[k]) + "</span>";
+  const life = Date.now() < LIFE_END, lifeTxt = pr => life ? "ou " + pr.life + " à vie : prix de lancement jusqu'au 31 décembre 2027, puis " + pr.lifeAfter : "ou " + pr.lifeAfter + " à vie, en un seul paiement";
+  const cta = '<div class="lp-cta"><button class="btn primary big" data-act="lplogin" data-m="up">Essayer gratuitement</button><button class="btn big" data-act="lplogin" data-m="in">J\'ai déjà un compte</button></div>';
+  const brand = '<span class="lp-brand"><img src="icon-192.png" alt="" width="32" height="32"><span>Fiitday</span></span>';
+  return '<div class="lp">' +
+    '<header class="lp-top"><div class="lp-in">' + brand +
+      '<nav class="lp-nav" aria-label="Sur cette page"><button data-act="lpgo" data-to="lp-fonctions">Fonctionnalités</button><button data-act="lpgo" data-to="lp-tarifs">Tarifs</button><button data-act="lpgo" data-to="lp-questions">Questions</button></nav>' +
+      '<button class="btn sm" data-act="lplogin" data-m="in">Se connecter</button></div></header>' +
+    '<section class="lp-hero"><div class="lp-in lp-hero-in"><div>' +
+      '<h1>Ton carnet de musculation, <span class="lp-grad">simple et complet</span></h1>' +
+      '<p class="lp-lead">Programmes, séances guidées, chrono de repos, plus de 100 exercices en 3D et le suivi de tes progrès. Sur ton téléphone et ton ordinateur.</p>' + cta +
+      '<p class="lp-small">' + (MONETIZATION ? "1 mois de Premium offert à la création du compte, sans carte bancaire." : "Toute l'appli est gratuite pendant le lancement, sans carte bancaire.") + "</p></div>" +
+      '<div class="lp-hero-shot">' + shot("seance", LP_SHOTS[0][1]) + "</div></div></section>" +
+    '<section class="lp-sec" id="lp-fonctions"><div class="lp-in"><h2>Tout pour t\'entraîner, rien de superflu</h2>' +
+      '<p class="lp-lead">Pensé pour la salle comme pour la maison : tu lances ta séance, Fiitday s\'occupe du reste.</p>' +
+      '<div class="lp-feats">' + LP_FEATURES.map(([k, t, d]) => '<div class="lp-feat">' + ic(k) + "<h3>" + esc(t) + "</h3><p>" + esc(nbsp(d)) + "</p></div>").join("") + "</div></div></section>" +
+    '<section class="lp-sec lp-alt" id="lp-ecrans"><div class="lp-in"><h2>Un coup d\'œil à l\'appli</h2>' +
+      '<div class="lp-shots">' + LP_SHOTS.slice(1).map(([k, alt]) => "<figure>" + shot(k, alt, true) + "<figcaption>" + esc(alt) + "</figcaption></figure>").join("") + "</div></div></section>" +
+    '<section class="lp-sec" id="lp-tarifs"><div class="lp-in"><h2>Gratuit pour commencer</h2>' +
+      '<p class="lp-lead">À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire. Ensuite, tu continues en version gratuite, sans rien perdre, ou tu passes à Premium.</p>' +
+      (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
+      '<div class="lp-prices">' +
+        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et 2 séances actives</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des 30 derniers jours</li><li>Stats de la semaine</li></ul></div>' +
+        [["solo", "Premium Solo", "Pour toi, sur tous tes appareils"], ["family", "Premium Famille", "Toi et 4 proches, chacun avec son compte et ses données"]].map(([k, t, d]) => { const pr = PRICES[k];
+          return '<div class="lp-price' + (k === "solo" ? " best" : "") + '"><h3>' + t + '</h3><div class="amt num">' + pr.month + " <small>/ mois</small></div>" +
+            '<div class="lp-small">ou ' + pr.year + " par an (soit " + pr.yearMonth + " par mois)<br>" + esc(lifeTxt(pr)) + "</div><ul><li>" + esc(d) + "</li><li>Tout illimité, toutes les stats</li><li>Synchro téléphone et ordinateur</li><li>Les programmes Fiitday</li></ul></div>"; }).join("") +
+      "</div>" +
+      '<details class="lp-compare"><summary>Comparer Premium et gratuit</summary><div class="card plan-table"><table><thead><tr><th></th><th>Premium</th><th>Gratuit</th></tr></thead><tbody>' +
+        PLAN_ROWS.map(r => "<tr><th>" + esc(r[0]) + "</th><td>" + esc(r[1]) + "</td><td>" + esc(r[2]) + "</td></tr>").join("") + "</tbody></table></div></details>" +
+      '<p class="lp-small">Prix TTC, en euros. Abonnements sans engagement, résiliables à tout moment. Sur Android, paiement par Google Play ; sur iPhone et sur ordinateur, par carte bancaire sur fiitday.com.</p></div></section>' +
+    '<section class="lp-sec lp-alt" id="lp-ou"><div class="lp-in"><h2>Sur ton téléphone et ton ordinateur</h2><div class="lp-where">' +
+      '<div class="lp-feat">' + ic("phone") + "<h3>Android</h3><p>" + esc(nbsp("L'appli Android arrive bientôt sur Google Play. En attendant, Fiitday marche aussi dans le navigateur du téléphone.")) + "</p></div>" +
+      '<div class="lp-feat">' + ic("phone") + "<h3>iPhone</h3><p>" + esc(nbsp("Ouvre fiitday.com dans Safari, puis Partager › « Sur l'écran d'accueil » : Fiitday s'ouvre comme une appli.")) + "</p></div>" +
+      '<div class="lp-feat">' + ic("laptop") + "<h3>Ordinateur</h3><p>" + esc(nbsp("Directement sur fiitday.com, avec un affichage pensé pour le grand écran : idéal pour préparer tes programmes et suivre tes progrès.")) + "</p></div>" +
+      "</div></div></section>" +
+    '<section class="lp-sec" id="lp-questions"><div class="lp-in lp-narrow"><h2>Questions fréquentes</h2><div class="faq-box">' +
+      LP_FAQ().map(([id, q, a]) => '<details class="faq-q" id="lpq-' + id + '"><summary>' + esc(nbsp(q)) + '</summary><div class="faq-a">' + nbsp(a) + "</div></details>").join("") + "</div>" +
+      '<p class="lp-small">Une autre question ? Écris à <a href="mailto:contact@fiitday.com">contact@fiitday.com</a>.</p></div></section>' +
+    '<section class="lp-sec"><div class="lp-in"><div class="hero lp-end"><h2>Prêt pour ta prochaine séance ?</h2><p>Crée ton compte en une minute et retrouve tes séances partout.</p>' + cta + "</div></div></section>" +
+    '<footer class="lp-foot"><div class="lp-in">' + brand +
+      '<nav aria-label="Informations légales"><a href="' + LEGAL.legal + '">Mentions légales</a><a href="' + LEGAL.privacy + '">Confidentialité</a>' + (LEGAL.cgv ? '<a href="' + LEGAL.cgv + '">Conditions générales de vente</a>' : "") +
+      '<a href="' + LEGAL.deletion + '">Supprimer son compte</a><a href="mailto:contact@fiitday.com">Contact</a></nav>' +
+      '<p class="lp-small">© ' + new Date().getFullYear() + " Fiitday</p></div></footer></div>";
 }
 /* ================= Mot de passe oublié ================= */
 // 1) l'e-mail du compte → Supabase envoie un code ; 2) le code + le nouveau mot de passe → connexion
@@ -1583,15 +1670,104 @@ function startRest(sec, label) {
 
 /* ================= Écran : programmes ================= */
 const GRIP = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+// ---- Programmes Fiitday : séances prêtes, par niveau (débutant : moins d'un an de musculation ; intermédiaire : à partir d'un an) ----
+// Musculation : 3 séances en salle + 1 à la maison (poids du corps) ; circuit training : 2 à la maison + 2 en salle.
+// Exercice : [id de la bibliothèque, séries, cible (reps ou secondes ou mètres), repos (s), type si différent de la bibliothèque].
+// Circuit : exercices enchaînés sans pause, « rounds » tours, « rest » secondes de repos entre les tours.
+const PRESETS = {
+  debutant: { label: "Débutant", sub: "Moins d'un an de musculation : tout le corps à chaque séance, des mouvements simples, surtout guidés.",
+    muscu: [
+      { key: "d-fba", name: "Full body A", where: "salle", note: "Machines et haltères : idéal pour apprendre les mouvements. 3 séances par semaine, avec un jour de repos entre deux.",
+        ex: [["presse-cuisses", 3, "10-12", 90], ["developpe-couche-halteres", 3, "10-12", 90], ["tirage-vertical", 3, "10-12", 90], ["developpe-epaules-machine", 2, "10-12", 75], ["leg-curl-assis", 2, "12-15", 60], ["gainage", 3, "30", 45, "time"]] },
+      { key: "d-fbb", name: "Full body B", where: "salle", note: "Ajoute un peu de charge dès que tu fais le haut de la fourchette de répétitions sur toutes les séries.",
+        ex: [["squat-goblet", 3, "10-12", 90], ["developpe-machine", 3, "10-12", 90], ["tirage-horizontal", 3, "10-12", 90], ["hip-thrust-machine", 3, "10-12", 90], ["elevations-laterales", 2, "12-15", 60], ["curl-halteres", 2, "10-12", 60], ["crunch", 2, "15", 45]] },
+      { key: "d-fbc", name: "Full body C", where: "salle", note: "Fentes et rowing : fais toutes les répétitions d'un côté, puis de l'autre.",
+        ex: [["fentes", 3, "10", 90], ["developpe-incline-halteres", 3, "10-12", 90], ["rowing-haltere", 3, "10-12", 60], ["leg-extension", 2, "12-15", 60], ["extension-poulie", 2, "12-15", 60], ["face-pull", 2, "15", 60], ["releve-jambes-allonge", 2, "12", 45]] },
+      { key: "d-fbm", name: "Full body maison", where: "maison", note: "Sans matériel : une chaise ou un banc suffit pour les pompes inclinées.",
+        ex: [["squat-poids-du-corps", 3, "15", 60], ["pompes-inclinees", 3, "10-12", 60], ["pont-fessier", 3, "15", 45], ["superman", 3, "12", 45], ["chaise", 2, "30", 60, "time"], ["gainage", 3, "30", 45, "time"], ["planche-laterale", 2, "20", 30, "time"]] }],
+    circuit: [
+      { key: "d-cm1", name: "Circuit maison · cardio et jambes", where: "maison", rounds: 3, rest: 60, note: "30 secondes par exercice, enchaînés sans pause, puis 1 minute de repos avant le tour suivant.",
+        work: [["jumping-jacks", "30", "time"], ["squat-poids-du-corps", "30", "time"], ["pompes-inclinees", "30", "time"], ["montees-de-genoux", "30", "time"], ["pont-fessier", "30", "time"], ["gainage", "30", "time"]] },
+      { key: "d-cm2", name: "Circuit maison · haut du corps et gainage", where: "maison", rounds: 3, rest: 60, note: "Va à ton rythme : la qualité du mouvement d'abord, la vitesse ensuite.",
+        work: [["talons-fesses", "30", "time"], ["pompes-inclinees", "30", "time"], ["superman", "30", "time"], ["mountain-climbers", "30", "time"], ["crunch", "30", "time"], ["chaise", "30", "time"]] },
+      { key: "d-cs1", name: "Circuit salle · machines", where: "salle", rounds: 3, rest: 90, note: "Une charge légère, que tu pourrais soulever 15 fois : on enchaîne les machines.",
+        work: [["presse-cuisses", "12"], ["developpe-machine", "12"], ["tirage-vertical", "12"], ["leg-curl-assis", "12"], ["developpe-epaules-machine", "12"], ["crunch-machine", "15"]] },
+      { key: "d-cs2", name: "Circuit salle · haltères et kettlebell", where: "salle", rounds: 3, rest: 90, note: "Rowing et fentes : les répétitions sont par côté.",
+        work: [["squat-goblet", "12"], ["rowing-haltere", "10"], ["kettlebell-swing", "15"], ["pompes", "8-10"], ["fentes", "10"], ["gainage", "30", "time"]] }] },
+  intermediaire: { label: "Intermédiaire", sub: "À partir d'un an de musculation : Push, Pull, Legs, plus de séries et des charges plus lourdes.",
+    muscu: [
+      { key: "i-push", name: "Push · pectoraux, épaules, triceps", where: "salle", note: "Échauffe-toi avec 2 séries légères avant le développé couché.",
+        ex: [["developpe-couche", 4, "6-8", 150], ["developpe-incline-halteres", 3, "8-10", 120], ["developpe-halteres-assis", 3, "8-10", 90], ["elevations-laterales", 3, "12-15", 60], ["ecarte-poulie", 3, "12-15", 60], ["extension-poulie", 3, "10-12", 60], ["extension-triceps-poulie-nuque", 2, "12", 60]] },
+      { key: "i-pull", name: "Pull · dos, biceps", where: "salle", note: "Tractions : ajoute du poids quand tu dépasses 10 répétitions, ou aide-toi d'un élastique si besoin.",
+        ex: [["tractions", 4, "6-10", 120], ["rowing-barre", 4, "8-10", 120], ["tirage-horizontal", 3, "10-12", 90], ["face-pull", 3, "15", 60], ["curl-barre", 3, "8-10", 75], ["curl-marteau", 3, "10-12", 60]] },
+      { key: "i-legs", name: "Legs · jambes, fessiers", where: "salle", note: "Squat et soulevé de terre roumain : dos neutre, charge maîtrisée avant d'augmenter.",
+        ex: [["squat", 4, "6-8", 150], ["souleve-roumain", 3, "8-10", 120], ["presse-cuisses", 3, "10-12", 90], ["leg-curl-assis", 3, "10-12", 60], ["mollets-debout", 4, "12-15", 60], ["releve-jambes-suspendu", 3, "10-12", 60]] },
+      { key: "i-fbm", name: "Full body maison", where: "maison", note: "Sans matériel : descends lentement (3 secondes) pour rendre chaque répétition plus difficile.",
+        ex: [["pompes-declinees", 4, "10-15", 75], ["squat-poids-du-corps", 4, "20", 60], ["pompes-diamant", 3, "8-12", 60], ["pont-fessier", 4, "20", 45], ["superman", 3, "15", 45], ["releve-jambes-allonge", 3, "15", 45], ["planche-laterale", 3, "30", 30, "time"], ["chaise", 3, "45", 60, "time"]] }],
+    circuit: [
+      { key: "i-cm1", name: "Circuit maison · HIIT", where: "maison", rounds: 4, rest: 60, note: "40 secondes par exercice, enchaînés sans pause, puis 1 minute de repos entre les tours.",
+        work: [["burpees", "40", "time"], ["squat-saute", "40", "time"], ["pompes", "40", "time"], ["mountain-climbers", "40", "time"], ["fentes-sautees", "40", "time"], ["gainage", "40", "time"]] },
+      { key: "i-cm2", name: "Circuit maison · gainage et cardio", where: "maison", rounds: 4, rest: 60, note: "Garde le dos plat sur les exercices au sol.",
+        work: [["jumping-jacks", "40", "time"], ["pompes-diamant", "40", "time"], ["crunch-velo", "40", "time"], ["talons-fesses", "40", "time"], ["russian-twist", "40", "time"], ["superman", "40", "time"], ["battements-jambes", "40", "time"]] },
+      { key: "i-cs1", name: "Circuit salle · force et cardio", where: "salle", rounds: 4, rest: 90, note: "Choisis des charges moyennes : tu dois tenir les 4 tours sans casser la technique.",
+        work: [["kettlebell-swing", "15"], ["wall-balls", "15"], ["rameur", "250", "dist"], ["burpees", "10"], ["developpe-militaire-halteres", "10"], ["fentes", "10"]] },
+      { key: "i-cs2", name: "Circuit salle · type Hyrox", where: "salle", rounds: 3, rest: 120, note: "Les ateliers de l'Hyrox, en version courte : régulier plutôt que rapide.",
+        work: [["skierg", "250", "dist"], ["sled-push", "25", "dist"], ["farmers-carry", "50", "dist"], ["wall-balls", "15"], ["burpees-sautes", "20", "dist"], ["fentes-sandbag", "20", "dist"]] }] }
+};
+let progLevel = "debutant";
+const presetLib = id => EXO_LIB.find(x => x.id === id);
+const presetByKey = k => { for (const lv of Object.values(PRESETS)) for (const s of lv.muscu.concat(lv.circuit)) if (s.key === k) return s; return null; };
+// exercices de la séance, prêts à entrer dans un programme (mêmes réglages que si tu les ajoutais toi-même)
+function presetExercises(s) {
+  const mk = (id, sets, target, rest, type) => { const lib = presetLib(id) || { id, n: id }; const d = libDefaults(lib);
+    return Object.assign(newExercise(), { name: lib.n, lib: lib.id }, d, { type: type || d.type, sets, target: String(target), rest, load: type === "dist" || d.type === "dist" ? !!lib.load : !!d.load }); };
+  if (s.work) { const gid = "g-" + uid(); return s.work.map(([id, target, type]) => Object.assign(mk(id, s.rounds, target, s.rest, type), { groupId: gid, groupKind: "circuit" })); }
+  return s.ex.map(([id, sets, target, rest, type]) => mk(id, sets, target, rest, type));
+}
+// durée estimée : environ 40 s par série de répétitions, le temps prévu pour le gainage, 1 s pour 4 m de distance
+function presetMinutes(s) {
+  const work = (target, type, id) => type === "time" ? +target : type === "dist" ? Math.max(30, +target / 4) : 40;
+  if (s.work) { const lap = s.work.reduce((t, [id, target, type]) => t + work(target, type, id) + 10, 0); return Math.round((s.rounds * lap + (s.rounds - 1) * s.rest) / 60 / 5) * 5 || 5; }
+  const t = s.ex.reduce((sum, [id, sets, target, rest, type]) => sum + sets * (work(target, type || (presetLib(id) && presetLib(id).kind === "time" ? "time" : ""), id) + rest), 0);
+  return Math.round(t / 60 / 5) * 5 || 5;
+}
+const presetDose = (target, type, id) => { const lib = presetLib(id) || {}; const side = /par (bras|jambe|côté)/.test(lib.reps || "") || ["fentes", "rowing-haltere"].includes(id);
+  return type === "time" ? fmtSecs(+target) : type === "dist" ? fmtDist(+target, "m") : target + (side ? " par côté" : "") + " reps"; };
+function presetCard(s) {
+  const n = s.work ? s.work.length : s.ex.length;
+  const rows = s.work ? s.work.map(([id, target, type]) => [id, presetDose(target, type || (presetLib(id) && presetLib(id).kind === "time" ? "time" : ""), id)])
+    : s.ex.map(([id, sets, target, rest, type]) => [id, sets + " × " + presetDose(target, type || (presetLib(id) && presetLib(id).kind === "time" ? "time" : ""), id) + " · repos " + fmtRest(rest)]);
+  return '<div class="card preset"><div class="spread"><b>' + esc(s.name) + '</b><span class="tag">' + (s.where === "maison" ? "Maison" : "Salle") + "</span></div>" +
+    '<div class="small muted">' + (s.work ? s.rounds + " tours de " + n + " exercices · repos " + fmtRest(s.rest) + " entre les tours" : n + " exercices") + " · environ " + presetMinutes(s) + " min</div>" +
+    '<p class="small preset-note">' + esc(s.note) + "</p>" +
+    '<details class="preset-list"><summary class="small">Voir les exercices</summary><ol>' + rows.map(([id, dose]) => '<li><button type="button" class="link" data-act="exoview" data-id="' + esc(id) + '">' + esc((presetLib(id) || { n: id }).n) + '</button> <span class="muted">· ' + esc(dose) + "</span></li>").join("") + "</ol></details>" +
+    '<button class="btn sm primary" data-act="presetadd" data-k="' + s.key + '">Ajouter à mes programmes</button></div>';
+}
 function viewPrograms() {
   // programmes Fiitday prêts à l'emploi (musculation, circuit training) ; tes propres programmes se gèrent depuis l'accueil
-  if (isFree()) return '<div class="page-head"><div><h1>Programmes</h1><div class="muted small">Prêts à l\'emploi, pour débutants et intermédiaires</div></div></div>' +
-    planCard("Les programmes Fiitday (musculation et circuit training) sont réservés aux abonnés Premium. Tes propres programmes restent sur l'accueil.");
-  const sec = (title, text) => '<div class="section-title">' + title + '</div><div class="card prog-empty"><p class="muted small">' + text + "</p></div>";
-  return '<div class="page-head"><div><h1>Programmes</h1><div class="muted small">Prêts à l\'emploi, pour débutants et intermédiaires</div></div></div>' +
-    '<div class="pc-cols progs"><div>' + sec("Musculation", "Des programmes complets, séance par séance, à ajouter en un appui à tes programmes.") + "</div><div>" +
-    sec("Circuit training", "Des circuits à faire à la salle ou à la maison, avec ou sans matériel.") + "</div></div>" +
-    '<p class="muted small" style="margin-top:14px">Tes propres programmes se créent et se modifient depuis l\'<a href="#/home">Accueil</a>.</p>';
+  const head = '<div class="page-head"><div><h1>Programmes Fiitday</h1><div class="muted small">Des séances prêtes, à ajouter à tes programmes</div></div></div>';
+  if (isFree()) return head + planCard("Les programmes Fiitday (musculation et circuit training) sont réservés aux abonnés Premium. Tes propres programmes restent sur l'accueil.");
+  const lv = PRESETS[progLevel] || PRESETS.debutant;
+  const block = (cat, title, list) => '<div class="spread preset-head"><div class="section-title">' + title + '</div><button class="btn sm" data-act="presetall" data-cat="' + cat + '">Tout ajouter (' + list.length + " séances)</button></div>" +
+    ["salle", "maison"].filter(w => list.some(s => s.where === w)).map(w => '<div class="small muted preset-where">' + (w === "salle" ? "En salle" : "À la maison, sans matériel") + '</div><div class="presets">' + list.filter(s => s.where === w).map(presetCard).join("") + "</div>").join("");
+  return head + '<div class="seg prog-level" role="group" aria-label="Niveau">' + Object.entries(PRESETS).map(([k, x]) => '<button class="' + (k === progLevel ? "on" : "") + '" aria-pressed="' + (k === progLevel) + '" data-act="proglevel" data-val="' + k + '">' + x.label + "</button>").join("") + "</div>" +
+    '<p class="small muted" style="margin:8px 2px 0">' + esc(lv.sub) + "</p>" +
+    block("muscu", "Musculation", lv.muscu) + block("circuit", "Circuit training", lv.circuit) +
+    '<p class="muted small" style="margin-top:14px">Durées indiquées sans l\'échauffement (5 à 10 minutes). Une fois ajoutée, une séance est à toi : change les exercices, les séries ou les charges depuis l\'<a href="#/home">Accueil</a>.</p>';
+}
+// ajoute une ou plusieurs séances prêtes dans un nouveau programme ou dans un programme existant
+async function addPresets(list, defName) {
+  const ts = templates().filter(t => !progLocked(t.id));
+  const opts = [["new", "Nouveau programme", "« " + defName + " »"]].concat(ts.map(t => ["t:" + t.id, "Ajouter à « " + t.name + " »", t.variants.length + " séance" + (t.variants.length > 1 ? "s" : "") + " aujourd'hui"]));
+  const dest = await choose(list.length > 1 ? "Ajouter les " + list.length + " séances" : "Ajouter « " + list[0].name + " »", opts); if (!dest) return;
+  let t;
+  if (dest === "new") {
+    const n = await ask({ title: "Nom du programme", input: defName, ok: "Créer" }); if (!n) return;
+    t = { id: "tpl-" + uid(), name: n.slice(0, 60), order: templates().length, variants: [] };
+  } else { t = getItem(dest.slice(2)); if (!t) return; }
+  list.forEach(s => t.variants.push({ id: "v" + uid(), name: s.name.slice(0, 60), exercises: presetExercises(s) }));
+  put("template", t); render();
+  toast(list.length > 1 ? list.length + " séances ajoutées à « " + t.name + " »" : "« " + list[0].name + " » ajoutée à « " + t.name + " »");
 }
 function exFields(e, k, letter, inGroup) {
   const time = e.type === "time", dist = e.type === "dist", rep = e.type === "rep", cardio = e.type === "cardio", d = dropsOf(e);
@@ -3000,7 +3176,7 @@ const FAQ_PLAN = ["Abonnement Premium", [
   ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
   ["resilier", "Comment résilier mon abonnement ?", "Abonné par Google Play : Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier. Abonné sur fiitday.com : Réglages › Abonnement › « Gérer mon abonnement ». Tu gardes Premium jusqu'à la fin de la période payée, puis tu passes en version gratuite sans rien perdre."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite sans rien perdre."],
-  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Tu as 14 jours après ton abonnement pour te rétracter (seule la période déjà utilisée reste due). Abonné par Google Play : fais la demande dans Google Play (Paiements et abonnements), ou écris-nous. Sur fiitday.com : écris-nous à l'adresse des mentions légales. Le détail est dans les conditions générales de vente."]]];
+  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Tu as 14 jours après ton achat pour te rétracter : pour un abonnement, seule la période déjà utilisée reste due ; pour Premium à vie, tu es remboursé intégralement. Abonné par Google Play : fais la demande dans Google Play (Paiements et abonnements), ou écris-nous. Sur fiitday.com : écris-nous à l'adresse des mentions légales. Le détail est dans les conditions générales de vente."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
   faqIdx = null;
@@ -3051,7 +3227,11 @@ const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 
 // Pas de prix barré : la loi demande qu'un prix barré ait vraiment été pratiqué dans les 30 jours d'avant.
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028";
 const FAMILY_SIZE = 5;
-let premiumFor = "solo", premiumPick = "year";
+// Premium ou gratuit : écran Premium et page de présentation du site
+const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
+  ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
+  ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
+let premiumFor = "solo", premiumPick = "year", premiumConsent = false; // case à cocher avant le paiement : demande expresse que Premium commence avant la fin du délai de rétractation (Code de la consommation, L221-25)
 // achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
 // « store » quand le paiement Google sera branché, « » sinon (appli Obtainium).
 // Sur fiitday.com : paiement par carte (RevenueCat Web Billing + Stripe). Clé publique de test (rcb_sb_, carte factice) :
@@ -3206,10 +3386,17 @@ function planStatus() {
 const isNativeApp = () => !!Native;
 const pickPrice = () => { const pr = PRICES[premiumFor]; return premiumPick === "month" ? pr.month + " / mois" : premiumPick === "life" ? (Date.now() < LIFE_END ? pr.life : pr.lifeAfter) + " en une fois" : pr.year + " / an"; };
 const pickLabel = () => (premiumPick === "life" ? "Acheter Premium à vie · " : "S'abonner · ") + pickPrice();
+// accord exprès avant le paiement (L221-25) : Premium commence tout de suite ; la rétractation reste possible 14 jours.
+// Premium est un « service numérique » (créer, stocker, synchroniser ses données) : l'exception du 13° de L221-28,
+// réservée aux contenus numériques, ne s'applique pas, donc pas de renonciation au droit de rétractation, même à vie.
+// Abonnement : seule la période utilisée reste due ; à vie : remboursement intégral.
+const consentText = () => premiumPick === "life"
+  ? "Je demande que Premium à vie commence tout de suite. Si je me rétracte dans les 14 jours, je serai remboursé intégralement."
+  : "Je demande que Premium commence tout de suite. Si je me rétracte dans les 14 jours, seule la période déjà utilisée me sera facturée.";
 function pickTerms() {
   const store = billingMode() === "test" ? "Achat de test, sans paiement réel" : isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
-  return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte."
-    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation au moins 24 h avant la fin de la période. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Abonnement") + ". Tu as 14 jours pour te rétracter.";
+  return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte. Tu as 14 jours pour te rétracter, remboursement intégral."
+    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation avant la date de renouvellement. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Abonnement") + ". Tu as 14 jours pour te rétracter.";
 }
 // déjà Premium : d'où il vient, et comment le gérer
 function premiumOwned() {
@@ -3220,9 +3407,7 @@ function premiumOwned() {
 }
 function viewPremium() {
   const s = planState(), prev = (history.state && history.state.prev) || "#/settings";
-  const rows = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
-    ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
-    ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
+  const rows = PLAN_ROWS;
   const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div>" +
@@ -3237,8 +3422,9 @@ function viewPremium() {
     (pr => Date.now() < LIFE_END
       ? '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><span class="tag">Offre de lancement</span><b>À vie</b><div class="plan-price num">' + pr.life + ' <small>en une fois</small></div><div class="small">Prix de lancement, puis ' + pr.lifeAfter + " à partir du " + LIFE_END_TXT + '.</div><div class="small muted">Sans abonnement, ' + pr.lifeVs + ".</div></button>"
       : '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></button>')(PRICES[premiumFor]) + "</div>" +
-    (s === "premium" ? premiumOwned() : '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
-      '<p class="small muted plan-terms">' + pickTerms() + "</p>") +
+    (s === "premium" ? premiumOwned() : (live ? '<label class="plan-consent"><input type="checkbox" data-act="planconsent"' + (premiumConsent ? " checked" : "") + "><span>" + esc(consentText()) + "</span></label>" : "") +
+      '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
+      '<p class="small muted plan-terms">' + pickTerms() + (LEGAL.cgv ? ' <a href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a>' : "") + "</p>") +
     (billingMode() && Native ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
     '<p class="small muted" style="margin:10px 2px 0">Essai gratuit d\'un mois à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
@@ -4584,6 +4770,9 @@ $app.addEventListener("click", async e => {
     case "statm": statsMetric = ["n", "time", "ton"].includes(b.dataset.v) ? b.dataset.v : "n"; render(); break;
     case "tab": { const { t } = currentProgram(); if (t) go("program/" + t.id + "/" + b.dataset.v); } break;
     case "homeaddvar": { const t = getItem(b.dataset.t); if (!t) return; if (isFree() && (progLocked(t.id) || t.variants.length >= FREE_VARIANTS)) { premiumGate("En version gratuite, un programme a 2 séances actives au plus."); return; } const v = { id: "v" + uid(), name: "Séance " + (t.variants.length + 1), exercises: [] }; t.variants.push(v); put("template", t); go("program/" + t.id + "/" + v.id); } break;
+    case "proglevel": progLevel = PRESETS[b.dataset.val] ? b.dataset.val : "debutant"; render(); break;
+    case "presetadd": { const ps = presetByKey(b.dataset.k); if (ps) addPresets([ps], (PRESETS[progLevel] || PRESETS.debutant).label + " · " + ps.name); } break;
+    case "presetall": { const lv = PRESETS[progLevel] || PRESETS.debutant, cat = b.dataset.cat === "circuit" ? "circuit" : "muscu"; addPresets(lv[cat], lv.label + " · " + (cat === "circuit" ? "Circuit training" : "Musculation")); } break;
     case "addvar": { const { t } = currentProgram(); if (!t) return; if (isFree() && (progLocked(t.id) || t.variants.length >= FREE_VARIANTS)) { premiumGate("En version gratuite, un programme a 2 séances actives au plus."); return; } const v = { id: "v" + uid(), name: "Séance " + (t.variants.length + 1), exercises: [] }; t.variants.push(v); put("template", t); go("program/" + t.id + "/" + v.id); } break;
     case "dupvar": {
       const { t, v } = currentProgram(); if (!v) return;
@@ -4654,12 +4843,14 @@ $app.addEventListener("click", async e => {
       if (!billingMode()) { toast("Le paiement arrive bientôt"); break; }
       if (!db.auth) { toast("Connecte-toi d'abord : l'achat est lié à ton compte"); break; }
       if (buying) break;
+      if (!premiumConsent) { toast("Coche la case au-dessus du bouton pour continuer"); const cb = document.querySelector('[data-act="planconsent"]'); if (cb) { cb.focus(); cb.closest(".plan-consent").classList.add("need"); } break; }
       const pid = PRODUCTS[premiumFor][premiumPick];
       buying = true; render();
       const r = Native ? await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life") : await webBuy(pid);
       buying = false; render();
       if (r.st === "cancel") { toast("Achat annulé"); break; }
       if (r.st !== "ok") { toast("L'achat n'a pas abouti" + (r.txt ? " : " + r.txt : "")); break; }
+      premiumConsent = false; // un autre achat demandera un nouvel accord
       const offTest = planTestOff(); // le mode test (simulation) cacherait le vrai achat
       toast(offTest ? (billingMode() === "test" ? "Achat de test réussi · " : "Merci ! ") + "Mode test désactivé pour afficher ton achat" : billingMode() === "test" ? "Achat de test réussi, Premium arrive…" : "Merci ! Premium arrive…");
       toast(await waitPlan() ? "Premium est activé sur ton compte" : "Achat enregistré : Premium s'affichera d'ici quelques minutes");
@@ -4777,7 +4968,10 @@ $app.addEventListener("click", async e => {
     } break;
     case "famskip": if (isFamily()) { const f = famData(); f.removed = f.removed.map(t => t - FAM_WAIT); saveNow(); render(); toast(FAM_WAIT_DAYS + " jours plus tard : la place est libre"); } break;
     case "planfor": premiumFor = b.dataset.val === "family" ? "family" : "solo"; render(); break;
-    case "planpick": premiumPick = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; render(); break;
+    case "planpick": { const pk = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; if ((pk === "life") !== (premiumPick === "life")) premiumConsent = false; premiumPick = pk; render(); } break; // le texte de l'accord change entre abonnement et achat à vie
+    case "planconsent": premiumConsent = !!b.checked; break;
+    case "lplogin": loginMode = b.dataset.m === "up" ? "up" : "in"; location.hash = "#/connexion"; window.scrollTo(0, 0); break;
+    case "lpgo": { const t = document.getElementById(b.dataset.to); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); } break;
     case "planmanage": { // abonnement payé par carte : page de gestion de RevenueCat (résilier, changer de carte, factures)
       if (Native || !billingMode() || !db.auth) { toast("Gère ton abonnement sur fiitday.com, connecté à ton compte"); break; }
       try { const ci = await (await webPurchases()).getCustomerInfo(); if (ci && ci.managementURL) openOut(ci.managementURL); else toast("Aucun abonnement par carte trouvé sur ce compte"); }

@@ -56,8 +56,14 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="${CSP}">
 <meta name="referrer" content="strict-origin-when-cross-origin">
-<title>Fiitday</title>
-<meta name="description" content="Suivi de mes séances de musculation">
+<title>Fiitday · Ton carnet de musculation</title>
+<meta name="description" content="Fiitday, ton carnet de musculation : programmes prêts ou sur mesure, séances guidées, chrono de repos, plus de 100 exercices en 3D et le suivi de tes progrès, sur téléphone et ordinateur.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Fiitday">
+<meta property="og:title" content="Fiitday · Ton carnet de musculation">
+<meta property="og:description" content="Programmes, séances guidées, chrono de repos, exercices en 3D et suivi de tes progrès. Essai gratuit.">
+<meta property="og:image" content="https://fiitday.com/icon-512.png">
+<meta property="og:locale" content="fr_FR">
 <meta name="theme-color" content="#F4F2F8">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
@@ -82,6 +88,9 @@ fs.writeFileSync(path.join(dist, "index.html"), html);
 for (const f of ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"]) fs.copyFileSync(path.join(__dirname, "src", "icons", f), path.join(dist, f));
 // onglet Exercices : module chargé à la demande + three.js (affichage 3D, licence MIT)
 for (const f of ["exercices.js", "three.module.min.js"]) fs.copyFileSync(path.join(__dirname, "src", f), path.join(dist, f));
+// page de présentation (site web seulement, visiteur non connecté) : captures de l'appli, en clair et en sombre
+fs.mkdirSync(path.join(dist, "presentation"), { recursive: true });
+for (const f of fs.readdirSync(path.join(__dirname, "src", "landing")).filter(f => f.endsWith(".webp"))) fs.copyFileSync(path.join(__dirname, "src", "landing", f), path.join(dist, "presentation", f));
 // paiement par carte (site web seulement, pas dans l'appli Android) : SDK RevenueCat purchases-js 1.73.2 (licence MIT), chargé au moment de payer
 fs.copyFileSync(path.join(__dirname, "src", "vendor", "purchases-js.umd.js"), path.join(dist, "purchases.js"));
 fs.writeFileSync(path.join(dist, "manifest.webmanifest"), JSON.stringify({
@@ -120,7 +129,9 @@ header{display:flex;align-items:center;gap:10px;margin-bottom:24px}header img{wi
 header a{font-family:"Space Grotesk",ui-sans-serif,sans-serif;font-weight:700;font-size:20px;color:var(--ink);text-decoration:none}
 h1,h2{font-family:"Space Grotesk",ui-sans-serif,sans-serif;line-height:1.2;text-wrap:balance}h1{font-size:32px;margin:0 0 4px}h2{font-size:20px;margin:28px 0 8px}
 .meta{color:var(--muted);font-size:14px;margin:0 0 20px}a{color:var(--accent)}li{margin:4px 0}
-footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:14px;display:flex;gap:16px;flex-wrap:wrap}`;
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:14px;display:flex;gap:16px;flex-wrap:wrap}
+.encadre{border:2px solid var(--accent);border-radius:12px;padding:2px 16px;margin:16px 0;background:var(--card)}p.encadre{padding:12px 16px}
+.loi{font-size:14px;color:var(--muted);border-left:3px solid var(--line);padding-left:14px}`;
 for (const f of fs.readdirSync(path.join(__dirname, "src", "pages")).filter(f => f.endsWith(".html"))) {
   const body = src("pages/" + f).replace(/\{\{CONTACT\}\}/g, CONTACT);
   const title = (body.match(/<!-- title: (.+?) -->/) || [, "Fiitday"])[1];

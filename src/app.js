@@ -679,6 +679,7 @@ function renderNow() {
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
   if (!db.auth && !localFixed) { localFixed = true; freezeNotes(); renameVariants(); purgeBody(); }
   const r = route();
+  if (ctr && r.name !== "resilier" && r.name !== "retractation") ctr = null; // formulaire de résiliation ou de rétractation quitté
   let body, wide = false, immersive = false;
   switch (r.name) {
     case "session": { const v = viewSession(r.args[0]); body = v.html; wide = v.wide; immersive = v.active; break; }
@@ -701,13 +702,15 @@ function renderNow() {
     case "famille": history.replaceState(history.state, "", "#/settings"); body = viewSettings(); setTimeout(() => famJoin(r.args[0] || ""), 0); break;
     case "premium": body = viewPremium(); break;
     case "connexion": history.replaceState(history.state, "", "#/home"); body = viewHome(); break; // connecté depuis la page de présentation
+    case "resilier": body = viewContract("resiliation"); break;
+    case "retractation": body = viewContract("retractation"); break;
     case "admin": body = viewAdmin(); break;
     case "guide": body = viewGuide(); break;
     case "faq": body = viewFaq(r.args[0]); if (r.args[0]) setTimeout(() => { const d = document.getElementById("faq-" + r.args[0]); if (d) d.scrollIntoView({ block: "start" }); }, 60); break;
     case "exercices": body = '<div id="exo-root"><div class="page-head"><h1>Exercices</h1></div><div class="card empty">Chargement des exercices…</div></div>'; break;
     default: body = viewHome();
   }
-  const tab = { guide: "settings", faq: "settings", premium: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
+  const tab = { guide: "settings", faq: "settings", premium: "settings", resilier: "settings", retractation: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
   $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand"><img src="icon-192.png" alt="" width="32" height="32"><span>Fiitday</span></div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
     '</nav><main class="main r-' + esc(r.name) + (wide ? " wide" : "") + '">' + body + "</main></div>";
@@ -966,7 +969,7 @@ function viewLanding() {
     '<section class="lp-sec"><div class="lp-in"><div class="hero lp-end"><h2>Prêt pour ta prochaine séance ?</h2><p>Crée ton compte en une minute et retrouve tes séances partout.</p>' + cta + "</div></div></section>" +
     '<footer class="lp-foot"><div class="lp-in">' + brand +
       '<nav aria-label="Informations légales"><a href="' + LEGAL.legal + '">Mentions légales</a><a href="' + LEGAL.privacy + '">Confidentialité</a>' + (LEGAL.cgv ? '<a href="' + LEGAL.cgv + '">Conditions générales de vente</a>' : "") +
-      '<a href="' + LEGAL.deletion + '">Supprimer son compte</a><a href="mailto:contact@fiitday.com">Contact</a></nav>' +
+      '<a href="' + LEGAL.deletion + '">Supprimer son compte</a><a href="#/resilier">Résilier un abonnement</a><a href="mailto:contact@fiitday.com">Contact</a></nav>' +
       '<p class="lp-small">© ' + new Date().getFullYear() + " Fiitday</p></div></footer></div>";
 }
 /* ================= Mot de passe oublié ================= */
@@ -3174,9 +3177,9 @@ const FAQ_PLAN = ["Abonnement Premium", [
   ["gratuit", "Que garde la version gratuite ?", "1 programme et 2 séances actives (tu choisis lesquelles), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. <b>Rien n'est supprimé</b> : tes autres programmes, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes. La synchro entre tes appareils est réservée à Premium."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : 1,99 € par mois ou 19,90 € par an. <b>Famille</b> (toi + 4 proches, chacun son compte) : 6,99 € par mois ou 69,90 € par an. <b>À vie</b>, en un seul paiement : 49,90 € en Solo ou 149,90 € en Famille jusqu'au 31 décembre 2027, puis 79,90 € et 229,90 €. Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
-  ["resilier", "Comment résilier mon abonnement ?", "Abonné par Google Play : Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier. Abonné sur fiitday.com : Réglages › Abonnement › « Gérer mon abonnement ». Tu gardes Premium jusqu'à la fin de la période payée, puis tu passes en version gratuite sans rien perdre."],
+  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Abonnement › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite sans rien perdre."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite sans rien perdre."],
-  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Tu as 14 jours après ton achat pour te rétracter : pour un abonnement, seule la période déjà utilisée reste due ; pour Premium à vie, tu es remboursé intégralement. Abonné par Google Play : fais la demande dans Google Play (Paiements et abonnements), ou écris-nous. Sur fiitday.com : écris-nous à l'adresse des mentions légales. Le détail est dans les conditions générales de vente."]]];
+  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Abonnement › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
   faqIdx = null;
@@ -3389,10 +3392,10 @@ const pickLabel = () => (premiumPick === "life" ? "Acheter Premium à vie · " :
 // accord exprès avant le paiement (L221-25) : Premium commence tout de suite ; la rétractation reste possible 14 jours.
 // Premium est un « service numérique » (créer, stocker, synchroniser ses données) : l'exception du 13° de L221-28,
 // réservée aux contenus numériques, ne s'applique pas, donc pas de renonciation au droit de rétractation, même à vie.
-// Abonnement : seule la période utilisée reste due ; à vie : remboursement intégral.
+// Fiitday choisit de rembourser intégralement dans les 14 jours, abonnement comme achat à vie (plus simple et plus favorable).
 const consentText = () => premiumPick === "life"
-  ? "Je demande que Premium à vie commence tout de suite. Si je me rétracte dans les 14 jours, je serai remboursé intégralement."
-  : "Je demande que Premium commence tout de suite. Si je me rétracte dans les 14 jours, seule la période déjà utilisée me sera facturée.";
+  ? "Je demande que Premium à vie commence tout de suite. Je garde 14 jours pour me rétracter, avec un remboursement intégral."
+  : "Je demande que Premium commence tout de suite. Je garde 14 jours pour me rétracter, avec un remboursement intégral.";
 function pickTerms() {
   const store = billingMode() === "test" ? "Achat de test, sans paiement réel" : isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
   return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte. Tu as 14 jours pour te rétracter, remboursement intégral."
@@ -3411,7 +3414,7 @@ function viewPremium() {
   const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div>" +
-    (s !== "premium" && !Native && billingMode() === "test" && ((!planTesting() && db.plan) || {}).source === "subscription" ? '<button class="btn sm" style="margin-top:8px" data-act="planmanage">Gérer mon abonnement (test)</button>' : "") + "</div>" +
+    (s !== "premium" && !Native && billingMode() === "test" && ((!planTesting() && db.plan) || {}).source === "subscription" ? '<button class="btn sm" style="margin-top:8px" data-act="planmanage">Gérer mon abonnement (test)</button>' : "") + "</div>" + contractsCard() +
     (billingMode() === "test" ? (Native ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>'
       : '<div class="card plan-testapp"><b>Paiement de test</b><div class="small muted">Visible seulement par toi. Carte de test Stripe : 4242 4242 4242 4242, une date future, n\'importe quel code : aucun paiement réel. Seul le compte administrateur reçoit Premium.</div></div>') : "") +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +
@@ -3507,6 +3510,113 @@ const famErr = e => e && e.message === "Failed to fetch" ? "Pas de connexion int
 // suppression du compte : ce qui sera perdu (statut lu sur le serveur, sinon le dernier connu). Supprimer le compte
 // n'arrête pas un abonnement : il se résilie dans Google Play (ou sur fiitday.com), d'où « stop » pour proposer de le faire d'abord.
 const PLAY_SUBS = "https://play.google.com/store/account/subscriptions?package=com.fiitday.app";
+
+/* ================= Résilier / renoncer au contrat (Code de la consommation, L215-1-1 et L221-21) ================= */
+// Réglages › Abonnement et écran Premium, carte « Tes achats Premium » : « Résilier mon abonnement » (formulaire, date de fin,
+// récapitulatif, « Notifier la résiliation ») et, pendant 14 jours après un achat, « Renoncer au contrat ici » (récapitulatif,
+// « Confirmer la rétractation »). La fonction Edge « contrat » vérifie la demande, arrête l'abonnement chez RevenueCat
+// et envoie la confirmation par e-mail. Un abonnement Google Play se résilie dans Google Play (le bouton l'ouvre).
+let contracts = null, contractsAt = 0, contractsBusy = false, ctr = null;
+async function loadContracts(force) {
+  if (!db.auth || contractsBusy) return;
+  if (!force && contractsAt && Date.now() - contractsAt < 60000) return;
+  contractsBusy = true;
+  try { const r = await rpc("my_contracts"); contracts = r && r.ok ? r : (contracts && contracts.ok ? contracts : { ok: false }); }
+  catch (e) { if (!contracts || !contracts.ok) contracts = { ok: false, err: e.message === "Failed to fetch" ? "pas de connexion internet" : "tes achats n'ont pas pu être chargés" }; }
+  contractsAt = Date.now(); contractsBusy = false;
+  if (["settings", "premium", "resilier", "retractation"].includes(route().name)) render();
+}
+const ctrClock = () => contracts && contracts.now ? Date.parse(contracts.now) + (Date.now() - contractsAt) : Date.now();
+const STORE_TXT = { PLAY_STORE: "Google Play", RC_BILLING: "carte bancaire sur fiitday.com", TEST_STORE: "magasin de test" };
+const ctrEur = v => (+v || 0).toFixed(2).replace(".", ",") + "\u00a0€";
+const ctrDf = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+const ctrDate = t => ctrDf.format(new Date(t)); // avec l'année : « 20 novembre 2027 »
+const ctrWhen = t => ctrDate(t) + " à " + new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+const ctrLastDay = t => ctrDate(Date.parse(t) - 60000); // échéance à minuit (heure de Paris) → dernier jour inclus
+function ctrItems() {
+  if (!contracts || !contracts.ok) return [];
+  const out = (contracts.subs || []).map(x => ({ type: "sub", store: x.store, product: x.product, label: x.label, until: x.until, renews: x.renews, retract: x.retract_until }));
+  const l = contracts.life;
+  if (l) out.push({ type: "life", store: l.store, product: l.product, label: l.kind === "family" ? "Premium Famille à vie" : "Premium Solo à vie", at: l.at, retract: l.retract_until });
+  return out;
+}
+const ctrKey = i => i.store + "/" + i.product;
+const ctrHref = (page, i) => "#/" + page + "/" + encodeURIComponent(i.store) + "/" + encodeURIComponent(i.product);
+const canRetract = i => !!i.retract && ctrClock() < Date.parse(i.retract);
+const playSubUrl = i => PLAY_SUBS + "&sku=" + encodeURIComponent(i.product);
+function contractsCard() {
+  if (!db.auth) return "";
+  if (!contractsAt || Date.now() - contractsAt > 60000) setTimeout(() => loadContracts(), 0);
+  const items = ctrItems(), reqs = ((contracts && contracts.requests) || []).slice(0, 3);
+  if (!items.length && !reqs.length) return "";
+  return '<div class="card ctr-card"><b>Tes achats Premium</b>' +
+    items.map(i => '<div class="ctr-item"><div class="ctr-txt"><b>' + esc(i.label) + '</b><div class="small muted">' + esc(STORE_TXT[i.store] || "") +
+      (i.type === "sub" ? " · " + (i.renews ? "se renouvelle le " : "résilié, Premium jusqu'au ") + esc(ctrDate(Date.parse(i.until))) : i.at ? " · acheté le " + esc(ctrDate(Date.parse(i.at))) : "") + "</div>" +
+      (canRetract(i) ? '<div class="small muted">Rétractation possible jusqu\'au ' + esc(ctrLastDay(i.retract)) + " inclus</div>" : "") + '</div><div class="ctr-btns">' +
+      (i.type === "sub" ? (i.store === "PLAY_STORE" ? '<a class="btn sm" href="' + esc(playSubUrl(i)) + '" target="_blank" rel="noopener">Résilier mon abonnement</a>' : '<a class="btn sm" href="' + ctrHref("resilier", i) + '">Résilier mon abonnement</a>') : "") +
+      (canRetract(i) ? '<a class="btn sm" href="' + ctrHref("retractation", i) + '">Renoncer au contrat ici</a>' : "") + "</div></div>").join("") +
+    (reqs.length ? '<div class="ctr-hist small muted">' + reqs.map(r => esc((r.kind === "resiliation" ? "Résiliation notifiée le " : "Rétractation envoyée le ") + ctrDate(Date.parse(r.at)) + " · " + r.label +
+      (r.kind === "resiliation" ? ", fin le " + ctrDate(Date.parse(r.end_at)) : ", remboursement intégral"))).join("<br>") + "</div>" : "") +
+    '<div class="small muted ctr-note">Résilier ou te rétracter est gratuit et sans motif ; tu reçois une confirmation par e-mail.</div></div>';
+}
+function ctrGrab() {
+  if (!ctr) return;
+  const n = document.querySelector('[data-ctr="name"]'), m = document.querySelector('[data-ctr="email"]');
+  if (n) ctr.name = n.value; if (m) ctr.email = m.value;
+}
+function viewContract(kind) {
+  const r = route(), res = kind === "resiliation";
+  const head = '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>' + (res ? "Résilier votre contrat" : "Renoncer au contrat") + "</h1></div>";
+  if (!ctr || ctr.kind !== kind) ctr = { kind, step: "form", name: firstName(), email: (db.auth && db.auth.user.email) || "", key: "", wish: "fin", err: "", busy: false, res: null };
+  if (ctr.step === "done" && ctr.res) {
+    const d = ctr.res;
+    return head + '<div class="card ctr-done"><b>' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</b><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
+      (res ? "<p>Ton abonnement " + esc(d.label) + " prend fin le <b>" + esc(ctrWhen(d.end_at)) + "</b>. Plus rien ne sera prélevé ; ensuite, ton compte passe en version gratuite et tu gardes toutes tes données.</p>" +
+          (+d.refund > 0 ? "<p>La part non utilisée, <b>" + esc(ctrEur(d.refund)) + "</b>, te sera remboursée avec ton moyen de paiement au plus tard 14 jours après aujourd'hui.</p>" : "")
+        : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, sans rien perdre. Tu es remboursé intégralement, avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
+      "<p>" + (d.mail_sent ? "Une confirmation t'a été envoyée par e-mail à <b>" + esc(ctr.email) + "</b>." : "L'e-mail de confirmation n'a pas pu partir pour l'instant : garde cet écran (par exemple en capture d'écran), il fait foi. Nous t'écrirons à " + esc(ctr.email) + ".") + "</p>" +
+      '<a class="btn" href="#/settings">Retour aux réglages</a></div>';
+  }
+  if (!contracts || (!contracts.ok && !contracts.err && contractsBusy)) { loadContracts(); return head + '<div class="card empty">Chargement de tes achats…</div>'; }
+  if (!contracts.ok) return head + '<div class="card"><p class="msg err" style="margin:0">' + esc(contracts.err || "Tes achats n'ont pas pu être chargés") + '</p><button class="btn sm" style="margin-top:10px" data-act="ctrreload">Réessayer</button></div>';
+  const items = ctrItems().filter(i => res ? i.type === "sub" : canRetract(i));
+  if (!items.length) return head + '<div class="card">' + (res ? "Tu n'as aucun abonnement en cours à résilier." : "Aucun achat de moins de 14 jours : il n'y a rien à rétracter.") + "</div>";
+  const want = r.args[0] && r.args[1] ? r.args[0] + "/" + r.args[1] : "";
+  if (!ctr.key || !items.some(i => ctrKey(i) === ctr.key)) ctr.key = items.some(i => ctrKey(i) === want) ? want : ctrKey(items[0]);
+  const it = items.find(i => ctrKey(i) === ctr.key);
+  if (res && it.renews === false) ctr.wish = "maintenant";
+  const msg = '<p class="msg' + (ctr.err ? " err" : "") + '" role="status">' + esc(ctr.err) + "</p>";
+  if (ctr.step === "recap") {
+    const rows = [["Nom", ctr.name], ["E-mail", ctr.email], ["Contrat", it.label + " · " + (STORE_TXT[it.store] || it.store)]];
+    if (res) rows.push(["Date de fin", ctr.wish === "fin" ? "le " + ctrDate(Date.parse(it.until)) + ", à la fin de la période déjà payée" : "dès maintenant, avec le remboursement de la part non utilisée"]);
+    else rows.push(["Déclaration", "Je me rétracte de mon contrat " + it.label + "."], ["Remboursement", "intégral"]);
+    return head + '<div class="card ctr-recap"><b>Vérifie ta demande</b><dl class="ctr-dl">' + rows.map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>").join("") + "</dl>" +
+      '<div class="row duo"><button class="btn" data-act="ctredit"' + (ctr.busy ? " disabled" : "") + '>Modifier</button><button class="btn primary" data-act="ctrsend"' + (ctr.busy ? " disabled" : "") + ">" +
+      (ctr.busy ? "Envoi…" : res ? "Notifier la résiliation" : "Confirmer la rétractation") + "</button></div>" + msg + "</div>";
+  }
+  const play = res && it.store === "PLAY_STORE";
+  return head + '<p class="muted ctr-intro">' + (res ? "Gratuit et sans motif. Vérifie ou remplis ces informations, puis vérifie le récapitulatif avant d'envoyer ta résiliation."
+      : "Pendant les 14 jours qui suivent ton achat, tu peux te rétracter sans motif ni frais : Premium s'arrête et tu es remboursé intégralement.") + "</p>" +
+    '<div class="card ctr-form">' +
+    '<label class="fl">Nom et prénom<input class="f" data-ctr="name" autocomplete="name" maxlength="120" value="' + esc(ctr.name) + '"></label>' +
+    '<label class="fl">E-mail pour recevoir la confirmation<input class="f" type="email" data-ctr="email" autocomplete="email" maxlength="200" value="' + esc(ctr.email) + '"></label>' +
+    '<div class="fl">Contrat concerné<div class="ctr-opts">' + items.map(i => '<label class="ctr-opt"><input type="radio" name="ctrkey" data-act="ctrkey" value="' + esc(ctrKey(i)) + '"' + (ctrKey(i) === ctr.key ? " checked" : "") + "><span><b>" + esc(i.label) + '</b><span class="small muted">' +
+      esc((STORE_TXT[i.store] || i.store) + (i.type === "sub" ? " · " + (i.renews ? "se renouvelle le " : "Premium jusqu'au ") + ctrDate(Date.parse(i.until)) : "")) + "</span></span></label>").join("") + "</div></div>" +
+    (res && !play ? '<div class="fl">Date de fin souhaitée<div class="ctr-opts">' +
+      (it.renews !== false ? '<label class="ctr-opt"><input type="radio" name="ctrwish" data-act="ctrwish" value="fin"' + (ctr.wish === "fin" ? " checked" : "") + '><span><b>À la fin de la période déjà payée</b><span class="small muted">le ' + esc(ctrDate(Date.parse(it.until))) + " : tu gardes Premium jusque-là, rien n'est remboursé</span></span></label>" : "") +
+      '<label class="ctr-opt"><input type="radio" name="ctrwish" data-act="ctrwish" value="maintenant"' + (ctr.wish === "maintenant" ? " checked" : "") + '><span><b>Dès maintenant</b><span class="small muted">Premium s\'arrête aujourd\'hui et la part non utilisée t\'est remboursée</span></span></label></div></div>' : "") +
+    (play ? '<p class="small" style="margin:4px 0 10px">Cet abonnement a été payé par Google Play : il se résilie dans Google Play, qui t\'envoie la confirmation.</p><a class="btn primary block" href="' + esc(playSubUrl(it)) + '" target="_blank" rel="noopener">Résilier dans Google Play</a>'
+      : '<button class="btn primary block" data-act="ctrnext">Continuer</button>') + msg + "</div>";
+}
+async function contractCall(body) {
+  try {
+    await ensureToken();
+    const call = () => fetch(SUPABASE_URL + "/functions/v1/contrat", { method: "POST", body: JSON.stringify(body), headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + db.auth.access_token, "Content-Type": "application/json" } });
+    let r = await call(); if (r.status === 401) { await ensureToken(true); r = await call(); }
+    const j = await r.json().catch(() => null);
+    return j || { ok: false, reason: "Réponse illisible du serveur (" + r.status + ")" };
+  } catch (e) { return { ok: false, reason: e.message === "Failed to fetch" ? "Pas de connexion internet : réessaie dans un instant" : e.message }; }
+}
 async function deleteWarnings() {
   let fam = null;
   try { fam = await rpc("family_status"); } catch (e) { }
@@ -3587,6 +3697,7 @@ function planSettings() {
   else if (fsh) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(famSrv && famSrv.err ? "Ta famille n'a pas pu être chargée : " + famSrv.err : "Chargement de ta famille…") + "</div></div>";
   else if (s !== "off") h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
     : '<div class="row duo"><a class="btn sm' + (s === "premium" ? "" : " primary") + '" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + '</a><button class="btn sm" data-act="famjoin">J\'ai une invitation Famille</button></div>') + "</div>";
+  h += contractsCard();
   if (isAdmin()) h += '<div class="card"><div class="spread"><b>Administration</b><span class="tag adm-tag">Visible seulement par toi</span></div><div class="small muted" style="margin-top:4px">Inscrits, utilisateurs actifs, séances, résumé de la semaine.</div><a class="btn sm primary" style="margin-top:8px" href="#/admin">Ouvrir le tableau de bord</a></div>';
   if (isPlanTester()) {
     const cur = planTesting() ? db.planTest : "";
@@ -3677,7 +3788,7 @@ async function mfaVerify() {
     const j = await authApi("POST", "factors/" + f.id + "/verify", { challenge_id: ch.id, code });
     if (j && j.access_token && j.user) setSession(j); // la session passe au niveau aal2
     const first = !!mfa.enroll;
-    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = ""; ledgerAuto = null; ledgerAutoTried = false; adminSubs = null; adminSubsErr = "";
+    mfa = { factors: null, enroll: null, err: "", busy: false }; adminKpi = null; adminErr = ""; ledger = null; ledgerErr = ""; ledgerAuto = null; ledgerAutoTried = false; adminSubs = null; adminSubsErr = ""; adminCtr = null; ctrCheck = null;
     toast(first ? "Double authentification activée" : "Code validé"); render();
   } catch (e) { mfa.err = mfaMessage(e); render(); }
 }
@@ -3911,11 +4022,29 @@ function viewAdminDash() {
 
 /* ---------- Abonnements : Premium offert, familles à surveiller ---------- */
 let adminSubs = null, adminSubsErr = "", adminSubsBusy = false, giftForm = { kind: "solo", days: "30" };
+let adminCtr = null, ctrCheck = null, ctrCheckBusy = false; // résiliations et rétractations (Administration › Abonnements)
+function adminCtrCard() {
+  const a = adminCtr; if (!a) return "";
+  const reqs = a.requests || [], todo = r => !r.done_at && /À faire/.test(r.auto || "");
+  return '<div class="section-title">Résiliations et rétractations</div><div class="card adm-ctr"><div class="spread"><span class="small muted">' + reqs.filter(todo).length + " à traiter · " +
+    (a.reminders || 0) + " rappel" + ((a.reminders || 0) > 1 ? "s" : "") + ' avant renouvellement envoyé' + ((a.reminders || 0) > 1 ? "s" : "") + ' en 30 jours</span><button class="btn sm" data-act="ctrcheck"' + (ctrCheckBusy ? " disabled" : "") + ">" + (ctrCheckBusy ? "Vérification…" : "Vérifier RevenueCat et Brevo") + "</button></div>" +
+    (ctrCheck ? '<div class="small adm-ctr-check">RevenueCat : ' + esc(ctrCheck.revenuecat) + "<br>Brevo (e-mails) : " + esc(ctrCheck.brevo) + "<br>Rappels quotidiens : " + esc(ctrCheck.cron) + "</div>" : "") +
+    (reqs.length ? '<ul class="adm-ctr-list">' + reqs.map(r => '<li class="' + (todo(r) ? "todo" : "") + '"><div><b>' + (r.kind === "resiliation" ? "Résiliation" : "Rétractation") + " · " + esc(r.label) + '</b></div><div class="small muted">' +
+      esc(ctrWhen(r.at) + " · " + r.name + " · " + r.email + " · " + (STORE_TXT[r.store] || r.store)) + '</div><div class="small">' +
+      esc((r.kind === "resiliation" ? (r.wish === "maintenant" ? "Fin immédiate" : "Fin le " + ctrDate(Date.parse(r.end_at))) : "Fin immédiate") + (+r.refund > 0 ? " · remboursement " + (r.refund_all ? "intégral, " : "") + ctrEur(r.refund) : "")) + '</div><div class="small muted">' +
+      esc(r.auto || "") + (r.mail ? " · E-mail " + esc(r.mail) : "") + "</div>" +
+      (todo(r) ? '<button class="btn sm" style="margin-top:6px" data-act="ctrdone" data-id="' + esc(r.id) + '">C\'est fait</button>' : r.done_at ? '<div class="small ok-txt">Traité le ' + esc(ctrDate(Date.parse(r.done_at))) + "</div>" : "") + "</li>").join("") + "</ul>"
+      : '<p class="small muted" style="margin:8px 0 0">Aucune demande pour l\'instant.</p>') + "</div>";
+}
 async function loadAdminSubs(manual) {
   if (adminSubsBusy || !isAdmin()) return;
   adminSubsBusy = true; adminSubsErr = ""; if (manual) render();
   let ok = false;
-  try { const r = await rpc("admin_subs"); const den = admDenied(r); if (den) { adminSubs = null; adminSubsErr = den; } else { adminSubs = r; ok = true; } }
+  try {
+    const r = await rpc("admin_subs"); const den = admDenied(r); if (den) { adminSubs = null; adminSubsErr = den; } else { adminSubs = r; ok = true; }
+    // résiliations et rétractations : sans effet sur le reste si la fonction n'existe pas encore
+    if (ok) { try { const c = await rpc("admin_contracts"); if (!admDenied(c)) adminCtr = c; } catch (e) { } }
+  }
   catch (e) { adminSubsErr = admErrText(e, "Les abonnements n'ont pas pu être chargés"); }
   finally { adminSubsBusy = false; if (route().name === "admin") render(); if (manual) toast(ok ? "Abonnements à jour · " + fmtTimeSec(Date.now()) : "Mise à jour impossible"); }
 }
@@ -3932,7 +4061,7 @@ function viewAdminSubs() {
     (launch ? "Essai d'un mois pour les nouveaux comptes, version gratuite ensuite, synchro réservée à Premium." : "Tant que la date de lancement n'est pas fixée, tout le monde a l'appli complète et la synchro reste ouverte. Premium offert et familles marchent déjà : ils compteront au lancement.") + "</div></div>" +
     '<div class="stats adm-tiles">' + tile("Abonnés payants", c.subscribers || 0, (c.cancelled || 0) + " résilié" + ((c.cancelled || 0) > 1 ? "s" : "") + " (Premium jusqu'à la fin de leur période)") + tile("Premium à vie", c.lifetime || 0, "achats uniques") +
     tile("Premium offert", c.gifts || 0, "en cours") + tile("Familles", c.families || 0, (c.members || 0) + " membre" + ((c.members || 0) > 1 ? "s" : "") + " invité" + ((c.members || 0) > 1 ? "s" : "")) + "</div>" +
-    '<div class="adm-grid"><div class="adm-main"><div class="section-title">Offrir Premium</div><div class="card adm-gift">' +
+    '<div class="adm-grid"><div class="adm-main">' + adminCtrCard() + '<div class="section-title">Offrir Premium</div><div class="card adm-gift">' +
     '<label class="fl">E-mail du compte Fiitday<input class="f" type="email" data-gf="email" autocomplete="off" placeholder="prenom@exemple.fr" value="' + esc(giftForm.email || "") + '"></label>' +
     '<div class="fl" style="margin-top:10px">Formule' + seg("kind", [["solo", "Solo"], ["family", "Famille (5 personnes)"]]) + "</div>" +
     '<div class="fl" style="margin-top:10px">Durée' + seg("days", GIFT_DAYS) + "</div>" +
@@ -4845,6 +4974,9 @@ $app.addEventListener("click", async e => {
       if (buying) break;
       if (!premiumConsent) { toast("Coche la case au-dessus du bouton pour continuer"); const cb = document.querySelector('[data-act="planconsent"]'); if (cb) { cb.focus(); cb.closest(".plan-consent").classList.add("need"); } break; }
       const pid = PRODUCTS[premiumFor][premiumPick];
+      // la demande cochée est gardée sur le serveur (preuve, et rappel dans l'e-mail de confirmation de la commande)
+      try { const c = await rpc("record_purchase_consent", { p_product: pid, p_text: consentText() }); if (c && c.ok === false) throw new Error("refus"); }
+      catch (e) { toast("Connexion au serveur impossible : réessaie dans un instant"); break; }
       buying = true; render();
       const r = Native ? await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life") : await webBuy(pid);
       buying = false; render();
@@ -4970,6 +5102,39 @@ $app.addEventListener("click", async e => {
     case "planfor": premiumFor = b.dataset.val === "family" ? "family" : "solo"; render(); break;
     case "planpick": { const pk = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; if ((pk === "life") !== (premiumPick === "life")) premiumConsent = false; premiumPick = pk; render(); } break; // le texte de l'accord change entre abonnement et achat à vie
     case "planconsent": premiumConsent = !!b.checked; break;
+    case "ctrkey": ctrGrab(); if (ctr) { ctr.key = b.value; ctr.err = ""; ctr.wish = "fin"; } render(); break;
+    case "ctrwish": ctrGrab(); if (ctr) { ctr.wish = b.value === "maintenant" ? "maintenant" : "fin"; ctr.err = ""; } render(); break;
+    case "ctrnext": {
+      ctrGrab(); if (!ctr) break;
+      ctr.name = ctr.name.trim(); ctr.email = ctr.email.trim();
+      if (ctr.name.length < 2) { ctr.err = "Indique ton nom et ton prénom."; render(); break; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ctr.email)) { ctr.err = "Indique une adresse e-mail valide pour recevoir la confirmation."; render(); break; }
+      ctr.err = ""; ctr.step = "recap"; render(); window.scrollTo(0, 0);
+    } break;
+    case "ctredit": if (ctr) { ctr.step = "form"; ctr.err = ""; } render(); break;
+    case "ctrsend": {
+      if (!ctr || ctr.busy) break;
+      const [store, product] = ctr.key.split("/");
+      ctr.busy = true; ctr.err = ""; render();
+      const j = await contractCall({ action: ctr.kind === "resiliation" ? "resilier" : "retracter", store, product, wish: ctr.wish, name: ctr.name, email: ctr.email });
+      if (!ctr) break;
+      ctr.busy = false;
+      if (j && j.ok) { ctr.step = "done"; ctr.res = j; loadContracts(true); loadPlan(true); }
+      else ctr.err = (j && j.reason) || "La demande n'a pas pu être envoyée. Réessaie, ou écris à contact@fiitday.com.";
+      render(); window.scrollTo(0, 0);
+    } break;
+    case "ctrreload": contracts = null; contractsAt = 0; render(); loadContracts(true); break;
+    case "ctrcheck": {
+      if (ctrCheckBusy) break;
+      ctrCheckBusy = true; render();
+      const j = await contractCall({ action: "verifier" });
+      ctrCheckBusy = false; ctrCheck = j && j.ok ? j : { revenuecat: (j && j.reason) || "vérification impossible", brevo: "—", cron: "—" }; render();
+    } break;
+    case "ctrdone": {
+      if (!await ask({ title: "Demande traitée ?", text: "Le remboursement ou l'arrêt de l'abonnement a bien été fait (Stripe, RevenueCat ou Play Console) ?", ok: "Oui, c'est fait" })) break;
+      try { const r = await rpc("admin_contract_done", { p_id: b.dataset.id }); const den = admDenied(r); if (den) { toast(den); break; } } catch (e) { toast("Impossible pour l'instant"); break; }
+      toast("Demande marquée comme traitée"); loadAdminSubs();
+    } break;
     case "lplogin": loginMode = b.dataset.m === "up" ? "up" : "in"; location.hash = "#/connexion"; window.scrollTo(0, 0); break;
     case "lpgo": { const t = document.getElementById(b.dataset.to); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); } break;
     case "planmanage": { // abonnement payé par carte : page de gestion de RevenueCat (résilier, changer de carte, factures)

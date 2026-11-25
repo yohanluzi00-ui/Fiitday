@@ -17,12 +17,12 @@ Relecture juridique complète le 25 novembre 2026 (Code de la consommation à jo
 
 « TVA non applicable, article 293 B du CGI » : à garder seulement si l'entreprise est en franchise de TVA.
 
-## À faire dans l'appli avant de publier les CGV (elles les décrivent)
+## Fonctions décrites par les CGV (faites en V1.128)
 
-1. Bouton « Résilier mon abonnement » (Réglages › Abonnement) avec date de fin au choix (fin de période ou sous 10 jours avec remboursement), récapitulatif, « Notifier la résiliation », e-mail de confirmation (L215-1-1, D215-1 à D215-3, L224-25-9).
-2. Bouton « Renoncer au contrat ici » pendant 14 jours après un achat, « Confirmer la rétractation », accusé de réception par e-mail avec date et heure (L221-21, D221-5).
-3. E-mail de confirmation après chaque achat avec les CGV, le formulaire de rétractation et la demande de début immédiat (L221-13, L224-25-5).
-4. E-mail de rappel 1 à 3 mois avant le renouvellement annuel, date limite dans un encadré (L215-1).
+« Résilier mon abonnement », « Renoncer au contrat ici », e-mail de confirmation après chaque achat et rappel avant le
+renouvellement annuel : prêts (fonction Edge « contrat », webhook « revenuecat », SQL `supabase/contrats-en-ligne.sql`).
+Il faut seulement enregistrer dans Supabase › Edge Functions › Secrets la clé Brevo (BREVO_API_KEY) et la clé secrète
+RevenueCat API v2 (RC_V2_SECRET_KEY), puis vérifier dans Administration › Abonnements › « Vérifier RevenueCat et Brevo ».
 
 ## Le jour de la publication
 

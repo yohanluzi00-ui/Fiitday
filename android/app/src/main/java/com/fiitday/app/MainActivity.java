@@ -13,7 +13,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.provider.Settings;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -27,6 +30,9 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -46,19 +52,29 @@ public class MainActivity extends Activity {
     /** sauvegarde en fichier : le téléphone demande où l'enregistrer, puis quel fichier relire */
     private static final int REQ_SAVE = 41, REQ_OPEN = 42;
     private static final long MAX_FILE = 20L * 1024 * 1024;
-    private static String pendingSave = null;
-    /** fichier binaire en attente d'enregistrement (registre des recettes en PDF) */
-    private static byte[] pendingBytes = null;
+    /** contenu à enregistrer, gardé dans un fichier de l'appli pendant que le sélecteur est ouvert : si Android ferme l'appli
+     *  entre-temps (manque de mémoire), il est relu au retour au lieu de laisser un fichier de sauvegarde vide */
+    private static final String SAVE_FILE = "a-enregistrer.bin", OPEN_FILE = "fichier-lu.txt";
     /** appli ouverte (pour lui transmettre les boutons « Passer » / « Terminer » des notifications) */
     private static WeakReference<MainActivity> currentActivity = new WeakReference<>(null);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        currentActivity = new WeakReference<>(this);
+        Billing.setup(this); // achats : seulement dans l'appli de test pour l'instant
+        makeWeb();
+        // toujours charger la page (même après une fermeture par Android) : l'appli relit tout dans son stockage ;
+        // on revient à la même page de l'appli si on la connaît
+        String url = savedInstanceState != null ? savedInstanceState.getString("url") : null;
+        if (url == null || !url.startsWith("https://" + HOST + "/")) url = "https://" + HOST + "/index.html";
+        web.loadUrl(url);
+    }
 
+    /** crée l'affichage de l'appli (au démarrage, et après un plantage du moteur d'affichage) */
+    private void makeWeb() {
         web = new WebView(this);
         setContentView(web);
-        currentActivity = new WeakReference<>(this);
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -92,13 +108,22 @@ public class MainActivity extends Activity {
                 }
                 return true;
             }
+
+            /** le moteur d'affichage s'est arrêté (manque de mémoire, vues 3D…) : on recrée la page au lieu de fermer l'appli */
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                if (view != web) return true;
+                try { ((ViewGroup) view.getParent()).removeView(view); } catch (Exception ignored) { }
+                try { view.destroy(); } catch (Exception ignored) { }
+                web = null;
+                if (isFinishing() || isDestroyed()) return true;
+                makeWeb();
+                web.loadUrl("https://" + HOST + "/index.html");
+                return true;
+            }
         });
         web.setWebChromeClient(new WebChromeClient());
-        Billing.setup(this); // achats : seulement dans l'appli de test pour l'instant
         web.addJavascriptInterface(new Bridge(), "AndroidBridge");
-
-        if (savedInstanceState != null) web.restoreState(savedInstanceState);
-        else web.loadUrl("https://" + HOST + "/index.html");
     }
 
     private static String mime(String path) {
@@ -185,9 +210,42 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void askNotifications() {
             if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                getSharedPreferences("fiitday", MODE_PRIVATE).edit().putBoolean("notif_asked", true).apply();
                 runOnUiThread(() -> requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2));
             }
         }
+
+        /** notifications de Fiitday autorisées ? « 1 » oui, « 0 » non */
+        @JavascriptInterface
+        public String notificationsOn() { return RestTimerService.notificationsOn(MainActivity.this) ? "1" : "0"; }
+
+        /** autoriser les notifications : la question d'Android si elle peut encore être posée, sinon les réglages de Fiitday */
+        @JavascriptInterface
+        public void enableNotifications() {
+            runOnUiThread(() -> {
+                boolean asked = getSharedPreferences("fiitday", MODE_PRIVATE).getBoolean("notif_asked", false);
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+                        && (!asked || shouldShowRequestPermissionRationale("android.permission.POST_NOTIFICATIONS"))) {
+                    getSharedPreferences("fiitday", MODE_PRIVATE).edit().putBoolean("notif_asked", true).apply();
+                    requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 2);
+                    return;
+                }
+                Intent i;
+                if (Build.VERSION.SDK_INT >= 26) i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                else i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()));
+                try { startActivity(i); } catch (Exception e) {
+                    try { startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
+                }
+            });
+        }
+
+        /** Réglages › Alerte de fin de repos › Tester : la vraie alerte de fin de repos dans 5 s */
+        @JavascriptInterface
+        public void testAlert(String mode) { RestTimerService.testAlert(MainActivity.this, mode); }
+
+        /** résultat d'un enregistrement ou d'une lecture de fichier en attente (page rechargée entre-temps) : {"kind","status","text"} ou "" */
+        @JavascriptInterface
+        public String takeFile() { return takeFileResult(); }
 
         @JavascriptInterface
         public void share(final String text) {
@@ -202,31 +260,18 @@ public class MainActivity extends Activity {
         /** Réglages › Données › Enregistrer une sauvegarde : choix de l'emplacement (Téléchargements, Drive…) */
         @JavascriptInterface
         public void saveFile(final String name, final String content) {
-            runOnUiThread(() -> {
-                pendingSave = content;
-                pendingBytes = null;
-                Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType("text/plain");
-                i.putExtra(Intent.EXTRA_TITLE, name);
-                try { startActivityForResult(i, REQ_SAVE); }
-                catch (Exception e) { pendingSave = null; fileResult("save", "error", null); }
-            });
+            final byte[] bytes = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
+            runOnUiThread(() -> pickSave(name, "text/plain", bytes));
         }
 
         /** Administration › Registre des recettes › PDF : même choix de l'emplacement, contenu binaire en base64 */
         @JavascriptInterface
         public void saveBytes(final String name, final String mime, final String base64) {
             runOnUiThread(() -> {
-                try { pendingBytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT); }
-                catch (Exception e) { pendingBytes = null; fileResult("save", "error", null); return; }
-                pendingSave = null;
-                Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType(mime == null || mime.isEmpty() ? "application/octet-stream" : mime);
-                i.putExtra(Intent.EXTRA_TITLE, name);
-                try { startActivityForResult(i, REQ_SAVE); }
-                catch (Exception e) { pendingBytes = null; fileResult("save", "error", null); }
+                byte[] bytes;
+                try { bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT); }
+                catch (Exception e) { fileResult("save", "error", null); return; }
+                pickSave(name, mime == null || mime.isEmpty() ? "application/octet-stream" : mime, bytes);
             });
         }
 
@@ -273,6 +318,26 @@ public class MainActivity extends Activity {
         web.post(() -> { if (web != null) web.evaluateJavascript(js, null); });
     }
 
+    /** exécute un petit bout de JavaScript dans l'appli ouverte (s'il y en a une) */
+    static void toPage(final String js) {
+        final MainActivity a = currentActivity.get();
+        if (a == null) return;
+        a.runOnUiThread(() -> { if (a.web != null) a.web.evaluateJavascript(js, null); });
+    }
+
+    /** enregistrement : le contenu est d'abord écrit dans un fichier de l'appli, puis le téléphone demande où l'enregistrer */
+    private void pickSave(String name, String mime, byte[] bytes) {
+        File f = new File(getCacheDir(), SAVE_FILE);
+        try (OutputStream out = new FileOutputStream(f)) { out.write(bytes); }
+        catch (Exception e) { fileResult("save", "error", null); return; }
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType(mime);
+        i.putExtra(Intent.EXTRA_TITLE, name);
+        try { startActivityForResult(i, REQ_SAVE); }
+        catch (Exception e) { f.delete(); fileResult("save", "error", null); }
+    }
+
     /** bouton « Passer » / « Terminer » : gardé jusqu'à ce que l'appli le prenne, et l'appli ouverte est prévenue tout de suite */
     static void deliverAction(Context c, String act, long at) {
         c.getSharedPreferences("fiitday", MODE_PRIVATE).edit().putString("action", act).putLong("action_at", at).apply();
@@ -287,12 +352,12 @@ public class MainActivity extends Activity {
         if (requestCode != REQ_SAVE && requestCode != REQ_OPEN) return;
         Uri uri = resultCode == RESULT_OK && data != null ? data.getData() : null;
         if (requestCode == REQ_SAVE) {
-            String content = pendingSave;
-            byte[] bin = pendingBytes;
-            pendingSave = null;
-            pendingBytes = null;
-            if (uri == null || (content == null && bin == null)) { fileResult("save", "cancel", null); return; }
-            fileResult("save", (bin != null ? writeBytes(uri, bin) : writeText(uri, content)) ? "ok" : "error", null);
+            File f = new File(getCacheDir(), SAVE_FILE);
+            byte[] bin = f.exists() ? readFile(f) : null;
+            f.delete();
+            if (uri == null) { fileResult("save", "cancel", null); return; }
+            if (bin == null) { fileResult("save", "error", null); return; }
+            fileResult("save", writeBytes(uri, bin) ? "ok" : "error", null);
         } else {
             if (uri == null) { fileResult("open", "cancel", null); return; }
             String text = readText(uri);
@@ -300,8 +365,14 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean writeText(Uri uri, String content) {
-        return writeBytes(uri, content.getBytes(StandardCharsets.UTF_8));
+    private static byte[] readFile(File f) {
+        try (InputStream in = new FileInputStream(f)) {
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            byte[] b = new byte[8192];
+            int n;
+            while ((n = in.read(b)) > 0) buf.write(b, 0, n);
+            return buf.toByteArray();
+        } catch (Exception e) { return null; }
     }
 
     private boolean writeBytes(Uri uri, byte[] bytes) {
@@ -335,11 +406,36 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** renvoie le résultat à l'appli web : window.__fiitdayFile(type, "ok" | "cancel" | "error", texte) */
+    /**
+     * résultat d'un enregistrement ou d'une lecture de fichier : gardé (le texte lu dans un fichier de l'appli) jusqu'à ce que
+     * l'appli le prenne (Native.takeFile), même si la page a été rechargée entre-temps ; l'appli ouverte est prévenue tout de suite
+     */
     private void fileResult(String kind, String status, String text) {
-        if (web == null) return;
-        final String js = "window.__fiitdayFile&&window.__fiitdayFile(" + JSONObject.quote(kind) + "," + JSONObject.quote(status) + "," + (text == null ? "null" : JSONObject.quote(text)) + ")";
-        web.post(() -> { if (web != null) web.evaluateJavascript(js, null); });
+        File t = new File(getCacheDir(), OPEN_FILE);
+        if (text != null) {
+            try (OutputStream out = new FileOutputStream(t)) { out.write(text.getBytes(StandardCharsets.UTF_8)); }
+            catch (Exception e) { status = "error"; t.delete(); }
+        } else t.delete();
+        getSharedPreferences("fiitday", MODE_PRIVATE).edit().putString("file_kind", kind).putString("file_status", status)
+                .putLong("file_at", System.currentTimeMillis()).apply();
+        if (web != null) web.post(() -> { if (web != null) web.evaluateJavascript("window.__fiitdayFileReady&&window.__fiitdayFileReady()", null); });
+    }
+
+    private String takeFileResult() {
+        SharedPreferences p = getSharedPreferences("fiitday", MODE_PRIVATE);
+        String kind = p.getString("file_kind", ""), status = p.getString("file_status", "");
+        long at = p.getLong("file_at", 0);
+        p.edit().remove("file_kind").remove("file_status").remove("file_at").apply();
+        File t = new File(getCacheDir(), OPEN_FILE);
+        String text = null;
+        if (t.exists()) { byte[] b = readFile(t); t.delete(); if (b != null) text = new String(b, StandardCharsets.UTF_8); }
+        if (kind == null || kind.isEmpty() || System.currentTimeMillis() - at > 30 * 60 * 1000L) return "";
+        try {
+            JSONObject o = new JSONObject();
+            o.put("kind", kind); o.put("status", status);
+            if (text != null) o.put("text", text);
+            return o.toString();
+        } catch (Exception e) { return ""; }
     }
 
     @Override
@@ -365,7 +461,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        if (web != null) web.saveState(outState);
+        if (web != null && web.getUrl() != null) outState.putString("url", web.getUrl());
     }
 
     @Override

@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- minuteur de repos sans limite de durée (le type « courte durée » était coupé au bout de 3 minutes) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- garde le compte à rebours à l'heure écran éteint, seulement pendant un repos -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Android 16 et plus : le repos et le chrono en « Live Update » (écran verrouillé, barre d'état, montre) -->
     <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 
@@ -28,7 +32,11 @@
         <service
             android:name=".RestTimerService"
             android:exported="false"
-            android:foregroundServiceType="shortService" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Minuteur de repos et chrono pendant une séance de sport : affiche le temps restant et prévient (vibration, son, montre) à la fin, écran verrouillé." />
+        </service>
         <receiver
             android:name=".ActionReceiver"
             android:exported="false" />

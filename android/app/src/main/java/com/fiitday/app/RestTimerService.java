@@ -18,8 +18,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+
+import java.lang.ref.WeakReference;
 
 
 /**
@@ -28,8 +31,11 @@ import android.os.Vibrator;
  *   « Live Update » (en haut de l'écran verrouillé, pastille dans la barre d'état ; sur les montres qui le permettent) ;
  * - option « montre » : l'alerte de fin (fin du repos, objectif du chrono) part aussi quand Fiitday est à l'écran
  *   et vibre elle-même, pour que la montre la reçoive et vibre (rien n'est envoyé à la montre au départ) ;
- * - à la fin du repos ou à l'objectif du chrono, si l'appli n'est pas à l'écran, le service sonne et/ou vibre.
- * Service de premier plan de type « courte durée » (shortService), le type prévu par Android pour ce besoin.
+ * - à la fin du repos ou à l'objectif du chrono, si l'appli n'est pas à l'écran, le service sonne et/ou vibre ; si la
+ *   notification ne peut pas vibrer (notifications refusées, canal coupé, « Ne pas déranger »), le service vibre lui-même ;
+ * - un verrou de réveil partiel, limité à la durée du repos, garde le compte à rebours à l'heure écran éteint.
+ * Service de premier plan de type « usage particulier » (specialUse) : sans limite de durée (un repos peut durer 20 min ;
+ * le type « courte durée » était arrêté par Android au bout de 3 minutes, sans alerte).
  */
 public class RestTimerService extends Service {
     static final int ONGOING_ID = 10;
@@ -47,9 +53,15 @@ public class RestTimerService extends Service {
     /** minuteur en cours dans le service : « rest », « chrono » ou null (mis à jour dès la demande, avant le démarrage) */
     static volatile String current = null;
 
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+    /** service en marche (fil principal seulement) : un nouveau minuteur lui est passé directement, sans redémarrer le service
+     *  (Android interdit souvent de démarrer un service de premier plan quand l'appli est en arrière-plan, après « Terminer » sur la montre) */
+    private static WeakReference<RestTimerService> running = new WeakReference<>(null);
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable fire = this::onEnd;
-    private final Runnable stopper = this::stopSelf;
+    private final Runnable stopper = this::finish;
+    private boolean stopping = false;
+    private PowerManager.WakeLock wake;
     private String kind = "rest";
     private long end = 0;    // repos : heure de fin ; chrono : heure de l'objectif (0 = pas d'objectif)
     private long start = 0;  // chrono : heure de départ (après les 5 s de préparation)
@@ -72,27 +84,70 @@ public class RestTimerService extends Service {
     }
 
     private static void launch(Context c, Intent i) {
-        try {
-            if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i);
-            else c.startService(i);
-        } catch (Exception ignored) {
-        }
+        final Context app = c.getApplicationContext();
+        MAIN.post(() -> {
+            RestTimerService s = running.get();
+            if (s != null && !s.stopping) { s.apply(i, false); return; }
+            try {
+                if (Build.VERSION.SDK_INT >= 26) app.startForegroundService(i);
+                else app.startService(i);
+            } catch (Exception e) {
+                // Android a refusé de démarrer le minuteur (appli en arrière-plan) : l'appli prévient
+                current = null;
+                MainActivity.toPage("window.__fiitdayTimerFail&&window.__fiitdayTimerFail()");
+            }
+        });
     }
 
-    /** arrête le minuteur s'il est de ce genre (null : quel qu'il soit) — un chrono qui vient de démarrer n'est pas coupé par la fin d'un repos */
+    /**
+     * arrête le minuteur s'il est de ce genre (null : quel qu'il soit) — un chrono qui vient de démarrer n'est pas coupé par la fin d'un repos.
+     * Le service attend 3 s avant de s'arrêter : le repos qui suit un chrono arrêté le reprend sans le redémarrer.
+     */
     static void stop(Context c, String onlyKind) {
         if (onlyKind != null && current != null && !onlyKind.equals(current)) return;
         current = null;
-        try { c.stopService(new Intent(c, RestTimerService.class)); } catch (Exception ignored) { }
-        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (nm != null) { nm.cancel(ONGOING_ID); nm.cancel(WATCH_ID); }
+        final Context app = c.getApplicationContext();
+        MAIN.post(() -> {
+            RestTimerService s = running.get();
+            if (s != null && !s.stopping) { s.idle(); return; }
+            try { app.stopService(new Intent(app, RestTimerService.class)); } catch (Exception ignored) { }
+            NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) { nm.cancel(ONGOING_ID); nm.cancel(WATCH_ID); }
+        });
     }
 
     static void stop(Context c) { stop(c, null); }
 
+    /** « Passer » le repos dans la notification : arrêt tout de suite (la notification disparaît) */
+    static void stopNow(Context c) {
+        current = null;
+        final Context app = c.getApplicationContext();
+        MAIN.post(() -> {
+            RestTimerService s = running.get();
+            if (s != null && !s.stopping) { s.handler.removeCallbacks(s.fire); s.finish(); return; }
+            try { app.stopService(new Intent(app, RestTimerService.class)); } catch (Exception ignored) { }
+            NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) { nm.cancel(ONGOING_ID); nm.cancel(WATCH_ID); }
+        });
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        running = new WeakReference<>(this);
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) { stopSelf(); return START_NOT_STICKY; }
+        stopping = false;
+        running = new WeakReference<>(this);
+        if (!apply(intent, true)) { finish(); }
+        return START_NOT_STICKY;
+    }
+
+    /** nouveau minuteur (au démarrage du service, ou passé au service déjà en marche) */
+    private boolean apply(Intent intent, boolean first) {
         String k = intent.getStringExtra("kind");
         kind = "chrono".equals(k) ? "chrono" : "rest";
         end = intent.getLongExtra("end", 0);
@@ -104,38 +159,72 @@ public class RestTimerService extends Service {
         watch = intent.getBooleanExtra("watch", false);
         reached = false;
         current = kind;
-        try {
-            if (Build.VERSION.SDK_INT >= 34) startForeground(ONGOING_ID, ongoing(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE);
-            else startForeground(ONGOING_ID, ongoing());
-        } catch (Exception e) {
-            stopSelf();
-            return START_NOT_STICKY;
-        }
         handler.removeCallbacks(fire);
-        handler.removeCallbacks(stopper); // un nouveau minuteur annule l'arrêt prévu après le son précédent
+        handler.removeCallbacks(stopper); // un nouveau minuteur annule l'arrêt prévu (après le son précédent, ou après un chrono arrêté)
+        if (first) {
+            try {
+                if (Build.VERSION.SDK_INT >= 34) startForeground(ONGOING_ID, ongoing(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+                else startForeground(ONGOING_ID, ongoing());
+            } catch (Exception e) {
+                current = null;
+                MainActivity.toPage("window.__fiitdayTimerFail&&window.__fiitdayTimerFail()");
+                return false;
+            }
+        } else {
+            NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) { try { nm.notify(ONGOING_ID, ongoing()); } catch (SecurityException ignored) { } }
+        }
         cancelWatchCard();
         if (end > 0) {
             long d = end - System.currentTimeMillis();
             if (d <= 0) onEnd();
-            else handler.postDelayed(fire, d);
-        }
-        return START_NOT_STICKY;
+            else { awake(d + 15000); handler.postDelayed(fire, d); }
+        } else release();
+        return true;
+    }
+
+    /** verrou de réveil partiel : le compte à rebours continue écran éteint (il se libère seul après la durée donnée) */
+    private void awake(long ms) {
+        try {
+            if (wake == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm == null) return;
+                wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "fiitday:minuteur");
+                wake.setReferenceCounted(false);
+            }
+            wake.acquire(Math.max(1000, Math.min(ms, 30 * 60 * 1000L)));
+        } catch (Exception ignored) { }
+    }
+
+    private void release() {
+        try { if (wake != null && wake.isHeld()) wake.release(); } catch (Exception ignored) { }
+    }
+
+    /** minuteur arrêté : le service attend 3 s un éventuel minuteur suivant, puis s'arrête */
+    private void idle() {
+        current = null;
+        handler.removeCallbacks(fire);
+        release();
+        handler.removeCallbacks(stopper);
+        handler.postDelayed(stopper, 3000);
+    }
+
+    private void finish() {
+        stopping = true;
+        release();
+        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
+        else stopForeground(true);
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) { nm.cancel(ONGOING_ID); nm.cancel(WATCH_ID); }
+        stopSelf();
     }
 
     private static String str(String s) { return s == null ? "" : s; }
 
-    /** Android limite ce type de service à environ 3 minutes : on garde alors la notification affichée, sans alerte. */
-    @Override
-    public void onTimeout(int startId) {
-        handler.removeCallbacks(fire);
-        if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_DETACH);
-        else stopForeground(false);
-        stopSelf();
-    }
-
     private boolean isChrono() { return "chrono".equals(kind); }
 
     private void onEnd() {
+        release();
         boolean visible = MainActivity.visible;
         // avec l'option montre, l'alerte part aussi quand Fiitday est à l'écran (la montre doit vibrer) ; le son reste joué par l'appli
         boolean notify = !"aucune".equals(mode) && (watch || !visible);
@@ -153,6 +242,7 @@ public class RestTimerService extends Service {
         }
         if (nm != null) nm.cancel(WATCH_ID);
         current = null;
+        stopping = true; // plus au premier plan : un nouveau minuteur redémarrera le service
         if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE);
         else stopForeground(true);
         // le son joue encore quelques secondes : le service s'arrête juste après
@@ -160,19 +250,23 @@ public class RestTimerService extends Service {
         else stopSelf();
     }
 
-    private PendingIntent openApp() {
-        Intent open = new Intent(this, MainActivity.class);
+    private static PendingIntent openApp(Context c) {
+        Intent open = new Intent(c, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        return PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getActivity(c, 0, open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    private PendingIntent openApp() { return openApp(this); }
+
     /** bouton « Passer » (repos) ou « Terminer » (chrono), aussi affiché sur la montre */
-    private Notification.Action action() {
-        String act = isChrono() ? ACT_STOP : ACT_SKIP;
-        Intent i = new Intent(this, ActionReceiver.class).setAction(act);
-        PendingIntent pi = PendingIntent.getBroadcast(this, isChrono() ? 2 : 1, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        return new Notification.Action.Builder(Icon.createWithResource(this, R.drawable.ic_stat), isChrono() ? "Terminer" : "Passer", pi).build();
+    private static Notification.Action action(Context c, boolean chrono) {
+        String act = chrono ? ACT_STOP : ACT_SKIP;
+        Intent i = new Intent(c, ActionReceiver.class).setAction(act);
+        PendingIntent pi = PendingIntent.getBroadcast(c, chrono ? 2 : 1, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return new Notification.Action.Builder(Icon.createWithResource(c, R.drawable.ic_stat), chrono ? "Terminer" : "Passer", pi).build();
     }
+
+    private Notification.Action action() { return action(this, isChrono()); }
 
     private Notification.Builder builder(String channel) {
         return Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, channel) : new Notification.Builder(this);
@@ -249,40 +343,83 @@ public class RestTimerService extends Service {
     /**
      * Fin du repos ou objectif du chrono : notification « Pause terminée » / « Objectif atteint ».
      * Le son passe par le flux « alarme » : il se fait entendre même écran verrouillé (le son d'une notification peut y être coupé).
-     * Avec l'option montre, la notification vibre elle-même (la montre vibre aussi) : le service ne vibre pas en plus.
+     * Avec l'option montre, la notification vibre elle-même (la montre vibre aussi) : le service ne vibre pas en plus, sauf si la
+     * notification ne peut pas vibrer (notifications refusées, canal coupé, « Ne pas déranger ») : le téléphone vibre alors lui-même.
      * @param local vrai si l'appli n'est pas à l'écran : le service joue alors le son (sinon c'est l'appli)
      * @return vrai si un son a été lancé (le service doit rester actif le temps qu'il joue)
      */
     private boolean alert(boolean local) {
-        boolean sound = local && (mode.equals("son") || mode.equals("les deux"));
-        boolean vib = local && !watch && (mode.equals("vibration") || mode.equals("les deux"));
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        return endAlert(this, handler, mode, watch, local, isChrono(), title, end, start);
+    }
+
+    /**
+     * La notification pourra-t-elle vibrer (et arriver sur la montre) ? Non si les notifications de Fiitday sont refusées,
+     * si ce canal est coupé ou sans vibration, ou en « Ne pas déranger ».
+     */
+    static boolean notifWorks(Context c, String channel) {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return false;
-        channels(this);
-        boolean chrono = isChrono();
-        Notification.Builder b = builder(watch ? CH_END_WATCH : CH_END)
+        if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT >= 26) {
+            channels(c);
+            NotificationChannel ch = nm.getNotificationChannel(channel);
+            if (ch == null || ch.getImportance() == NotificationManager.IMPORTANCE_NONE || !ch.shouldVibrate()) return false;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && nm.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL) return false;
+        return true;
+    }
+
+    /** les notifications de Fiitday sont-elles autorisées (affichage à l'écran verrouillé et sur la montre) ? */
+    static boolean notificationsOn(Context c) {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return false;
+        if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) return false;
+        if (Build.VERSION.SDK_INT >= 26) {
+            channels(c);
+            NotificationChannel ch = nm.getNotificationChannel(CH_END_WATCH);
+            if (ch != null && ch.getImportance() == NotificationManager.IMPORTANCE_NONE) return false;
+        }
+        return true;
+    }
+
+    /** Réglages › Alerte de fin de repos › Tester (appli Android) : la vraie alerte de fin de repos, 5 s plus tard (le temps de verrouiller) */
+    static void testAlert(Context c, String mode) {
+        final Context app = c.getApplicationContext();
+        MAIN.postDelayed(() -> endAlert(app, MAIN, mode == null ? "vibration" : mode, true, true, false, "", 0, 0), 5000);
+    }
+
+    private static boolean endAlert(Context c, Handler h, String mode, boolean watch, boolean local, boolean chrono, String title, long end, long start) {
+        boolean wantVib = mode.equals("vibration") || mode.equals("les deux");
+        boolean sound = local && (mode.equals("son") || mode.equals("les deux"));
+        // avec l'option montre, c'est la notification qui vibre (téléphone et montre) ; si elle ne le peut pas, le téléphone vibre lui-même
+        boolean vib = wantVib && (watch ? !notifWorks(c, CH_END_WATCH) : local);
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) { if (vib) vibrate(c); return false; }
+        channels(c);
+        String ch = watch ? CH_END_WATCH : CH_END;
+        Notification.Builder b = (Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, ch) : new Notification.Builder(c))
                 .setSmallIcon(R.drawable.ic_stat)
                 .setContentTitle(chrono ? "Objectif atteint 💪" : "Pause terminée")
                 .setContentText(chrono ? (title.isEmpty() ? "Tu peux arrêter le chrono" : title + (end > start ? " · " + clock(end - start) + " tenu" : "")) : "C'est reparti 💪")
                 .setAutoCancel(true)
-                .setContentIntent(openApp())
+                .setContentIntent(openApp(c))
                 .setCategory(Notification.CATEGORY_REMINDER);
-        if (chrono) b.addAction(action());
+        if (chrono) b.addAction(action(c, true));
         if (Build.VERSION.SDK_INT < 26) {
             b.setPriority(Notification.PRIORITY_HIGH);
             if (watch) b.setVibrate(PATTERN);
         }
         try { nm.notify(ALERT_ID, b.build()); } catch (SecurityException ignored) { }
-        if (vib) vibrate(this);
+        if (vib) vibrate(c);
         if (!sound) return false;
         try {
             Uri u = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
             if (u == null) u = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            final Ringtone r = RingtoneManager.getRingtone(this, u);
+            final Ringtone r = RingtoneManager.getRingtone(c, u);
             if (r == null) return false;
             r.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build());
             r.play();
-            handler.postDelayed(() -> { try { r.stop(); } catch (Exception ignored) { } }, 3500);
+            h.postDelayed(() -> { try { r.stop(); } catch (Exception ignored) { } }, 3500);
             return true;
         } catch (Exception e) { return false; }
     }
@@ -318,6 +455,8 @@ public class RestTimerService extends Service {
     public void onDestroy() {
         handler.removeCallbacks(fire);
         handler.removeCallbacks(stopper);
+        release();
+        if (running.get() == this) running.clear();
         super.onDestroy();
     }
 

@@ -53,16 +53,69 @@ const ICON = {
 
 /* ================= Stockage local ================= */
 function emptyDb() { return { items: {}, lastServerAt: null, auth: null, mode: null, seeded: true, live: {}, owner: null }; }
+// données illisibles (écriture interrompue…) : le texte brut est mis de côté sous une autre clé avant toute écriture
+let unreadable = false;
 function load() {
-  try { const d = JSON.parse(localStorage.getItem(DB_KEY)); if (d && d.items) return Object.assign(emptyDb(), d); } catch (e) { }
+  let raw = null;
+  try { raw = localStorage.getItem(DB_KEY); } catch (e) { }
+  try { const d = JSON.parse(raw); if (d && d.items) return Object.assign(emptyDb(), d); } catch (e) { }
+  if (raw) { unreadable = true; try { localStorage.setItem(DB_KEY + "-illisible-" + new Date().toISOString().slice(0, 10), raw); } catch (e) { } }
   return emptyDb();
 }
 let db = load();
 if (db.auth && !db.owner) db.owner = db.auth.user.id;
-let saveTimer = null;
+let saveTimer = null, frozen = false, storageFull = false;
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 300); }
-function saveNow() { clearTimeout(saveTimer); try { localStorage.setItem(DB_KEY, JSON.stringify(db)); } catch (e) { console.error(e); } }
+function saveNow() {
+  clearTimeout(saveTimer); saveTimer = null;
+  if (frozen) return; // page en train de se recharger : rien n'est réécrit
+  try { localStorage.setItem(DB_KEY, JSON.stringify(db)); if (storageFull) { storageFull = false; storageBanner(); } }
+  catch (e) {
+    console.error(e);
+    if (!storageFull) { storageFull = true; storageBanner(); }
+  }
+}
 window.addEventListener("pagehide", saveNow);
+// stockage de l'appareil plein (ou refusé) : bandeau tant que l'enregistrement échoue
+function storageBanner() {
+  let b = document.getElementById("storage-full");
+  if (!storageFull) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("div"); b.id = "storage-full"; b.className = "storage-full"; b.setAttribute("role", "alert"); document.body.appendChild(b); }
+  b.innerHTML = "<b>Stockage de l'appareil plein</b> : tes dernières modifications ne sont pas enregistrées sur cet appareil. Fais une sauvegarde (Réglages › Données) puis libère de la place." +
+    (db.auth ? " Tant que la synchro fonctionne, elles partent quand même sur ton compte." : "");
+}
+// recharge la page (changement de compte, déconnexion) : rien de l'ancien compte ne reste en mémoire
+function restart(hash) { frozen = true; try { if (hash) history.replaceState(null, "", hash); } catch (e) { } location.reload(); }
+// plusieurs onglets ouverts (site sur ordinateur) : chaque onglet reprend ce que les autres enregistrent, élément par élément,
+// au lieu de les écraser avec sa propre copie
+window.addEventListener("storage", e => {
+  if (e.key !== DB_KEY || frozen || !e.newValue) return;
+  let o; try { o = JSON.parse(e.newValue); } catch (err) { return; }
+  if (!o || !o.items) return;
+  const uid = x => x && x.auth && x.auth.user ? x.auth.user.id : null;
+  if (uid(o) !== uid(db) || (o.owner || null) !== (db.owner || null) || (o.mode || null) !== (db.mode || null)) { restart(); return; } // déconnexion ou autre compte dans l'autre onglet
+  const mine = saveTimer !== null; // modifications pas encore enregistrées ici
+  let more = mine, changed = false;
+  for (const id of Object.keys(o.items)) {
+    const t = o.items[id], m = db.items[id];
+    if (!t || typeof t.updated_at !== "number") continue;
+    if (!m || t.updated_at > m.updated_at) { db.items[id] = t; changed = true; }
+    else if (t.updated_at === m.updated_at) { if (m.dirty && !t.dirty) m.dirty = false; }
+    else more = true;
+  }
+  if (!more) for (const id of Object.keys(db.items)) if (!o.items[id]) { more = true; break; }
+  if (db.auth && o.auth) { // jeton le plus récent (l'autre onglet a pu le renouveler)
+    if (o.auth.access_token !== db.auth.access_token) { if (o.auth.expires_at > db.auth.expires_at) db.auth = o.auth; }
+    else if (o.auth.dead && !db.auth.dead) db.auth = o.auth;
+  }
+  if (o.lastServerAt && (!db.lastServerAt || o.lastServerAt > db.lastServerAt)) db.lastServerAt = o.lastServerAt;
+  if (!mine) for (const k of Object.keys(o)) {
+    if (k === "items" || k === "auth" || k === "lastServerAt") continue;
+    if (JSON.stringify(o[k]) !== JSON.stringify(db[k])) { db[k] = o[k]; changed = true; }
+  }
+  if (changed) { dataRev++; softRender(); }
+  if (more) save(); // l'autre onglet reprendra aussi ce qui n'existe qu'ici
+});
 
 // compteur de modifications : permet de ne recalculer les listes triées qu'après un changement
 let dataRev = 0;
@@ -90,12 +143,17 @@ function putLater(kind, data) {
 function flushPending() {
   for (const id of Object.keys(pending)) { clearTimeout(pending[id]); delete pending[id]; const it = db.items[id]; if (it && !it.deleted) put(it.kind, it.data); }
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden) { flushPending(); saveNow(); } else { sync(); if (window.__fiitdayPending) window.__fiitdayPending(); } });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { flushPending(); saveNow(); return; }
+  sync(); if (window.__fiitdayPending) window.__fiitdayPending();
+  if (Native && route().name === "settings") softRender(); // retour des réglages de notification d'Android
+});
 
 /* ================= Données ================= */
 // identifiants : lettres, chiffres, « _ » et « - » seulement (ils sont insérés dans les attributs HTML)
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const okId = x => typeof x === "string" && ID_RE.test(x);
+const KINDS = { template: 1, workout: 1, settings: 1 }, NOTE_MAX = 1000; // genres d'éléments connus (une sauvegarde n'en apporte pas d'autres)
 function validItem(it) {
   if (!it || !okId(it.id) || typeof it.kind !== "string" || !it.data || typeof it.data !== "object") return false;
   if (it.deleted) return true;
@@ -401,17 +459,34 @@ async function authReq(path, body) {
 }
 function setSession(j) {
   db.auth = { access_token: j.access_token, refresh_token: j.refresh_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000, user: { id: j.user.id, email: j.user.email, name: (j.user.user_metadata && j.user.user_metadata.first_name) || "" } };
-  db.mode = "account"; saveNow();
+  db.mode = "account"; delete db.expired; saveNow();
 }
 let refreshing = null;
 async function ensureToken(force) {
   if (!db.auth) throw new Error("non connecté");
+  if (db.auth.dead) { const e = new Error("Ta connexion a expiré : reconnecte-toi à la fin de ta séance pour synchroniser."); e.status = 401; e.expired = true; throw e; }
   if (!force && db.auth.expires_at - 60000 > Date.now()) return;
-  if (!refreshing) refreshing = authReq("token?grant_type=refresh_token", { refresh_token: db.auth.refresh_token })
-    .then(setSession)
-    .catch(e => { if (e.status === 400 || e.status === 401) { db.auth = null; db.mode = null; saveNow(); render(); } throw e; })
-    .finally(() => { refreshing = null; });
+  if (!refreshing) {
+    const base = db, me = db.auth.user.id;
+    refreshing = authReq("token?grant_type=refresh_token", { refresh_token: db.auth.refresh_token })
+      .then(j => { if (db === base && db.auth && db.auth.user.id === me) setSession(j); })
+      .catch(e => { if ((e.status === 400 || e.status === 401) && db === base) expireSession(); throw e; })
+      .finally(() => { refreshing = null; });
+  }
   return refreshing;
+}
+// connexion refusée par le serveur (session révoquée, mot de passe changé ailleurs…) : les données restent sur l'appareil.
+// Pendant une séance, on la laisse finir (sans synchro) ; ensuite, écran de connexion avec un message et l'e-mail déjà rempli.
+function expireSession() {
+  if (!db.auth || db.auth.dead) return;
+  db.expired = { email: db.auth.user.email || "" };
+  if (activeWorkout()) {
+    db.auth.dead = true; saveNow();
+    syncState.status = "err"; syncState.error = "Ta connexion a expiré : reconnecte-toi à la fin de ta séance pour synchroniser."; updateSyncBadges();
+    toast("Ta connexion a expiré : continue ta séance, tu te reconnecteras à la fin");
+    return;
+  }
+  db.auth = null; db.mode = null; saveNow(); restart();
 }
 async function rest(method, path, body, headers) {
   await ensureToken();
@@ -425,35 +500,151 @@ async function rest(method, path, body, headers) {
     const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch (e) { }
     const e = new Error(j.message || t || ("Erreur " + r.status)); e.status = r.status; e.code = j.code; throw e;
   }
-  return method === "GET" ? r.json() : null;
+  return method === "GET" || /return=representation/.test((headers && headers.Prefer) || "") ? r.json() : null;
 }
 
-let syncTimer = null, syncing = false, syncAgain = false;
-function scheduleSync() { if (!db.auth) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 2500); }
+// textes envoyés au serveur : sans caractère nul ni moitié d'émoji (PostgreSQL les refuse et toute la synchro bloquerait)
+function fixStr(s) {
+  if (!/[\u0000\ud800-\udfff]/.test(s)) return s;
+  let r = "";
+  for (let k = 0; k < s.length; k++) {
+    const c = s.charCodeAt(k);
+    if (c === 0) continue;
+    if (c >= 0xd800 && c <= 0xdbff) { const d = s.charCodeAt(k + 1); if (d >= 0xdc00 && d <= 0xdfff) { r += s[k] + s[k + 1]; k++; } continue; }
+    if (c >= 0xdc00 && c <= 0xdfff) continue;
+    r += s[k];
+  }
+  return r;
+}
+function cleanData(x) {
+  if (typeof x === "string") return fixStr(x);
+  if (Array.isArray(x)) return x.map(cleanData);
+  if (x && typeof x === "object") { const r = {}; for (const k of Object.keys(x)) r[k] = cleanData(x[k]); return r; }
+  return x;
+}
+// texte coupé à n caractères sans casser un émoji, nettoyé des caractères invisibles de contrôle
+const cutStr = (s, n) => Array.from(fixStr(String(s == null ? "" : s)).replace(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")).slice(0, n).join("");
+// erreur propre à un élément (texte refusé, trop gros, contrainte) : on l'isole ; sinon (réseau, connexion) on réessaiera plus tard
+const itemError = e => e && !e.expired && (e.status === 400 || e.status === 409 || e.status === 413 || e.status === 422 || /^2[23]/.test(String(e.code || "")));
+const itemLabel = i => { const d = i.data || {}; return "« " + (i.kind === "workout" ? (d.variantName ? vLabel(d.variantName) : "séance") + (d.startedAt ? " du " + new Date(d.startedAt).toLocaleDateString("fr-FR") : "") : i.kind === "settings" ? "réglages" : d.name || i.kind) + " »"; };
+function syncErrText(e) {
+  if (e.expired) return e.message;
+  if (e.code === "PGRST205" || e.code === "42P01" || /items/.test(e.message) && e.status === 404) return "La base Supabase n'est pas encore prête (table « items » absente).";
+  if (e.message === "Failed to fetch" || e.name === "TypeError" || !e.status) return "Pas de connexion.";
+  if (e.status >= 500) return "Le serveur ne répond pas pour le moment : nouvel essai dans une minute.";
+  return "Le serveur a refusé la synchro (erreur " + (e.code || e.status) + "). Nouvel essai dans une minute ; si cela continue, écris-nous.";
+}
+function sendItems(list) {
+  const uid = db.auth.user.id;
+  return rest("POST", "items?on_conflict=user_id,id&select=id,updated_at", list.map(i => ({ user_id: uid, id: i.id, kind: i.kind, data: cleanData(i.data), updated_at: i.updated_at, deleted: !!i.deleted })),
+    { Prefer: "resolution=merge-duplicates,return=representation" });
+}
+// ligne reçue du serveur : la plus récente gagne ; un programme ou les réglages modifiés ici ET sur un autre appareil depuis la
+// dernière synchro sont fusionnés (chaque modification est gardée, élément par élément) au lieu d'être écrasés
+const MERGED = { template: 1, settings: 1 };
+function takeRow(r) {
+  if (!validItem(r)) { console.warn("élément ignoré (format inattendu)", r && r.id); return false; }
+  const loc = db.items[r.id], ru = Number(r.updated_at), b = db.base && db.base[r.id];
+  if (loc && loc.dirty && ru !== loc.updated_at && MERGED[r.kind] && loc.kind === r.kind && !loc.deleted && !r.deleted && b && b.u !== ru) {
+    let base; try { base = JSON.parse(b.d); } catch (e) { base = undefined; }
+    if (base !== undefined) {
+      const data = merge3(base, loc.data, r.data, loc.updated_at > ru, r.kind === "settings" ? SETTINGS_WHOLE : null);
+      data.id = r.id;
+      db.items[r.id] = { id: r.id, kind: r.kind, data, updated_at: Math.max(ru, loc.updated_at) + 1, deleted: false, dirty: true };
+      setBase(r.id, ru, r.data);
+      return true;
+    }
+  }
+  if (!loc || ru > loc.updated_at || (!loc.dirty && ru !== loc.updated_at)) {
+    db.items[r.id] = { id: r.id, kind: r.kind, data: r.data, updated_at: ru, deleted: r.deleted, dirty: false };
+    keepBase(db.items[r.id]);
+    return true;
+  }
+  if (!loc.dirty && ru === loc.updated_at && !(db.base && db.base[r.id])) keepBase(loc);
+  return false;
+}
+// version de référence (la dernière connue du serveur) des programmes et des réglages, pour fusionner
+function setBase(id, u, data) { db.base = db.base || {}; db.base[id] = { u, d: JSON.stringify(data) }; }
+function keepBase(it) {
+  if (!MERGED[it.kind]) return;
+  if (it.deleted) { if (db.base) delete db.base[it.id]; return; }
+  setBase(it.id, it.updated_at, it.data);
+}
+// réglages gardés en un seul bloc lors d'une fusion (programme actif et séances actives de la version gratuite vont ensemble)
+const SETTINGS_WHOLE = new Set(["freeActive"]);
+const same = (a, b) => a === b || JSON.stringify(a) === JSON.stringify(b);
+const isObj = x => !!x && typeof x === "object" && !Array.isArray(x);
+const byIds = a => Array.isArray(a) && a.every(x => isObj(x) && typeof x.id === "string");
+// fusion à trois versions : b = référence commune, m = ici, t = serveur ; pm = en cas de conflit sur une même valeur, garder celle d'ici
+function merge3(b, m, t, pm, whole, atom) { // atom : valeur gardée en un seul bloc
+  if (same(m, t)) return m;
+  if (same(b, m)) return t;
+  if (same(b, t)) return m;
+  if (!atom && isObj(m) && isObj(t)) {
+    const bo = isObj(b) ? b : {}, r = {};
+    for (const k of new Set(Object.keys(bo).concat(Object.keys(m), Object.keys(t)))) {
+      const v = whole && whole.has(k) ? merge3(bo[k], m[k], t[k], pm, null, true) : merge3(bo[k], m[k], t[k], pm);
+      if (v !== undefined) r[k] = v;
+    }
+    return r;
+  }
+  if (!atom && byIds(m) && byIds(t) && (b === undefined || byIds(b))) {
+    const bl = b || [], bm = new Map(bl.map(x => [x.id, x])), mm = new Map(m.map(x => [x.id, x])), tm = new Map(t.map(x => [x.id, x]));
+    const common = l => l.map(x => x.id).filter(id => bm.has(id) && mm.has(id) && tm.has(id));
+    const first = same(common(m), common(bl)) ? t : m, second = first === t ? m : t; // l'ordre de celui qui l'a changé
+    const out = [], seen = new Set();
+    const one = id => merge3(bm.get(id), mm.get(id), tm.get(id), pm);
+    first.forEach(x => { if (seen.has(x.id)) return; seen.add(x.id); const v = one(x.id); if (v !== undefined) out.push(v); });
+    second.forEach((x, k) => {
+      if (seen.has(x.id)) return; seen.add(x.id);
+      const v = one(x.id); if (v === undefined) return;
+      let pos = 0;
+      for (let j = k - 1; j >= 0; j--) { const q = out.findIndex(o => o.id === second[j].id); if (q >= 0) { pos = q + 1; break; } }
+      out.splice(pos, 0, v);
+    });
+    return out;
+  }
+  // même valeur changée des deux côtés, ou supprimée d'un côté et modifiée de l'autre : on ne perd pas la modification
+  if (m === undefined) return t;
+  if (t === undefined) return m;
+  return pm ? m : t;
+}
+// marques « supprimé » déjà envoyées depuis plus de 30 jours : retirées de l'appareil (le serveur les garde)
+function purgeTombs() {
+  const old = Date.now() - 30 * DAY;
+  for (const it of Object.values(db.items)) if (it.deleted && !it.dirty && it.updated_at < old) { delete db.items[it.id]; if (db.base) delete db.base[it.id]; }
+}
+let syncTimer = null, syncing = false, syncAgain = false, syncRun = null;
+function scheduleSync() { if (!db.auth || db.auth.dead) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 2500); }
+// attend la fin de la synchro en cours (avant une déconnexion ou une suppression de compte)
+async function syncIdle() { while (syncRun) { try { await syncRun; } catch (e) { } } }
 async function sync() {
-  if (!db.auth) return;
+  if (!db.auth || db.auth.dead) return;
+  const base = db, me = db.auth.user.id;
+  // le compte a changé pendant une attente (déconnexion, autre compte) : on s'arrête sans rien écrire
+  const gone = () => db !== base || !db.auth || db.auth.dead || db.auth.user.id !== me;
   if (!planTesting()) await loadPlan();
+  if (gone()) return;
+  if (!db.base) { db.base = {}; for (const it of Object.values(db.items)) if (!it.dirty) keepBase(it); } // première fois : versions de référence
   if (isFree() && !planTesting()) { syncState.status = "free"; updateSyncBadges(); return; } // version gratuite : les données restent sur l'appareil
   if (syncing) { syncAgain = true; return; }
   if (navigator.onLine === false) { syncState.status = "offline"; updateSyncBadges(); return; }
   syncing = true; if (syncState.status !== "ok") { syncState.status = "busy"; updateSyncBadges(); } // déjà synchronisé : la synchro de fond ne change pas le texte (pas de saut à l'écran)
-  let changed = false;
+  let changed = false, endRun;
+  syncRun = new Promise(r => { endRun = r; });
   try {
-    // 1) récupérer ce qui a changé sur le serveur
+    // 1) récupérer ce qui a changé sur le serveur (avec 5 s de marge : une écriture validée juste après la dernière lecture
+    //    n'est jamais sautée ; relire deux fois la même ligne est sans effet)
     let since = db.lastServerAt, maxSeen = db.lastServerAt;
+    if (since) { const t = Date.parse(since); if (t) since = new Date(t - 5000).toISOString(); }
     for (let page = 0; page < 50; page++) {
       let q = "items?select=id,kind,data,updated_at,deleted,server_at&order=server_at.asc&limit=1000";
       if (since) q += "&server_at=gte." + encodeURIComponent(since);
       const rows = await rest("GET", q);
+      if (gone()) return;
       for (const r of rows) {
         if (r && (!maxSeen || r.server_at > maxSeen)) maxSeen = r.server_at;
-        if (!validItem(r)) { console.warn("élément ignoré (format inattendu)", r && r.id); continue; }
-        const loc = db.items[r.id];
-        const ru = Number(r.updated_at);
-        if (!loc || ru > loc.updated_at || (!loc.dirty && ru !== loc.updated_at)) {
-          db.items[r.id] = { id: r.id, kind: r.kind, data: r.data, updated_at: ru, deleted: r.deleted, dirty: false };
-          changed = true; dataRev++;
-        }
+        if (takeRow(r)) { changed = true; dataRev++; }
       }
       if (rows.length < 1000) break;
       since = rows[rows.length - 1].server_at;
@@ -461,28 +652,62 @@ async function sync() {
     db.lastServerAt = maxSeen;
     purgeBody(); // plus de page Corps : les anciennes mesures sont effacées, contenu compris
     freezeNotes(); renameVariants(); // après la récupération : les données sont à jour, aucun risque d'écraser une modif récente
-    // 2) envoyer ce qui a changé ici
-    const dirty = Object.values(db.items).filter(i => i.dirty);
+    // 2) envoyer ce qui a changé ici, par paquets de 200 ; le serveur renvoie ce qu'il a enregistré (il garde sa version
+    //    si elle est plus récente) ; un élément qu'il refuse (texte invalide, trop gros…) est mis de côté sans bloquer les autres
+    const dirty = Object.values(db.items).filter(i => i.dirty && !i.refused);
+    const later = [];
     for (let k = 0; k < dirty.length; k += 200) {
       const chunk = dirty.slice(k, k + 200);
-      const snap = chunk.map(i => i.updated_at);
-      await rest("POST", "items?on_conflict=user_id,id", chunk.map(i => ({ user_id: db.auth.user.id, id: i.id, kind: i.kind, data: i.data, updated_at: i.updated_at, deleted: !!i.deleted })),
-        { Prefer: "resolution=merge-duplicates,return=minimal" });
-      chunk.forEach((i, n) => { const cur = db.items[i.id]; if (cur && cur.updated_at === snap[n]) cur.dirty = false; });
+      let saved;
+      try { saved = await sendItems(chunk); }
+      catch (e) {
+        if (gone()) return;
+        if (!itemError(e)) throw e;
+        saved = [];
+        for (const i of chunk) {
+          try { saved = saved.concat(await sendItems([i]) || []); }
+          catch (e1) {
+            if (gone()) return;
+            if (!itemError(e1)) throw e1;
+            console.warn("élément refusé par le serveur", i.id, e1.message);
+            const cur = db.items[i.id]; if (cur && cur.updated_at === i.updated_at) cur.refused = true;
+          }
+        }
+      }
+      if (gone()) return;
+      const back = Array.isArray(saved) ? new Map(saved.map(x => [x.id, Number(x.updated_at)])) : null;
+      chunk.forEach(i => {
+        const cur = db.items[i.id]; if (!cur || cur.updated_at !== i.updated_at || cur.refused) return;
+        if (!back || back.get(i.id) === i.updated_at) { cur.dirty = false; keepBase(cur); }
+        else later.push(i.id); // le serveur a gardé une version plus récente : on la relit pour fusionner
+      });
     }
+    // versions plus récentes gardées par le serveur : relues tout de suite (fusion des programmes et réglages, sinon la plus récente gagne)
+    for (let k = 0; k < later.length; k += 100) {
+      const rows = await rest("GET", "items?select=id,kind,data,updated_at,deleted,server_at&id=in.(" + later.slice(k, k + 100).join(",") + ")");
+      if (gone()) return;
+      for (const r of rows) if (takeRow(r)) { changed = true; dataRev++; }
+      syncAgain = true;
+    }
+    purgeTombs();
     saveNow();
-    syncState.status = "ok"; syncState.at = Date.now(); syncState.error = "";
+    const refused = Object.values(db.items).filter(i => i.dirty && i.refused);
+    syncState.status = "ok"; syncState.at = Date.now();
+    syncState.error = refused.length ? (refused.length > 1 ? refused.length + " éléments n'ont pas pu être envoyés" : "Un élément n'a pas pu être envoyé") +
+      " (" + refused.slice(0, 3).map(itemLabel).join(", ") + (refused.length > 3 ? "…" : "") + ") : le serveur les refuse. Modifie-les ou supprime-les ; tout le reste est synchronisé." : "";
   } catch (e) {
     console.error(e);
+    if (gone()) return;
     if ((e.status === 403 || e.code === "42501") && !planTesting()) { await loadPlan(true); if (isFree()) { syncState.status = "free"; return; } } // le serveur refuse : abonnement fini
     syncState.status = "err";
-    syncState.error = e.code === "PGRST205" || e.code === "42P01" || /items/.test(e.message) && e.status === 404
-      ? "La base Supabase n'est pas encore prête (table « items » absente)." : (e.message === "Failed to fetch" ? "Pas de connexion." : e.message);
+    syncState.error = syncErrText(e);
   } finally {
-    syncing = false;
-    updateSyncBadges();
-    if (changed) softRender();
-    if (syncAgain) { syncAgain = false; scheduleSync(); }
+    syncing = false; syncRun = null; endRun();
+    if (!gone()) {
+      updateSyncBadges();
+      if (changed) softRender();
+      if (syncAgain) { syncAgain = false; scheduleSync(); }
+    }
   }
 }
 setInterval(() => { if (!document.hidden) sync(); }, 60000);
@@ -495,9 +720,11 @@ function syncBadge() {
   const txt = s === "free" ? "Synchro réservée à Premium" : s === "ok" ? "Synchronisé " + fmtTime(syncState.at) : s === "err" ? "Synchro en échec" : s === "busy" ? "Synchronisation…" : s === "offline" ? "Pas de réseau" : "En attente";
   return '<span class="sync" data-sync><span class="dot ' + cls + '"></span>' + esc(txt) + "</span>";
 }
+// message sous l'état de la synchro (échec, ou élément refusé par le serveur alors que le reste est synchronisé)
+const syncMsg = () => syncState.status === "err" || syncState.status === "ok" ? syncState.error || "" : "";
 function updateSyncBadges() {
   const html = syncBadge(); document.querySelectorAll("[data-sync]").forEach(el => { if (el.outerHTML !== html) el.outerHTML = html; });
-  const e = document.querySelector("[data-sync-error]"); if (e) e.textContent = syncState.status === "err" ? syncState.error : "";
+  const e = document.querySelector("[data-sync-error]"); if (e) e.textContent = syncMsg();
 }
 
 /* ================= Navigation ================= */
@@ -673,6 +900,7 @@ let localFixed = false; // sans compte : anciens noms et anciennes mesures corri
 function renderNow() {
   applyTheme();
   if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
+  if (db.auth && db.auth.dead && !activeWorkout()) { db.auth = null; db.mode = null; saveNow(); restart(); return; } // séance finie après une session expirée : reconnexion
   if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
   document.title = "Fiitday";
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
@@ -872,10 +1100,11 @@ function viewLogin() {
     '<p class="muted small">Pas reçu ? Regarde dans les spams.</p><button class="btn" data-act="resend">Renvoyer le code</button>' +
     '<button class="link" data-act="changemail">Changer d\'adresse e-mail</button></div>';
   if (resetStep) return viewReset();
-  const up = loginMode === "up", em = esc(loginEmail);
+  const up = loginMode === "up", em = esc(loginEmail || (!up && db.expired && db.expired.email) || "");
   // (le mode « sans compte » existe toujours dans le code, mais n'est plus proposé sur cet écran)
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Fiitday</h1>' +
     '<p class="muted">' + (up ? "Crée ton compte pour enregistrer tes séances sur ton téléphone et sur ton ordinateur." : "Connecte-toi pour retrouver tes séances sur ton téléphone et sur ton ordinateur.") + "</p>" +
+    (db.expired && !up ? '<p class="msg warn" role="status">Ta connexion a expiré (mot de passe changé ou déconnexion sur un autre appareil ?). Reconnecte-toi : tes données sont gardées sur cet appareil.</p>' : "") +
     '<form data-form="login" class="stack">' +
     (up ? '<label class="fl">Prénom<input class="f" name="firstname" autocomplete="given-name" maxlength="40" value="' + esc(loginName) + '"></label>' : "") +
     '<label class="fl">E-mail<input class="f" type="email" name="email" autocomplete="email" value="' + em + '" required></label>' +
@@ -896,7 +1125,7 @@ function viewLogin() {
 // ou « Créer mon compte » (#/connexion). Jamais dans l'appli Android (connexion directe). Les liens internes de la page sont des
 // boutons : un lien « #… » ouvrirait une page de l'appli. Les captures (données d'exemple) sont dans src/landing, clair et sombre.
 const LP_TITLE = "Fiitday · Ton carnet de musculation";
-const showLanding = () => !Native && !db.auth && db.mode !== "local" && !db.verify && !resetStep && route().name === "home";
+const showLanding = () => !Native && !db.auth && db.mode !== "local" && !db.verify && !db.expired && !resetStep && route().name === "home";
 const LP_ICON = {
   cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
   body: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M4 9l8-1 8 1M12 8v6l-4 7M12 14l4 7"/></svg>',
@@ -1074,18 +1303,49 @@ function authMessage(e) {
   if (m === "Failed to fetch") return "Pas de connexion internet.";
   return m;
 }
+// données d'un compte gardées à part sur l'appareil (déconnexion avec des modifications pas encore envoyées, version gratuite,
+// session expirée puis autre compte) : clé propre à chaque compte, reprises quand CE compte se reconnecte ici
+const asideKey = uid => DB_KEY + ":garde:" + uid;
+function keepAside(uid, everything) {
+  const items = {}; let n = 0;
+  for (const it of Object.values(db.items)) if (everything || it.dirty) { items[it.id] = Object.assign({}, it, { dirty: true, refused: undefined }); n++; }
+  if (!n || !uid) return 0;
+  try { const prev = JSON.parse(localStorage.getItem(asideKey(uid)) || "null"); if (prev && prev.items) for (const id of Object.keys(prev.items)) { const p = prev.items[id]; if (!items[id] || p.updated_at > items[id].updated_at) items[id] = p; } } catch (e) { }
+  try { localStorage.setItem(asideKey(uid), JSON.stringify({ at: Date.now(), items })); return n; } catch (e) { return -1; }
+}
+function takeAside(uid) {
+  let k = null; try { k = JSON.parse(localStorage.getItem(asideKey(uid)) || "null"); } catch (e) { }
+  try { localStorage.removeItem(asideKey(uid)); } catch (e) { }
+  if (!k || !k.items) return 0;
+  let n = 0;
+  for (const it of Object.values(k.items)) {
+    if (!validItem(it) || typeof it.updated_at !== "number" || !KINDS[it.kind]) continue;
+    const cur = db.items[it.id];
+    if (!cur || it.updated_at > cur.updated_at) { db.items[it.id] = { id: it.id, kind: it.kind, data: it.data, updated_at: it.updated_at, deleted: !!it.deleted, dirty: true }; n++; }
+  }
+  if (n) dataRev++;
+  return n;
+}
 async function afterLogin() {
   loginMode = "in"; loginEmail = "";
-  db.verify = null; db.seeded = true; db.lastServerAt = null;
+  db.verify = null; db.seeded = true; db.lastServerAt = null; delete db.expired;
   const uidNow = db.auth.user.id;
   if (db.owner && db.owner !== uidNow) {
-    // données laissées par un AUTRE compte sur cet appareil (session expirée) : on ne les mélange pas
-    db.items = {}; db.live = {}; dataRev++;
+    // données laissées par un AUTRE compte sur cet appareil (session expirée) : on ne les mélange pas ;
+    // ce qui n'avait pas été envoyé est gardé à part et reviendra quand ce compte se reconnectera ici
+    const kept = keepAside(db.owner, db.plan && db.plan.state === "free" && db.plan.launched);
+    if (kept < 0 && !await ask({ title: "Données de l'autre compte", text: "Des modifications de l'autre compte n'ont pas encore été envoyées et le stockage de l'appareil est plein : elles seront perdues. Annule pour enregistrer d'abord une sauvegarde (Réglages › Données) avec l'autre compte.", ok: "Continuer quand même", cancel: "Annuler", danger: true })) {
+      db.auth = null; db.mode = null; saveNow(); restart(); return;
+    }
+    db.items = {}; db.live = {}; db.base = {}; dataRev++;
+    if (kept > 0) toast("Les modifications pas encore envoyées de l'autre compte restent gardées sur cet appareil : elles repartiront à sa prochaine connexion ici");
   } else if (!db.owner) {
     // données saisies sans compte : elles sont envoyées au compte
     Object.values(db.items).forEach(i => { if (i.updated_at > 0) i.dirty = true; });
   }
   db.owner = uidNow; db.plan = null; famSrv = null;
+  const back = takeAside(uidNow);
+  if (back > 0) toast(back > 1 ? back + " modifications gardées sur cet appareil ont été reprises" : "Une modification gardée sur cet appareil a été reprise");
   saveNow(); await loadPlan(true); render(); await sync();
   if (db.pendingConsent || db.pendingName) {
     const st = settings();
@@ -1234,7 +1494,7 @@ async function startWorkout(tid, vid, direct) {
   };
   put("workout", w);
   db.live = {}; save();
-  go("session/" + w.id);
+  go("session/" + w.id); setTimeout(notifIntro, 600);
 }
 
 /* ================= Séance libre (accueil) : sans programme ================= */
@@ -1264,7 +1524,7 @@ async function freeStart() {
     act.endedAt = Date.now(); put("workout", act);
   }
   const w = { id: "w-" + uid(), templateId: "libre", variantId: "libre", templateName: "Séance libre", variantName: "Sans programme", free: true, startedAt: Date.now(), endedAt: null, exercises };
-  put("workout", w); db.live = {}; save(); go("session/" + w.id);
+  put("workout", w); db.live = {}; save(); go("session/" + w.id); setTimeout(notifIntro, 600);
 }
 // à la fin d'une séance libre : la garder comme séance d'un programme, pour la relancer plus tard
 async function keepFreeSession(w) {
@@ -1307,7 +1567,7 @@ async function cardioNow(exs) {
   exs = exs || await cardioPick(act ? "Ajouter à la séance en cours" : "Lancer une séance cardio"); if (!exs || !exs.length) return;
   if (act) { act.exercises.push(...exs); put("workout", act); toast(exs.length > 1 ? "Machines ajoutées à la séance en cours" : "Ajouté à la séance en cours"); go("session/" + act.id); return; }
   const w = cardioWorkout(Date.now(), exs, false);
-  put("workout", w); db.live = {}; save(); go("session/" + w.id);
+  put("workout", w); db.live = {}; save(); go("session/" + w.id); setTimeout(notifIntro, 600);
 }
 async function cardioPast() {
   const at = await askWhen(); if (!at) return;
@@ -1443,7 +1703,7 @@ function applyDrops(e, n, scope) {
 }
 function noteBox(w, e, i, letter) {
   const te = e.note == null ? tplExercise(w, e.exId) : null, note = e.note != null ? e.note : (te && te.note) || ""; // la note de CETTE séance
-  return '<textarea class="f" data-f="note" data-i="' + i + '" placeholder="Notes' + (letter ? " " + letter + " · " + esc(e.name) : " (réglages, sensations…)") + '" aria-label="Notes ' + esc(e.name) + '">' + esc(note) + "</textarea>";
+  return '<textarea class="f" data-f="note" data-i="' + i + '" maxlength="' + NOTE_MAX + '" placeholder="Notes' + (letter ? " " + letter + " · " + esc(e.name) : " (réglages, sensations…)") + '" aria-label="Notes ' + esc(e.name) + '">' + esc(note) + "</textarea>";
 }
 // machine de cardio en séance : durée (chrono ou saisie), indicateurs de la machine et les tiens, validation
 function cardioBody(w, e, i) {
@@ -1788,7 +2048,7 @@ function exFields(e, k, letter, inGroup) {
     (inGroup || cardio ? "" : '<div class="fl"><span>Repos</span><button type="button" class="f pick" data-act="picksec" data-sf="rest" data-e="' + k + '">' + fmtSecs(num(e.rest) || 0) + "</button></div>") +
     (time || dist || rep || cardio ? "" : '<label class="fl">Dégressif<select class="f" data-p="drops" data-e="' + k + '">' + [0, 1, 2, 3].map(n => '<option value="' + n + '"' + (d === n ? " selected" : "") + ">" + (n ? "Oui · " + n + " baisse" + (n > 1 ? "s" : "") : "Non") + "</option>").join("") + "</select></label>") +
     (time || dist || rep || cardio || !d ? "" : '<label class="fl">Dégressif sur<select class="f" data-p="dscope" data-e="' + k + '"><option value="all"' + (e.dropScope !== "last" ? " selected" : "") + '>Toutes les séries</option><option value="last"' + (e.dropScope === "last" ? " selected" : "") + ">La dernière série</option></select></label>") +
-    '<label class="fl full">Notes<textarea class="f" data-p="note" data-e="' + k + '" placeholder="Réglages de la machine, consignes…">' + esc(e.note) + "</textarea></label></div>";
+    '<label class="fl full">Notes<textarea class="f" data-p="note" data-e="' + k + '" maxlength="' + NOTE_MAX + '" placeholder="Réglages de la machine, consignes…">' + esc(e.note) + "</textarea></label></div>";
 }
 function viewProgram(tid, vid) {
   const t = getItem(tid);
@@ -2641,16 +2901,16 @@ async function importShared(code) {
   if (!dest) return;
   const gmap = {};
   const exercises = data.ex.map(x => {
-    const e = { id: "e-" + uid(), name: String(x.n || "Exercice").slice(0, 80), lib: libById[x.li] ? x.li : undefined, type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: String(x.c == null ? "" : x.c).slice(0, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(1200, num(x.rn) || num(data.rb) || 0)), note: String(x.no || "").slice(0, 500), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
+    const e = { id: "e-" + uid(), name: cutStr(x.n || "Exercice", 80) || "Exercice", lib: libById[x.li] ? x.li : undefined, type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: cutStr(x.c, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(1200, num(x.rn) || num(data.rb) || 0)), note: cutStr(x.no, NOTE_MAX), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
     if (x.g && GROUP_LABEL[x.k]) { gmap[x.g] = gmap[x.g] || "g-" + uid(); e.groupId = gmap[x.g]; e.groupKind = x.k; }
     return e;
   });
   let t, vid = "v" + uid();
   if (dest === "new") {
-    t = { id: "tpl-" + uid(), name: String(data.prog || "Programme partagé").slice(0, 60), order: ts.length, variants: [{ id: vid, name: String(data.name || "Séance partagée").slice(0, 60), exercises }] };
+    t = { id: "tpl-" + uid(), name: cutStr(data.prog, 60) || "Programme partagé", order: ts.length, variants: [{ id: vid, name: cutStr(data.name, 60) || "Séance partagée", exercises }] };
   } else {
     t = getItem(dest.slice(2)); if (!t) return;
-    let name = String(data.name || "Séance partagée").slice(0, 60);
+    let name = cutStr(data.name, 60) || "Séance partagée";
     if (t.variants.some(v => vLabel(v.name) === name)) name += " (partagée)";
     t.variants.push({ id: vid, name, exercises });
   }
@@ -2660,6 +2920,21 @@ async function importShared(code) {
 /* ================= Minuteur de repos dans les notifications (appli Android) ================= */
 let nativeRestSent = null, nativeRestEnd = 0, nativeChronoSent = null, notifAsked = false;
 function askNotif() { if (!notifAsked && Native.askNotifications) { notifAsked = true; Native.askNotifications(); } }
+// notifications de Fiitday refusées (appli Android) ?
+const notifOff = () => { try { return !!(Native && typeof Native.notificationsOn === "function" && Native.notificationsOn() === "0"); } catch (e) { return false; } };
+function notifCard() {
+  if (!notifOff()) return "";
+  return '<div class="small notif-off"><b>Notifications de Fiitday désactivées.</b> Le téléphone vibre quand même à la fin du repos, mais le temps restant ne s\'affiche pas à l\'écran verrouillé ni sur ta montre.' +
+    '<div style="margin-top:8px"><button class="btn sm" data-act="notifon">Autoriser les notifications</button></div></div>';
+}
+// première séance dans l'appli Android : on explique à quoi servent les notifications, puis Android pose sa question (une seule fois)
+async function notifIntro() {
+  if (!notifOff() || typeof Native.enableNotifications !== "function") return;
+  try { if (localStorage.getItem("fiitday-notif-intro")) return; localStorage.setItem("fiitday-notif-intro", "1"); } catch (e) { return; }
+  if (await ask({ title: "Être prévenu à la fin du repos", text: "Fiitday affiche le temps de repos dans les notifications (écran verrouillé, montre) et te prévient à la fin. Autorise les notifications à l'étape suivante.\n\nTu pourras changer d'avis dans Réglages › Alerte de fin de repos.", ok: "Continuer", cancel: "Pas maintenant" })) Native.enableNotifications();
+}
+// minuteur refusé par Android (appli en arrière-plan) : on prévient
+window.__fiitdayTimerFail = () => { toast("Android n'a pas pu lancer le minuteur : garde Fiitday ouvert pendant ce repos"); return true; };
 function syncNativeRest() {
   if (!Native || !Native.startRestTimer) return;
   const L = db.live || {}, v = L.restEnd || 0, wOn = watchOn();
@@ -2668,7 +2943,7 @@ function syncNativeRest() {
   nativeRestSent = key;
   try {
     if (v) {
-      askNotif();
+      if (typeof Native.enableNotifications !== "function") askNotif(); // ancienne appli : question d'Android au premier repos
       if (typeof Native.startRest === "function") Native.startRest(String(v), settings().alert, L.restLabel || "Repos", wOn);
       else Native.startRestTimer(String(v), settings().alert);
       nativeRestEnd = v;
@@ -2691,7 +2966,7 @@ function syncNativeChrono() {
       const w = getItem(c.wid), ex = w && w.exercises[c.i];
       const title = chronoKind(w, c) + (ex ? " · " + ex.name : "");
       const text = c.target ? "Objectif " + fmtHold(c.target) : c.dist ? "Distance : " + fmtNum(c.dist) + " m" : "";
-      askNotif();
+      if (typeof Native.enableNotifications !== "function") askNotif();
       Native.startChrono(String(c.start), String(Math.round(c.target || 0)), settings().alert, title, text, wOn);
     } else Native.stopChrono();
   } catch (e) { }
@@ -2704,7 +2979,7 @@ function nativeAction(act, at) {
     const c = L.chrono; if (!c || at < c.start - 10000) return;
     const w = getItem(c.wid);
     if (w) stopChrono(w, at); else L.chrono = null;
-    save(); render();
+    save(); render(); tick(); // le repos suivant part tout de suite dans le minuteur d'Android (encore en marche)
   }
 }
 window.__fiitdayPending = () => {
@@ -3050,7 +3325,21 @@ const backupName = () => { const d = new Date(); return "fiitday-sauvegarde-" + 
 // fichier : dans l'appli Android, le téléphone demande où l'enregistrer (Téléchargements, Drive…) ; sur le site, téléchargement classique
 const nativeFiles = () => !!(window.AndroidBridge && typeof window.AndroidBridge.saveFile === "function" && typeof window.AndroidBridge.openFile === "function");
 let fileCb = null;
-window.__fiitdayFile = (kind, status, text) => { const cb = fileCb; fileCb = null; if (cb) cb(status, text); };
+window.__fiitdayFile = (kind, status, text) => {
+  const cb = fileCb; fileCb = null;
+  if (cb) { cb(status, text); return; }
+  // la page a été rechargée pendant que le sélecteur de fichiers était ouvert (Android a fermé l'appli) : on finit ici
+  if (kind === "save") toast(status === "ok" ? "Sauvegarde enregistrée" : status === "error" ? "La sauvegarde n'a pas pu être enregistrée" : "Enregistrement annulé");
+  else if (kind === "open" && status === "ok" && text) setTimeout(() => restoreBackup(text, "Ce fichier n'est pas une sauvegarde Fiitday"), 800);
+  else if (kind === "open" && status === "error") toast("Ce fichier n'a pas pu être lu");
+};
+window.__fiitdayFileReady = () => {
+  try {
+    const t = Native && typeof Native.takeFile === "function" ? Native.takeFile() : "";
+    if (t) { const r = JSON.parse(t); window.__fiitdayFile(r.kind, r.status, r.text == null ? null : r.text); }
+  } catch (e) { }
+  return true;
+};
 function saveFile(name, text) {
   if (nativeFiles()) return new Promise(res => { fileCb = st => res(st); window.AndroidBridge.saveFile(name, text); });
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" })); a.download = name;
@@ -3109,7 +3398,7 @@ const FAQ = [
     ["superset", "Comment faire un superset ou un dégressif ?", "Ajoute d'abord tes exercices, puis dans la configuration de la séance : « Enchaîner avec l'exercice suivant » relie deux exercices en superset ou biset (un 3e exercice ajouté au groupe en fait un triset), et le réglage « Dégressif » d'un exercice ajoute les baisses de charge. Dans un superset, le repos démarre seulement quand tout le tour est fini."]]],
   ["Pendant la séance", [
     ["repos", "Comment fonctionne le repos ?", "Quand tu valides une série (✓), le repos démarre tout seul avec la durée réglée pour l'exercice. Tu peux ajouter ou enlever 15 s, le passer ou le réduire. Après la dernière série d'un exercice, c'est le « Repos avant l'exercice suivant » qui démarre : il se règle dans la configuration de la séance."],
-    ["alerte", "Je ne suis pas prévenu à la fin du repos, que faire ?", "Vérifie <a href=\"#/settings\">Réglages</a> › Alerte de fin de repos (Vibration, Son, ou les deux allumés ensemble) et appuie sur « Tester ». Dans l'appli Android, autorise les notifications de Fiitday : elles te préviennent même écran verrouillé. Limite d'Android : hors de l'appli, un repos de plus de 3 minutes peut ne pas sonner à la fin."],
+    ["alerte", "Je ne suis pas prévenu à la fin du repos, que faire ?", "Vérifie <a href=\"#/settings\">Réglages</a> › Alerte de fin de repos (Vibration, Son, ou les deux allumés ensemble) et appuie sur « Tester ». Dans l'appli Android, « Tester » fait la vraie alerte 5 secondes plus tard : verrouille ton téléphone pour l'essayer. Autorise aussi les notifications de Fiitday (le bouton est dans Réglages › Alerte de fin de repos) : le temps de repos s'affiche alors à l'écran verrouillé et sur ta montre. Sans elles, le téléphone vibre quand même à la fin du repos."],
     ["chrono", "Comment marche le chrono du gainage et des étirements ?", "Appuie sur ▶ « Chrono » : tu as 5 secondes pour te mettre en position, puis le chrono démarre. Quand tu l'arrêtes, le temps s'inscrit tout seul dans la série (il ne se modifie pas à la main). Pour la course et l'Hyrox, tu peux aussi taper ton temps : « 405 » devient 4:05."],
     ["gris", "À quoi servent les chiffres en gris ?", "Ce sont tes valeurs de la dernière fois pour cet exercice. Le bouton ✓ les reprend si tu as fait pareil ; sinon, tape simplement tes nouveaux chiffres."]]],
   ["Progrès et exercices", [
@@ -3310,8 +3599,10 @@ function loadPlan(force) {
   if (!force && db.plan && Date.now() - (db.plan.at_ms || 0) < 10 * 60000) return Promise.resolve(db.plan);
   if (planLoading) return planLoading;
   planLoading = (async () => {
+    const base0 = db;
     try {
       const p = await rpc("my_plan");
+      if (db !== base0) return null; // déconnecté pendant l'attente
       if (p && p.state && p.state !== "none") { const before = planState() + "|" + JSON.stringify(db.plan && db.plan.source); db.plan = Object.assign(p, { at_ms: Date.now() }); saveNow(); if (planState() + "|" + JSON.stringify(p.source) !== before) render(); }
     } catch (e) { /* hors ligne : le dernier statut connu reste valable, et le serveur vérifie de toute façon */ }
     finally { planLoading = null; }
@@ -4472,7 +4763,7 @@ function viewSettings() {
     '<div class="card"><b>Apparence</b><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
     '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
       return '<button class="swatch' + (on ? " on" : "") + '" aria-pressed="' + on + '" data-act="set" data-k="accent" data-val="' + k + '"><i style="background:linear-gradient(135deg,' + c + ')"></i>' + l + "</button>"; }).join("") + "</div></div>" +
-    '<div class="card"><b>Alerte de fin de repos</b><div class="alert-row">' + alertSeg(sv("alert")) + '<button class="btn sm" data-act="testalert">Tester</button></div></div>' +
+    '<div class="card"><b>Alerte de fin de repos</b><div class="alert-row">' + alertSeg(sv("alert")) + '<button class="btn sm" data-act="testalert">Tester</button></div>' + notifCard() + "</div>" +
     '<div class="card"><b>Étirements après la séance</b><div class="small muted" style="margin-top:4px">À la fin d\'une séance, l\'accueil propose pendant 15 minutes des étirements adaptés aux muscles travaillés.</div><div style="margin-top:10px">' + seg("stretchTips", [["oui", "Activés"], ["non", "Désactivés"]]) + "</div></div>" +
     '<div class="card"><b>Objectif de séances par semaine</b><div style="margin-top:10px">' + seg("goal", [["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"]]) + "</div></div>" +
     '<div class="card"><b>Données</b><div class="small muted" style="margin-top:4px">Tes programmes, séances et réglages.</div>' +
@@ -4483,7 +4774,7 @@ function viewSettings() {
     '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px 14px"><a class="link small" style="padding:0;display:inline-flex;align-items:center" href="#/faq/sauvegarde">Comment ça marche ?</a></div></div>' +
     '<div class="card"><b>Compte</b><div style="margin-top:8px">' +
     (db.auth ? '<label class="fl" style="margin-bottom:8px">Prénom<input class="f" data-setname maxlength="40" autocomplete="given-name" value="' + esc(firstName()) + '" placeholder="Ton prénom"></label>' +
-      '<div class="small">Connecté : ' + esc(db.auth.user.email) + "</div><div class=\"sync-row\">" + syncBadge() + '<button class="link small" data-act="syncnow">Synchroniser maintenant</button></div><div class="small msg err" data-sync-error>' + (syncState.status === "err" ? esc(syncState.error) : "") + "</div>" +
+      '<div class="small">Connecté : ' + esc(db.auth.user.email) + "</div><div class=\"sync-row\">" + syncBadge() + '<button class="link small" data-act="syncnow">Synchroniser maintenant</button></div><div class="small msg err" data-sync-error>' + esc(syncMsg()) + "</div>" +
       '<button class="btn sm pw-btn" data-act="pwchange">Changer mon mot de passe</button><div class="row duo"><button class="btn sm" data-act="logout">Se déconnecter</button><button class="btn sm danger" data-act="delaccount">Supprimer mon compte</button></div>'
       : '<div class="small muted">Sans compte : tes données restent sur cet appareil.</div><button class="btn sm primary" style="margin-top:8px" data-act="tologin">Se connecter / créer un compte</button>') +
     "</div></div>" +
@@ -4570,7 +4861,7 @@ function armEdge() {
   if (wait != null) edgeTimer = setTimeout(() => { tick(); armEdge(); }, wait + 2);
 }
 setInterval(() => { if (!edgeTimer) armEdge(); }, 1000);
-// fin du repos : l'appli clignote (sombre / clair) pendant 5 s avec un message au centre
+// fin du repos : l'appli clignote (sombre / clair, 1 fois par seconde) pendant 5 s avec un message au centre
 function restDone() {
   document.querySelectorAll(".restpop.done").forEach(x => x.remove());
   const d = document.createElement("div"); d.className = "restpop done"; d.setAttribute("role", "alert");
@@ -4580,6 +4871,8 @@ function restDone() {
   d.addEventListener("click", close);
   setTimeout(() => { if (d.isConnected) d.remove(); }, 5000);
   clearInterval(flashTimer);
+  // pas de clignotement si l'alerte est sur « Aucune » ou si le téléphone demande de réduire les animations : le message reste
+  if (settings().alert === "aucune" || (window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
   const root = document.documentElement; let n = 0;
   flashTimer = setInterval(() => {
     n++; root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
@@ -4753,10 +5046,23 @@ $app.addEventListener("click", async e => {
       catch (err) { msg.className = "msg err"; msg.textContent = authMessage(err); }
     } break;
     case "logout": {
-      if (!await ask({ title: "Se déconnecter ?", text: "Tes données restent enregistrées dans ton compte. Elles seront effacées de cet appareil.", ok: "Se déconnecter", danger: true })) return;
-      flushPending(); await sync();
-      if (Object.values(db.items).some(x => x.dirty) && !await ask({ title: "Modifications non envoyées", text: "Certaines modifications n'ont pas pu être envoyées (pas de réseau ?). Se déconnecter quand même ?", ok: "Oui", danger: true })) return;
-      billingLogout(); db = emptyDb(); dataRev++; consentAsked = nameAsked = false; famSrv = null; saveNow(); go("home"); render(); break;
+      const local = isFree() && !planTesting(); // version gratuite : pas de synchro, les données ne sont que sur cet appareil
+      if (!await ask({ title: "Se déconnecter ?", text: local ? "En version gratuite, tes données ne sont enregistrées que sur cet appareil. Elles y restent gardées et reviendront quand tu te reconnecteras ici (pas sur un autre appareil)." : "Tes données restent enregistrées dans ton compte. Elles seront effacées de cet appareil.", ok: "Se déconnecter", danger: true })) return;
+      flushPending(); await syncIdle();
+      if (!local) { await sync(); await syncIdle(); }
+      if (!db.auth) return;
+      const uid = db.auth.user.id;
+      if (local) { if (keepAside(uid, true) < 0 && !await ask({ title: "Stockage plein", text: "Tes données n'ont pas pu être gardées sur cet appareil : elles seront perdues. Annule et fais d'abord une sauvegarde (Réglages › Données).", ok: "Se déconnecter quand même", danger: true })) return; }
+      else {
+        const left = Object.values(db.items).filter(x => x.dirty).length;
+        if (left) {
+          const c = await choose("Modifications pas encore envoyées", [["keep", "Les garder sur cet appareil", "Elles partiront sur ton compte à ta prochaine connexion ici"], ["erase", "Les effacer", "Elles seront perdues"]],
+            (left > 1 ? left + " modifications n'ont" : "Une modification n'a") + " pas encore pu être envoyée" + (left > 1 ? "s" : "") + " (pas de réseau ?).");
+          if (!c) return;
+          if (c === "keep" && keepAside(uid, false) < 0 && !await ask({ title: "Stockage plein", text: "Les modifications n'ont pas pu être gardées : elles seront perdues.", ok: "Se déconnecter quand même", danger: true })) return;
+        }
+      }
+      billingLogout(); db = emptyDb(); dataRev++; saveNow(); restart("#/home"); break;
     }
     case "delaccount": {
       const pre = await deleteWarnings();
@@ -4774,7 +5080,12 @@ $app.addEventListener("click", async e => {
         toast(err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous (voir Informations légales)." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
         return;
       }
-      billingLogout(); db = emptyDb(); dataRev++; consentAsked = nameAsked = false; saveNow(); toast("Ton compte a été supprimé"); go("home"); render();
+      const gone = db.auth && db.auth.user.id;
+      await syncIdle();
+      billingLogout(); db = emptyDb(); dataRev++; saveNow();
+      try { if (gone) localStorage.removeItem(asideKey(gone)); } catch (e) { }
+      try { sessionStorage.setItem("fiitday-msg", "Ton compte a été supprimé"); } catch (e) { }
+      restart("#/home");
     } break;
     case "syncnow": flushPending(); await sync(); if (syncState.status === "ok") toast("Synchronisé"); break;
 
@@ -5213,6 +5524,7 @@ $app.addEventListener("click", async e => {
       if (b.dataset.val === "aucune") vib = son = false; else if (b.dataset.val === "vibration") vib = !vib; else son = !son;
       setSetting("alert", vib && son ? "les deux" : vib ? "vibration" : son ? "son" : "aucune");
     } break;
+    case "notifon": if (Native && typeof Native.enableNotifications === "function") Native.enableNotifications(); break;
     case "testwatch": {
       if (!nativeWatch() || typeof Native.testWatch !== "function") return;
       askNotif(); Native.testWatch();
@@ -5223,6 +5535,8 @@ $app.addEventListener("click", async e => {
       audio();
       const a = settings().alert;
       if (a === "aucune") { toast("Alerte désactivée"); break; }
+      // appli Android : la vraie alerte de fin de repos (notification, montre, ou vibration du téléphone sans notifications), dans 5 s
+      if (Native && typeof Native.testAlert === "function") { Native.testAlert(a); toast("Alerte de test dans 5 secondes : tu peux verrouiller ton téléphone"); break; }
       signal();
       if ((a === "vibration" || a === "les deux") && !Native && !navigator.vibrate) toast("Sur ce téléphone, un site web ne peut pas faire vibrer (c'est le cas sur iPhone) : seul le son fonctionne.");
     } break;
@@ -5262,15 +5576,57 @@ $app.addEventListener("click", async e => {
     } break;
   }
 });
+// sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
+// Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
+// repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
+const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt"];
 async function restoreBackup(txt, badMsg) {
-  {
-      try {
-        const j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items)) throw new Error();
-        let n = 0, bad = 0;
-        for (const it of j.items) { if (it && it.kind === "workout" && it.data) it.data = fatWorkout(it.data); if (!validItem(it) || typeof it.updated_at !== "number") { bad++; continue; } const cur = db.items[it.id]; if (!cur || cur.deleted || it.updated_at > cur.updated_at) { db.items[it.id] = { id: it.id, kind: it.kind, data: it.data, updated_at: Math.max(it.updated_at, (cur && cur.updated_at + 1) || 0), deleted: false, dirty: true }; n++; } }
-        dataRev++; localFixed = false; saveNow(); scheduleSync(); render(); toast((n ? n + " élément" + (n > 1 ? "s" : "") + " restauré" + (n > 1 ? "s" : "") : "Rien à restaurer : tout ce qui est dans la sauvegarde est déjà dans l'appli") + (bad ? " (" + bad + " ignoré" + (bad > 1 ? "s" : "") + ")" : ""));
-      } catch (err) { toast(badMsg || "Ce texte n'est pas une sauvegarde valide"); }
+  let j;
+  try { j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items) || (j.v != null && !(j.v >= 1 && j.v <= 2))) throw new Error(); }
+  catch (err) { toast(badMsg || "Ce texte n'est pas une sauvegarde valide"); return; }
+  const take = [], back = []; let bad = 0, same = 0;
+  for (const it of j.items) {
+    if (it && it.kind === "workout" && it.data) it.data = fatWorkout(it.data);
+    if (!it || !KINDS[it.kind] || it.deleted || !validItem(it) || typeof it.updated_at !== "number" || JSON.stringify(it.data).length > 400000) { bad++; continue; }
+    const cur = db.items[it.id];
+    if (cur && !cur.deleted && it.updated_at <= cur.updated_at) { same++; continue; }
+    take.push(it); if (cur && cur.deleted) back.push(it);
   }
+  if (!take.length) { toast("Rien à restaurer : tout ce qui est dans la sauvegarde est déjà dans l'appli" + (bad ? " (" + bad + " élément" + (bad > 1 ? "s" : "") + " illisible" + (bad > 1 ? "s" : "") + " ignoré" + (bad > 1 ? "s" : "") + ")" : "")); return; }
+  const nb = k => take.filter(x => x.kind === k).length, pl = (n, a, b) => n + " " + (n > 1 ? b : a);
+  const lines = [];
+  if (j.at) lines.push("Sauvegarde du " + new Date(j.at).toLocaleDateString("fr-FR") + " à " + fmtTime(j.at) + ".");
+  if (nb("template")) lines.push("• " + pl(nb("template"), "programme ajouté ou remplacé par sa version de la sauvegarde", "programmes ajoutés ou remplacés par leur version de la sauvegarde"));
+  if (nb("workout")) lines.push("• " + pl(nb("workout"), "séance ajoutée à l'historique ou remplacée", "séances ajoutées à l'historique ou remplacées"));
+  if (nb("settings")) lines.push("• Réglages de la sauvegarde (thème, alertes, objectif…) ; tes exercices perso sont gardés et complétés");
+  if (back.length) lines.push("• Dont " + pl(back.length, "élément supprimé depuis qui reviendra", "éléments supprimés depuis qui reviendront"));
+  if (same) lines.push("• " + pl(same, "élément déjà à jour dans l'appli : gardé tel quel", "éléments déjà à jour dans l'appli : gardés tels quels"));
+  if (bad) lines.push("• " + pl(bad, "élément illisible ignoré", "éléments illisibles ignorés"));
+  if (!await ask({ title: "Restaurer cette sauvegarde ?", text: lines.join("\n"), ok: "Restaurer" })) return;
+  for (const it of take) {
+    const cur = db.items[it.id];
+    let data = it.data;
+    if (it.kind === "settings") {
+      const mine = cur && !cur.deleted ? cur.data : {};
+      data = Object.assign({}, data);
+      SETTINGS_OWN.forEach(k => { if (k in mine) data[k] = mine[k]; else delete data[k]; });
+      // exercices perso (par nom) et indicateurs perso des machines cardio : ceux du compte sont gardés, ceux de la sauvegarde ajoutés
+      const ownM = Array.isArray(mine.ownEx) ? mine.ownEx.filter(x => x && x.n) : [], ownB = Array.isArray(data.ownEx) ? data.ownEx.filter(x => x && x.n) : [];
+      const names = new Set(ownM.map(x => norm(x.n)));
+      data.ownEx = ownM.concat(ownB.filter(x => !names.has(norm(x.n))));
+      data.ownGone = (Array.isArray(mine.ownGone) ? mine.ownGone : []).filter(k => !data.ownEx.some(x => norm(x.n) === k));
+      const cc = Object.assign({}, isObj(data.cardioCustom) ? data.cardioCustom : {});
+      if (isObj(mine.cardioCustom)) for (const k of Object.keys(mine.cardioCustom)) {
+        const b = Array.isArray(cc[k]) ? cc[k] : [], l = Array.isArray(mine.cardioCustom[k]) ? mine.cardioCustom[k] : [];
+        cc[k] = l.concat(b.filter(x => x && !l.some(y => y && y.k === x.k)));
+      }
+      data.cardioCustom = cc;
+      data.id = it.id;
+    }
+    db.items[it.id] = { id: it.id, kind: it.kind, data, updated_at: Math.max(it.updated_at, (cur && cur.updated_at + 1) || 0), deleted: false, dirty: true };
+  }
+  dataRev++; localFixed = false; saveNow(); scheduleSync(); render();
+  toast(pl(take.length, "élément restauré", "éléments restaurés"));
 }
 
 /* Saisie au clavier : enregistre sans redessiner l'écran (on garde le focus) */
@@ -5423,7 +5779,10 @@ if (history.state && history.state.k) applyScroll(scrollPos[history.state.k] || 
 else history.replaceState({ k: navKey(), prev: "" }, "");
 if (db.auth) sync();
 recoveryFromLink();
-setTimeout(() => window.__fiitdayPending(), 300);
+// message laissé avant un rechargement (compte supprimé…) ; données illisibles retrouvées au démarrage
+try { const m = sessionStorage.getItem("fiitday-msg"); if (m) { sessionStorage.removeItem("fiitday-msg"); setTimeout(() => toast(m), 400); } } catch (e) { }
+if (unreadable) setTimeout(() => ask({ title: "Données illisibles", text: "Les données enregistrées sur cet appareil n'ont pas pu être lues (écriture interrompue ?). Une copie a été mise de côté sur l'appareil, rien n'est effacé.\n\nReconnecte-toi : avec Premium ou pendant l'essai, tes données reviennent avec la synchro. Sinon, écris-nous à contact@fiitday.com : nous t'aiderons à les récupérer.", ok: "Compris", cancel: false }), 600);
+setTimeout(() => { window.__fiitdayPending(); window.__fiitdayFileReady(); }, 300);
 if ("serviceWorker" in navigator && location.protocol === "https:" && !Native && !window.claude) {
   navigator.serviceWorker.register("sw.js").catch(() => { });
 }

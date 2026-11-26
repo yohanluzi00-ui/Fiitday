@@ -163,6 +163,10 @@ table.grid { border-collapse: collapse; width: 100%; min-width: 900px; }
 .login h1 { font-size: 30px; font-weight: 800; }
 .msg { min-height: 20px; font-size: 14px; }
 .msg.err { color: var(--danger); }
+.notif-off { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--soft); border-left: 3px solid var(--accent); }
+.msg.warn { color: var(--ink); background: var(--soft); border-left: 3px solid var(--accent); padding: 8px 12px; border-radius: 8px; }
+/* stockage de l'appareil plein : bandeau en haut tant que l'enregistrement échoue */
+.storage-full { position: fixed; left: 8px; right: 8px; top: calc(8px + env(safe-area-inset-top)); z-index: 60; background: var(--card); color: var(--ink); border: 2px solid var(--danger); border-radius: 12px; padding: 10px 14px; font-size: 14px; box-shadow: 0 6px 24px rgba(0, 0, 0, .25); }
 
 /* ---------- Divers */
 .sync { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }

@@ -33,8 +33,8 @@ export function mailRappel(d: { first_name: string; label: string; store: string
     p("Tu peux choisir de ne pas le reconduire.") +
     encadre("<b>Date limite pour ne pas reconduire ton abonnement</b> : le " + esc(quand(d.until)) + ".") +
     (d.store === "PLAY_STORE"
-      ? p("Pour l'arrêter : dans l'appli, Réglages › Abonnement › « Résilier mon abonnement », ou dans le Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier.")
-      : p("Pour l'arrêter : sur fiitday.com ou dans l'appli, Réglages › Abonnement › « Résilier mon abonnement ».")) +
+      ? p("Pour l'arrêter : dans l'appli, Réglages › Tes achats Premium › « Résilier mon abonnement », ou dans le Play Store › ta photo › Paiements et abonnements › Abonnements › Fiitday › Résilier.")
+      : p("Pour l'arrêter : sur fiitday.com ou dans l'appli, Réglages › Tes achats Premium › « Résilier mon abonnement ».")) +
     p("Si tu ne fais rien, il continue au même prix et tu gardes Premium. Si tu l'arrêtes, tu gardes Premium jusqu'à cette date, puis ton compte passe en version gratuite, plus limitée ; tes données sont conservées.");
   return ["Ton abonnement Fiitday Premium se renouvelle le " + quand(d.until, false), page("Renouvellement de ton abonnement", corps)];
 }

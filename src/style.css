@@ -42,8 +42,9 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 /* rien ne doit dépasser sur les côtés (ex. la fiche qui arrive en glissant) : sinon le téléphone élargit et décale tout l'écran */
 .main { overflow-x: clip; }
 .nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; background: var(--card); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
-.nav a { flex: 1; min-height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-decoration: none; font-size: 11px; color: var(--muted); }
-.nav a svg { width: 22px; height: 22px; }
+.nav a { flex: 1 1 0; min-width: 0; overflow: hidden; min-height: var(--nav-h); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-decoration: none; font-size: 11px; color: var(--muted); }
+.nav a svg { width: 22px; height: 22px; flex: none; }
+.nav a span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav a.on { color: var(--accent); font-weight: 700; }
 .nav .brand { display: none; }
 .hide-nav .nav { display: none; }
@@ -100,7 +101,6 @@ label.fl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; col
 .variant { text-align: left; border: 1px solid var(--in-line); background: var(--card); border-radius: 12px; padding: 10px 12px; min-height: 64px; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .variant b { font-size: 15px; }
 .variant span { font-size: 12px; color: var(--muted); }
-.variant.sugg { border: 2px solid var(--accent); }
 .variant .tag { color: var(--accent); font-weight: 700; }
 
 /* ---------- Séance (cartes, téléphone) */
@@ -243,7 +243,6 @@ h1, .page-head h1, .ex-name, .tpl h2, .rp-time, .rp-end, .stat .v, .nav .brand, 
 @media (min-width: 900px) { .nav a.on { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); } }
 .hero { background: radial-gradient(500px 220px at 100% 0%, rgba(var(--a2-rgb), .35), transparent 70%), linear-gradient(135deg, var(--hero1), var(--hero2)); color: #fff; border: 1px solid rgba(var(--a2-rgb), .35); box-shadow: var(--glow); }
 .variant { border-radius: 14px; }
-.variant.sugg { border: 2px solid transparent; background: linear-gradient(var(--card), var(--card)) padding-box, var(--grad) border-box; }
 .seg button.on, .tabs button.on { background: var(--grad); color: var(--on-grad); box-shadow: var(--glow); }
 .letter { background: var(--grad); color: var(--on-grad); }
 .chrono.run { background: var(--grad); color: var(--on-grad); }
@@ -366,7 +365,7 @@ div.fl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color
 
 /* Accueil : « + Nouveau programme » et « Importer » sur une ligne, poignée pour ranger les programmes */
 .home-actions { display: flex; gap: 8px; margin: -4px 0 18px; }
-.home-actions .btn { flex: 1 1 auto; white-space: nowrap; }
+.home-actions .btn { flex: 1 1 auto; white-space: normal; text-align: center; line-height: 1.2; }
 .home-actions .btn.primary { flex-grow: 2; }
 .tpl-side { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
 .tpl .grip { width: 32px; height: 36px; margin-right: -8px; }
@@ -485,7 +484,8 @@ a.chip-btn { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* Stats : 4 onglets sur une ligne ; accueil : Découvrir ; carte d'étirements conseillés */
 .tabs.stabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; background: var(--soft); border: 1px solid var(--line); border-radius: 14px; }
-.tabs.stabs a.tab { justify-content: center; padding: 0 4px; min-height: 38px; border: 0; background: transparent; font-size: 13.5px; color: var(--muted); border-radius: 10px; white-space: nowrap; }
+.tabs.stabs a.tab { justify-content: center; padding: 0 4px; min-height: 38px; border: 0; background: transparent; font-size: 13.5px; color: var(--muted); border-radius: 10px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 359px) { .tabs.stabs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tabs.stabs a.tab.on { background: var(--grad); color: var(--on-grad); box-shadow: var(--glow); font-weight: 700; } /* sinon le fond transparent ci-dessus l'emporte : texte foncé sur fond sombre */
 @media (min-width: 700px) { .tabs.stabs { display: inline-grid; grid-template-columns: repeat(4, auto); } .tabs.stabs a.tab { padding: 0 16px; font-size: 14px; } }
 .home-more { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -500,7 +500,8 @@ a.chip-btn { text-decoration: none; display: inline-flex; align-items: center; }
 
 /* Ajouter un exercice | un étirement sur une ligne ; fenêtre de choix des étirements ; carte en haut de l'accueil */
 .add-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.add-row .btn { padding: 0 8px; font-size: 14.5px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.add-row .btn { padding: 4px 8px; font-size: 14.5px; white-space: normal; line-height: 1.2; min-width: 0; text-align: center; }
+@media (max-width: 359px) { .add-row { grid-template-columns: 1fr; } }
 .pk { max-height: min(86vh, 760px); }
 .pk-zones { display: flex; gap: 6px; flex-wrap: wrap; }
 .pk-zones .chip-btn { min-height: 34px; padding: 4px 12px; }
@@ -645,8 +646,8 @@ html.is-dragging, html.is-dragging * { user-select: none; -webkit-user-select: n
 /* Réglages : pastille de synchro + lien sur une ligne ; deux boutons côte à côte, même sur un petit téléphone */
 .sync-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .sync-row .link { padding: 0; }
-.row.duo { margin-top: 8px; flex-wrap: nowrap; gap: 8px; }
-.row.duo .btn { flex: 1 1 auto; min-width: 0; padding: 0 10px; white-space: nowrap; font-size: 13px; justify-content: center; text-align: center; }
+.row.duo { margin-top: 8px; flex-wrap: wrap; gap: 8px; }
+.row.duo .btn { flex: 1 1 140px; min-width: 0; padding: 0 10px; white-space: normal; line-height: 1.2; font-size: 13px; justify-content: center; text-align: center; }
 /* Stats : semaines où l'objectif de séances est atteint */
 .chart .bar.ok { fill: var(--ok-ink); }
 .prog-empty p { margin: 0; }
@@ -700,7 +701,7 @@ html.is-dragging, html.is-dragging * { user-select: none; -webkit-user-select: n
 .sec-row span { color: var(--muted); min-width: 0; }
 .sec-row b { flex: none; text-align: right; }
 /* Réglages : Vibration · Son · Aucune · Tester sur une ligne */
-.alert-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: nowrap; }
+.alert-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
 .alert-row .seg { flex-wrap: nowrap; gap: 6px; min-width: 0; }
 .alert-row .seg button { padding: 0 11px; white-space: nowrap; }
 .alert-row .btn { flex: none; min-height: 40px; padding: 0 11px; white-space: nowrap; }
@@ -907,6 +908,10 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 
 /* ================= Mes exercices : création / modification, fenêtres de confirmation, bouton Renommer de la configuration ================= */
 .cfg-acts { display: inline-flex; align-items: center; gap: 12px; }
+/* configuration d'une séance : sur un écran étroit, le nom de l'exercice garde sa place et les boutons passent dessous */
+.cfg-head { flex-wrap: wrap; row-gap: 2px; }
+.cfg-head > .fold-t, .cfg-head > b { flex: 1 1 150px; min-width: 0; overflow-wrap: anywhere; }
+.cfg-head > .row, .cfg-head > .cfg-acts { margin-left: auto; }
 .card .spread .row .link[data-act="cfgrename"] { margin-right: 4px; }
 .own-new { margin: 4px 0 6px; }
 .own-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }

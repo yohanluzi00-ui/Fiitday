@@ -17,6 +17,8 @@ const cors = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+// erreur technique : détail dans les journaux du serveur, message clair pour la personne
+const oops = (where: string, e: { message?: string } | null) => { console.error(where + " : " + String(e?.message || e)); return json(500, { ok: false, reason: "Le serveur n'a pas pu traiter la demande. Réessaie dans un instant ; si cela continue, écris-nous à contact@fiitday.com." }); };
 const URL_ = Deno.env.get("SUPABASE_URL")!;
 const srv = () => createClient(URL_, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 
@@ -82,7 +84,7 @@ async function demande(token: string, b: any) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return json(400, { ok: false, reason: "Indique une adresse e-mail valide" });
   if (kind === "resiliation" && store === "PLAY_STORE") return json(400, { ok: false, reason: "Un abonnement Google Play se résilie dans Google Play" });
   const { data: chk, error: ce } = await sb.rpc("contract_check", { p_user: uid, p_kind: kind, p_store: store, p_product: product, p_wish: wish });
-  if (ce) return json(500, { ok: false, reason: ce.message });
+  if (ce) return oops("contract_check", ce);
   if (!chk?.ok) return json(400, { ok: false, reason: chk?.reason || "Demande impossible" });
   // l'abonnement ou l'achat est arrêté chez RevenueCat (paiement par carte) ; Google Play et le magasin de test : à la main
   let auto = "";
@@ -95,7 +97,7 @@ async function demande(token: string, b: any) {
     auto = "Achat de test : rien à rembourser";
   }
   const { data: sv, error: se } = await sb.rpc("contract_save", { p_user: uid, p_kind: kind, p_store: store, p_product: product, p_wish: wish, p_name: name, p_email: email, p_auto: auto });
-  if (se) return json(500, { ok: false, reason: se.message });
+  if (se) return oops("contract_save", se);
   if (!sv?.ok) return json(400, { ok: false, reason: sv?.reason || "Demande impossible" });
   const [sujet, html] = kind === "resiliation"
     ? mailResiliation({ name, label: sv.label, store, at: sv.at, end_at: sv.end_at, refund: Number(sv.refund), wish: wish!, email })
@@ -124,7 +126,7 @@ async function rappels() {
   await brevoPing();
   const sb = srv();
   const { data, error } = await sb.rpc("renewal_due");
-  if (error) return json(500, { ok: false, reason: error.message });
+  if (error) return oops("renewal_due", error);
   let sent = 0;
   for (const d of (data || []) as any[]) {
     const [sujet, html] = mailRappel(d);

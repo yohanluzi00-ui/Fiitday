@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
   if (!ev || typeof ev !== "object") return json(400, { error: "event manquant" });
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const { data, error } = await sb.rpc("rc_apply", { ev });
-  if (error) return json(500, { error: error.message });
+  if (error) { console.error("rc_apply : " + error.message); return json(500, { error: "erreur du serveur" }); }
   // nouvel achat appliqué : confirmation de la commande (ne bloque jamais la réponse à RevenueCat en cas d'échec)
   if (data?.applied && (data.type === "INITIAL_PURCHASE" || data.type === "NON_RENEWING_PURCHASE")) {
     try { await confirmation(sb, data, ev); } catch (e) { console.error("confirmation de commande : " + String((e as Error).message || e)); }

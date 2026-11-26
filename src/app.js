@@ -417,15 +417,17 @@ let screenOn = null;
 function keepScreen(on) { if (on === screenOn) return; screenOn = on; try { if (Native && Native.keepScreenOn) Native.keepScreenOn(on); } catch (e) { } }
 
 /* ================= Petites fenêtres ================= */
+// typographie française : espace insécable avant « ? : ! ; » et à l'intérieur des guillemets (messages et fenêtres)
+function frNb(t) { return String(t == null ? "" : t).replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0"); }
 function toast(msg) {
-  const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role", "status"); d.textContent = msg;
+  const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role", "status"); d.textContent = frNb(msg);
   document.body.appendChild(d); setTimeout(() => d.remove(), 2600);
 }
 function ask(o) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '"><h3>' + esc(o.title) + "</h3>" +
-      (o.html || "") + (o.text ? "<p>" + esc(o.text) + "</p>" : "") +
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '"><h3>' + esc(frNb(o.title)) + "</h3>" +
+      (o.html || "") + (o.text ? "<p>" + esc(frNb(o.text)) + "</p>" : "") +
       (o.input !== undefined ? (o.code ? '<input class="f code-in" aria-label="' + esc(o.title) + '" maxlength="12" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="ex. K7P2X9QM" value="' + esc(o.input) + '">' : o.multiline ? '<textarea class="f" rows="6" aria-label="' + esc(o.title) + '">' + esc(o.input) + "</textarea>" : o.suggest ? '<div class="fl"><input class="f" data-suggest autocomplete="off" maxlength="80" placeholder="Tape un nom ou un muscle" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '"><div class="sugg" hidden></div></div>' : '<input class="f" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '">') : "") +
       '<div class="modal-btns">' + (o.cancel === false ? "" : '<button class="btn" data-r="0">' + esc(o.cancel || "Annuler") + "</button>") +
       '<button class="btn ' + (o.danger ? "strong" : "primary") + '" data-r="1">' + esc(o.ok || "OK") + "</button></div></div>";
@@ -447,10 +449,12 @@ async function rpc(name, args) {
   let r = await go();
   if (r.status === 401) { await ensureToken(true); r = await go(); }
   const t = await r.text(); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) { }
-  if (!r.ok) { const e = new Error((j && j.message) || t || ("Erreur " + r.status)); e.status = r.status; e.code = j && j.code; throw e; }
+  if (!r.ok) { const e = new Error((j && j.message) || shortTxt(t) || ("Erreur " + r.status)); e.status = r.status; e.code = j && j.code; throw e; }
   return j;
 }
 const syncState = { status: "idle", at: null, error: "" };
+// texte d'une réponse d'erreur : gardé seulement s'il est court et n'est pas une page web
+const shortTxt = t => t && t.length < 200 && !/[<>]/.test(t) ? t : "";
 async function authReq(path, body) {
   const r = await fetch(SUPABASE_URL + "/auth/v1/" + path, { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
@@ -498,7 +502,7 @@ async function rest(method, path, body, headers) {
   if (r.status === 401) { await ensureToken(true); r = await go(); }
   if (!r.ok) {
     const t = await r.text(); let j = {}; try { j = JSON.parse(t); } catch (e) { }
-    const e = new Error(j.message || t || ("Erreur " + r.status)); e.status = r.status; e.code = j.code; throw e;
+    const e = new Error(j.message || shortTxt(t) || ("Erreur " + r.status)); e.status = r.status; e.code = j.code; throw e;
   }
   return method === "GET" || /return=representation/.test((headers && headers.Prefer) || "") ? r.json() : null;
 }
@@ -642,6 +646,7 @@ async function sync() {
       if (since) q += "&server_at=gte." + encodeURIComponent(since);
       const rows = await rest("GET", q);
       if (gone()) return;
+      if (!Array.isArray(rows)) throw Object.assign(new Error("réponse inattendue"), { status: 502 });
       for (const r of rows) {
         if (r && (!maxSeen || r.server_at > maxSeen)) maxSeen = r.server_at;
         if (takeRow(r)) { changed = true; dataRev++; }
@@ -910,7 +915,11 @@ function renderNow() {
   if (ctr && r.name !== "resilier" && r.name !== "retractation") ctr = null; // formulaire de résiliation ou de rétractation quitté
   let body, wide = false, immersive = false;
   switch (r.name) {
-    case "session": { const v = viewSession(r.args[0]); body = v.html; wide = v.wide; immersive = v.active; break; }
+    case "session": {
+      const gone = db.items[r.args[0]];
+      if (gone && gone.deleted) { history.replaceState(history.state, "", "#/history"); body = viewHistory(); break; } // séance supprimée (retour arrière) : l'historique
+      const v = viewSession(r.args[0]); body = v.html; wide = v.wide; immersive = v.active; break;
+    }
     case "programs": body = viewPrograms(); break;
     case "program": body = viewProgram(r.args[0], r.args[1]); break;
     case "history": body = viewHistory(r.args[0]); break;
@@ -938,7 +947,8 @@ function renderNow() {
     case "exercices": body = '<div id="exo-root"><div class="page-head"><h1>Exercices</h1></div><div class="card empty">Chargement des exercices…</div></div>'; break;
     default: body = viewHome();
   }
-  const tab = { guide: "settings", faq: "settings", premium: "settings", resilier: "settings", retractation: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
+  const doneW = r.name === "session" && (() => { const w = getItem(r.args[0]); return w && w.endedAt; })(); // séance terminée : on vient des Stats
+  const tab = doneW ? "progress" : { guide: "settings", faq: "settings", premium: "settings", resilier: "settings", retractation: "settings", admin: "settings", famille: "settings", session: "home", program: "home", import: "home", s: "home", calendar: "progress", evolution: "progress", history: "progress", body: "progress" }[r.name] || (NAV.some(n => n[0] === r.name) ? r.name : "home");
   $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand"><img src="icon-192.png" alt="" width="32" height="32"><span>Fiitday</span></div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
     '</nav><main class="main r-' + esc(r.name) + (wide ? " wide" : "") + '">' + body + "</main></div>";
@@ -1168,7 +1178,7 @@ function viewLanding() {
     '<section class="lp-hero"><div class="lp-in lp-hero-in"><div>' +
       '<h1>Ton carnet de musculation, <span class="lp-grad">simple et complet</span></h1>' +
       '<p class="lp-lead">Programmes, séances guidées, chrono de repos, plus de 100 exercices en 3D et le suivi de tes progrès. Sur ton téléphone et ton ordinateur.</p>' + cta +
-      '<p class="lp-small">' + (MONETIZATION ? "1 mois de Premium offert à la création du compte, sans carte bancaire." : "Toute l'appli est gratuite pendant le lancement, sans carte bancaire.") + "</p></div>" +
+      '<p class="lp-small">' + (MONETIZATION ? "30 jours de Premium offerts à la création du compte, sans carte bancaire." : "Toute l'appli est gratuite pendant le lancement, sans carte bancaire.") + "</p></div>" +
       '<div class="lp-hero-shot">' + shot("seance", LP_SHOTS[0][1]) + "</div></div></section>" +
     '<section class="lp-sec" id="lp-fonctions"><div class="lp-in"><h2>Tout pour t\'entraîner, rien de superflu</h2>' +
       '<p class="lp-lead">Pensé pour la salle comme pour la maison : tu lances ta séance, Fiitday s\'occupe du reste.</p>' +
@@ -1176,7 +1186,7 @@ function viewLanding() {
     '<section class="lp-sec lp-alt" id="lp-ecrans"><div class="lp-in"><h2>Un coup d\'œil à l\'appli</h2>' +
       '<div class="lp-shots">' + LP_SHOTS.slice(1).map(([k, alt]) => "<figure>" + shot(k, alt, true) + "<figcaption>" + esc(alt) + "</figcaption></figure>").join("") + "</div></div></section>" +
     '<section class="lp-sec" id="lp-tarifs"><div class="lp-in"><h2>Gratuit pour commencer</h2>' +
-      '<p class="lp-lead">À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
+      '<p class="lp-lead">À la création de ton compte, tu as <b>30 jours de Premium offerts</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
       (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
       '<div class="lp-prices">' +
         '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et 2 séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des 30 derniers jours</li><li>Stats de la semaine</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
@@ -1298,10 +1308,12 @@ function authMessage(e) {
   if (/expired|invalid/i.test(m) && /token|otp|code/i.test(m)) return "Code incorrect ou expiré. Vérifie-le ou demande un nouveau code.";
   if (/rate limit/i.test(m)) return "Trop d'e-mails envoyés pour le moment. Réessaie un peu plus tard.";
   if (/security purposes|only request this after/i.test(m)) return "Patiente une minute avant de redemander un code.";
-  if (/already registered|already exists/i.test(m)) return "Un compte existe déjà avec cet e-mail : clique sur « Se connecter ».";
+  if (/already registered|already exists/i.test(m)) return "Un compte existe déjà avec cet e-mail : " + (isPC() ? "clique" : "touche") + " « Se connecter ».";
   if (/password/i.test(m) && /6|8|short|weak|characters/i.test(m)) return "Mot de passe trop faible : au moins 8 caractères.";
   if (m === "Failed to fetch") return "Pas de connexion internet.";
-  return m;
+  console.warn("connexion :", e.status, m);
+  if (e.status >= 500 || !m) return "Le serveur ne répond pas pour le moment. Réessaie dans un instant.";
+  return "Connexion impossible pour le moment (erreur " + (e.code || e.status || "inconnue") + "). Réessaie dans un instant ; si cela continue, écris-nous à contact@fiitday.com.";
 }
 // données d'un compte gardées à part sur l'appareil (déconnexion avec des modifications pas encore envoyées, version gratuite,
 // session expirée puis autre compte) : clé propre à chaque compte, reprises quand CE compte se reconnecte ici
@@ -1450,7 +1462,7 @@ function viewHome() {
     '<a class="card" href="#/programs"><b>Programmes Fiitday</b><span class="muted small">' + (isFree() ? '<span class="tag">Premium</span> ' : "") + 'Programmes prêts à l\'emploi et circuit training</span></a></div>';
   const recent = finished().slice(0, 3);
   if (recent.length) {
-    h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(historyRow).join("") + "</div>" +
+    h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(w => historyRow(w)).join("") + "</div>" +
       '<a class="home-hist" href="#/history">Voir l\'historique ›</a>';
   }
   return h + "</div></div>";
@@ -1799,7 +1811,7 @@ function viewSession(id, pane) {
     '<div class="rp-btns"><button class="rp-b" data-act="chronocancel">Annuler</button><button class="rp-b rp-go" data-act="chronostop">Terminer</button></div>' +
     '<button class="rp-min" data-act="chronomin">Réduire</button></div></div>' +
     '<button class="restpill gain num" data-chronopill data-act="chronomax" hidden></button>';
-  else h += pane ? '<button class="btn danger block" data-act="delworkout" style="margin-top:16px">Supprimer cette séance</button>' : '<div class="bottom-bar"><div class="inner"><button class="btn danger big" data-act="delworkout" style="flex:1">Supprimer cette séance</button></div></div>';
+  else h += '<button class="btn danger block" data-act="delworkout" style="margin-top:16px">Supprimer cette séance</button>'; // en bas de page (une barre fixe couvrait le menu du bas)
   return { html: h, wide, active };
 }
 function sessionCards(w) {
@@ -1864,6 +1876,7 @@ function markDone(w, i, s) {
 // repos : après chaque série, ou seulement à la fin du tour pour un superset / biset / triset
 function afterSet(w, i, s) {
   if (w.endedAt) return;
+  w.lastAt = Date.now(); // heure de la dernière série validée (pour terminer une séance oubliée ouverte)
   const e = w.exercises[i];
   // toute la séance est validée : pas de repos, on félicite et on propose de terminer
   if (w.exercises.every(x => x.sets.every(st => st.done))) {
@@ -1886,6 +1899,19 @@ async function congrats(wid) {
   const name = firstName();
   const ok = await ask({ title: "Félicitations" + (name ? " " + name : "") + " 🥳 !", text: "Tu as validé toutes les séries de ta séance.", ok: "Terminer la séance", cancel: "Continuer" });
   if (ok) finishWorkout(getItem(wid));
+}
+// au lancement : une séance restée ouverte depuis plus de 5 h (oubliée) peut être terminée à l'heure de sa dernière modification
+async function staleWorkout() {
+  const w = activeWorkout(); if (!w || (!db.auth && db.mode !== "local") || document.querySelector("body > .modal")) return;
+  if (Date.now() - w.startedAt < 5 * 3600e3) return;
+  const it = db.items[w.id], last = Math.max(w.startedAt + 60000, Math.min(Date.now(), w.lastAt || (it && it.updated_at) || w.startedAt));
+  const when = new Date(last), day = new Date().toDateString() === when.toDateString() ? "" : " le " + fmtDate(last);
+  const c = await choose("Séance encore ouverte", [["end", "Terminer à " + fmtTime(last) + day, w.lastAt ? "L'heure de ta dernière série validée" : "L'heure de ta dernière modification"], ["go", "Continuer la séance", "Elle reste ouverte"]],
+    "« " + w.templateName + " · " + vLabel(w.variantName) + " » est ouverte depuis le " + fmtDate(w.startedAt) + " à " + fmtTime(w.startedAt) + ".");
+  if (c !== "end") return;
+  const cur = getItem(w.id); if (!cur || cur.endedAt) return;
+  flushPending(); cur.endedAt = last; put("workout", cur); db.live = {}; save(); sync();
+  toast("Séance enregistrée, terminée à " + fmtTime(last)); if (route().name === "session") go("home"); else render();
 }
 function finishWorkout(w) {
   if (!w || w.endedAt) return;
@@ -2034,7 +2060,7 @@ async function addPresets(list, defName) {
 }
 function exFields(e, k, letter, inGroup) {
   const time = e.type === "time", dist = e.type === "dist", rep = e.type === "rep", cardio = e.type === "cardio", d = dropsOf(e);
-  return (inGroup ? '<div class="spread"><b><span class="letter">' + letter + '</span><span data-title="' + k + '">' + esc(e.name) + '</span></b><span class="cfg-acts"><button class="link" data-act="cfgrename" data-e="' + k + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + k + '">Retirer</button></span></div>' : "") +
+  return (inGroup ? '<div class="spread cfg-head"><b><span class="letter">' + letter + '</span><span data-title="' + k + '">' + esc(e.name) + '</span></b><span class="cfg-acts"><button class="link" data-act="cfgrename" data-e="' + k + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + k + '">Retirer</button></span></div>' : "") +
     '<div class="ed-grid">' +
     (exLib(e) ? '<div class="full" data-exolink="' + k + '"><button type="button" class="chip-mini" data-act="exoview" data-id="' + exLib(e).id + '">' + ICON.play + "Voir le mouvement</button></div>" : '<div class="full" data-exolink="' + k + '" hidden></div>') +
     '<label class="fl">Type<select class="f" data-p="type" data-e="' + k + '"><option value="reps"' + (!time && !dist && !rep ? " selected" : "") + '>Poids × reps</option><option value="rep"' + (rep ? " selected" : "") + '>Reps uniquement</option><option value="time"' + (time ? " selected" : "") + '>Temps (gainage)</option><option value="dist"' + (dist ? " selected" : "") + '>Distance (course, Hyrox)</option><option value="cardio"' + (cardio ? " selected" : "") + ">Cardio</option></select></label>" +
@@ -2097,7 +2123,7 @@ function viewProgram(tid, vid) {
     } else {
       const x = blk.items[0];
       const k = "t:" + x.e.id, f = folded.has(k);
-      h += '<div class="card' + (f ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread">' + grip + foldTitle(k, '<b><span data-title="' + x.i + '">' + esc(x.e.name) + "</span></b>", f) + '<div class="row">' + moves +
+      h += '<div class="card' + (f ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread cfg-head">' + grip + foldTitle(k, '<b><span data-title="' + x.i + '">' + esc(x.e.name) + "</span></b>", f) + '<div class="row">' + moves +
         '<button class="link" data-act="cfgrename" data-e="' + x.i + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + x.i + '">Supprimer</button></div></div>' + (f ? '<div class="fold-sum muted small">' + esc(tplLine(x.e)) + "</div>" : '<div class="blk-body">' + exFields(x.e, x.i, "", false) + nextField +
         (bi < bl.length - 1 && !bl[bi + 1].groupId ? '<button class="link" style="margin-top:6px" data-act="link" data-b="' + bi + '">Enchaîner avec l\'exercice suivant (superset / biset)</button>' : "") + "</div>") + "</div>";
     }
@@ -2125,8 +2151,8 @@ const ADD_CHOICES = [
 function choose(title, opts, text) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal";
-    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(title) + "</h3>" + (text ? '<p class="small muted" style="margin:0">' + esc(text) + "</p>" : "") + '<div class="stack" style="gap:8px">' +
-      opts.map(o => '<button class="btn block choice" data-c="' + o[0] + '"><b>' + esc(o[1]) + "</b>" + (o[2] ? '<span class="choice-desc">' + esc(o[2]) + "</span>" : "") + "</button>").join("") +
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(frNb(title)) + "</h3>" + (text ? '<p class="small muted" style="margin:0">' + esc(frNb(text)) + "</p>" : "") + '<div class="stack" style="gap:8px">' +
+      opts.map(o => '<button class="btn block choice" data-c="' + o[0] + '"><b>' + esc(frNb(o[1])) + "</b>" + (o[2] ? '<span class="choice-desc">' + esc(frNb(o[2])) + "</span>" : "") + "</button>").join("") +
       '</div><div class="modal-btns"><button class="btn" data-c="">Annuler</button></div></div>';
     document.body.appendChild(d);
     d.addEventListener("click", e => {
@@ -2396,7 +2422,7 @@ function historyRow(w, sel) {
   // glisser la ligne de droite à gauche fait apparaître « Supprimer »
   return '<div class="swipe"><button type="button" class="swipe-del" data-act="swipedel" data-id="' + esc(w.id) + '" tabindex="-1">Supprimer</button>' +
     '<a class="swipe-row' + (sel === w.id ? " pc-on" : "") + '" draggable="false" href="#/' + (sel !== undefined ? "history" : "session") + "/" + w.id + '"' + (sel !== undefined ? " data-pane" : "") + (sel === w.id ? ' aria-current="true"' : "") + '><div><b>' + esc(w.templateName) + '</b> <span class="muted">· ' + esc(vLabel(w.variantName)) + '</span><div class="muted small">' +
-    esc(fmtDate(w.startedAt)) + " · " + (w.cardio ? w.exercises.length + " machine" + (w.exercises.length > 1 ? "s" : "") + (workoutKcal(w) ? " · " + fmtNum(Math.round(workoutKcal(w))) + " kcal" : "") : w.exercises.length + " exercices · " + done + " séries" + (workoutTon(w) ? " · " + fmtTon(workoutTon(w)) : "")) + '</div></div><span class="muted small num">' + fmtDur((w.endedAt || Date.now()) - w.startedAt) + "</span></a></div>";
+    esc(fmtDate(w.startedAt)) + " · " + (w.cardio ? w.exercises.length + " machine" + (w.exercises.length > 1 ? "s" : "") + (workoutKcal(w) ? " · " + fmtNum(Math.round(workoutKcal(w))) + " kcal" : "") : w.exercises.length + " exercices · " + done + " séries" + (workoutTon(w) ? " · " + fmtTon(workoutTon(w)) : "")) + '</div></div><span class="muted small num">' + fmtDur(shownDur(w)) + "</span></a></div>";
 }
 // glisser pour supprimer : la ligne suit le doigt (ou la souris) horizontalement ; le défilement vertical reste normal
 const SW_W = 104;
@@ -2466,6 +2492,8 @@ const exTon = e => (!e.type || e.type === "reps") ? e.sets.reduce((a, st) => a +
 const workoutTon = w => w.exercises.reduce((a, e) => a + exTon(e), 0);
 const workoutKcal = w => w.exercises.reduce((a, e) => a + (e.type === "cardio" ? e.sets.reduce((b, st) => b + (st.cv && num(st.cv.cal) > 0 ? num(st.cv.cal) : 0), 0) : 0), 0);
 const workoutDur = w => { const d = (w.endedAt || 0) - (w.startedAt || 0); return d > 60000 ? Math.min(d, 5 * 3600e3) : 0; }; // une séance oubliée ouverte compte 5 h au plus
+// durée affichée : séance terminée = la même que dans les stats (5 h au plus) ; séance en cours = le temps qui défile
+const shownDur = w => w.endedAt ? Math.min(Math.max(0, w.endedAt - w.startedAt), 5 * 3600e3) : Date.now() - w.startedAt;
 const fmtDurH = ms => { const m = Math.round(ms / 60000), hh = Math.floor(m / 60); return hh ? hh + " h " + pad(m % 60) : m + " min"; };
 const fmtTon = v => v >= 10000 ? (v / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " t" : Math.round(v).toLocaleString("fr-FR") + " kg";
 function progressData() {
@@ -2485,14 +2513,15 @@ function progressData() {
         map[key].name = e.name;
         continue;
       }
-      const lb = exLib(e), key = exKey(e) + "|" + e.type; // ancien et nouveau nom d'un même exercice de la bibliothèque : une seule courbe
-      const D = e.type === "dist", T = e.type === "time" || D, RO = e.type === "rep", vs = e.sets.map(s => num(T ? s.sec : RO ? s.reps : s.kg)).filter(x => x != null && (!D || x > 0));
+      const D = e.type === "dist", dd = D ? Math.round(num(e.target) || 0) : 0; // distance : une courbe par distance (1 000 m et 5 000 m ne se comparent pas)
+      const lb = exLib(e), key = exKey(e) + "|" + e.type + (dd > 0 ? "|" + dd : ""); // ancien et nouveau nom d'un même exercice de la bibliothèque : une seule courbe
+      const T = e.type === "time" || D, RO = e.type === "rep", vs = e.sets.map(s => num(T ? s.sec : RO ? s.reps : s.kg)).filter(x => x != null && (!D || x > 0));
       const best = vs.length ? (D ? Math.min(...vs) : Math.max(...vs)) : -Infinity;
       const reps = T ? null : Math.max(...e.sets.map(s => num(s.reps)).filter(x => x != null), -Infinity);
       const orm = T || RO ? null : Math.max(...e.sets.map(s => e1rm(num(s.kg), num(s.reps))).filter(x => x != null), -Infinity);
       const kgs = e.sets.map(s => num(s.kg)).filter(x => x != null && x !== 0), kg = kgs.length ? Math.max(...kgs) : null; // avec assistance (négatif) : moins d'assistance = mieux
       const sec = T && vs.length ? (D ? Math.min(...vs) : Math.max(...vs)) : null, tn = exTon(e);
-      (map[key] = map[key] || { key, name: e.name, lib: lb ? lb.id : "", type: e.type, entries: [] }).entries.push({ w, e, best: best === -Infinity ? null : best, reps: reps === -Infinity ? null : reps, orm: orm === -Infinity ? null : orm, kg, sec, ton: tn > 0 ? tn : null });
+      (map[key] = map[key] || { key, name: e.name, lib: lb ? lb.id : "", type: e.type, dist: dd, entries: [] }).entries.push({ w, e, best: best === -Infinity ? null : best, reps: reps === -Infinity ? null : reps, orm: orm === -Infinity ? null : orm, kg, sec, ton: tn > 0 ? tn : null });
       map[key].name = e.name;
     }
   }
@@ -2608,7 +2637,7 @@ function evoCands() {
   return ps.map(p => {
     const lib = libById[p.lib] || libFor(p.name), last = p.entries[p.entries.length - 1].w.startedAt;
     return { p, n: p.name, nn: norm(p.name), w: words(p.name), a: lib ? words(lib.n + " " + lib.al.join(" ")) : [], o: lib ? lib.o : [], last,
-      dup: seen[p.name] > 1 ? ({ time: "temps", dist: "distance", cardio: "cardio", rep: "reps" }[p.type] || "poids × reps") : "" };
+      dup: p.dist > 0 ? fmtNum(p.dist) + " m" : seen[p.name] > 1 ? ({ time: "temps", dist: "distance", cardio: "cardio", rep: "reps" }[p.type] || "poids × reps") : "" };
   });
 }
 function evoSearch(q) {
@@ -2742,6 +2771,7 @@ function viewEvolutionDetail(key, pane) {
   evoCur = null; if (!pane) evoSel = null;
   const all_ = progressData(); let p = all_.find(x => x.key === key);
   if (!p && key && !/^lib:/.test(key)) { const [nm, ty] = String(key).split("|"), lb = libFor(nm); if (lb) p = all_.find(x => x.key === "lib:" + lb.id + "|" + ty); } // ancien lien (nom de l'exercice)
+  if (!p && key) p = all_.find(x => x.key.indexOf(key + "|") === 0); // ancien lien d'un exercice Distance (avant une courbe par distance)
   const back = pane ? "" : '<a class="back" href="#/evolution">‹ Évolution</a>';
   if (isFree()) return back + planCard("La courbe de chaque exercice est réservée à Premium.");
   if (!p) return back + '<div class="card empty">Pas encore de données pour cet exercice.</div>';
@@ -2753,7 +2783,7 @@ function viewEvolutionDetail(key, pane) {
   const ent = p.entries.filter(x => x.w.startedAt >= from);
   const pts = ent.filter(x => evoVal(x, m) != null).map(x => ({ t: x.w.startedAt, v: evoVal(x, m), ses: x.w.templateName + " · " + vLabel(x.w.variantName), sum: exSummary(x.e) }));
   const lib = libById[p.lib] || libFor(p.name), cdm = p.type === "cardio" && CARDIO_MACH[p.machine] ? p.machine : "", lid = cdm || (lib && lib.id);
-  let h = back + '<div class="page-head"><h1>' + esc(p.name) + "</h1></div>" +
+  let h = back + '<div class="page-head"><h1>' + esc(p.name) + (p.dist > 0 ? ' <span class="muted">· ' + esc(fmtNum(p.dist)) + " m</span>" : "") + "</h1></div>" +
     (lid ? '<div class="ex-chips" style="margin:-4px 0 12px"><button type="button" class="chip-mini" data-act="exoview" data-id="' + esc(lid) + '"' + (cdm ? ' data-arg="cardio"' : "") + ">" + ICON.play + (cdm ? "Voir la machine" : "Voir le mouvement") + "</button></div>" : "");
   const seg = (list, on, act) => '<div class="seg evo-seg seg-' + act + '" role="group">' + list.map(x => '<button type="button" data-act="' + act + '" data-k="' + esc(key) + '" data-v="' + x[0] + '"' + (x[0] === on ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div>";
   if (ms.length > 1 || pers.length > 1) h += '<div class="evo-filters">' + (ms.length > 1 ? seg(ms.map(x => [x, evoDef(x).short]), m, "evometric") : "") + (pers.length > 1 ? seg(pers, per, "evoper") : "") + "</div>";
@@ -2818,7 +2848,7 @@ const ymd = t => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.g
 function viewCalendar(ym, day) {
   const now = new Date();
   let y = now.getFullYear(), m = now.getMonth();
-  if (/^\d{4}-\d{2}$/.test(ym || "")) { y = +ym.slice(0, 4); m = +ym.slice(5, 7) - 1; }
+  if (/^\d{4}-\d{2}$/.test(ym || "") && +ym.slice(5, 7) >= 1 && +ym.slice(5, 7) <= 12) { y = +ym.slice(0, 4); m = +ym.slice(5, 7) - 1; } // sinon : le mois en cours
   const first = new Date(y, m, 1), days = new Date(y, m + 1, 0).getDate(), lead = (first.getDay() + 6) % 7;
   if (isFree()) return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("calendar") + planCard("Le calendrier de tes séances est réservé à Premium. Ta semaine en cours est dans « Séances ».");
   const byDay = {}; finished().forEach(w => { const k = ymd(w.startedAt); (byDay[k] = byDay[k] || []).push(w); });
@@ -3366,7 +3396,7 @@ async function useTransferCode(raw) {
   if (!XFER_RE.test(c)) { toast("Un code de transfert fait 8 caractères (lettres et chiffres)"); return; }
   if (!db.auth) { toast("Connecte-toi au compte qui doit recevoir les données"); return; }
   let txt; try { txt = await rpc("use_transfer", { p_code: c }); } catch (err) { toast(xferErr(err)); return; }
-  if (!txt || typeof txt !== "string") { toast("Code inconnu ou expiré (un code n'est valable qu'1 heure)"); return; }
+  if (!txt || typeof txt !== "string") { toast("Code inconnu ou expiré (un code n'est valable qu'une heure)"); return; }
   restoreBackup(txt, "Ce code ne contient pas une sauvegarde valide");
 }
 // « FIITDAY1: » + données compressées en base64 : bien plus court que le texte brut
@@ -3392,7 +3422,7 @@ async function unpackBackup(txt) {
 const FAQ = [
   ["Démarrer", [
     ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer »."],
-    ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Sur l'accueil, la séance marquée « Suggérée » est celle que tu n'as jamais faite, sinon celle faite il y a le plus longtemps. Un appui prolongé sur une séance affiche la liste de ses exercices."],
+    ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Un appui prolongé sur une séance affiche la liste de ses exercices."],
     ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice. Exercice avec assistance (tractions ou dips à la machine à contrepoids, élastique) : note un poids négatif, par exemple −20 kg ; moins d'assistance = progrès dans Stats › Évolution."],
     ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur ? « + Ajouter un indicateur » sous la machine : il sera proposé à chaque fois."],
     ["superset", "Comment faire un superset ou un dégressif ?", "Ajoute d'abord tes exercices, puis dans la configuration de la séance : « Enchaîner avec l'exercice suivant » relie deux exercices en superset ou biset (un 3e exercice ajouté au groupe en fait un triset), et le réglage « Dégressif » d'un exercice ajoute les baisses de charge. Dans un superset, le repos démarre seulement quand tout le tour est fini."]]],
@@ -3462,13 +3492,13 @@ function viewGuide() {
 }
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
-  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>un mois de Premium offert</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>30 jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
   ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et 2 séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les 30 jours), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : 1,99 € par mois ou 19,90 € par an. <b>Famille</b> (toi + 4 proches, chacun son compte) : 6,99 € par mois ou 69,90 € par an. <b>À vie</b>, en un seul paiement : 49,90 € en Solo ou 149,90 € en Famille jusqu'au 31 décembre 2027, puis 79,90 € et 229,90 €. Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
-  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Abonnement › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
+  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite, plus limitée, et gardent leurs données."],
-  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Abonnement › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
+  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Tes achats Premium › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
   faqIdx = null;
@@ -3478,7 +3508,7 @@ function viewFaq(open) {
     FAQ_.map(([cat, qs]) => '<section class="faq-cat"><div class="section-title">' + esc(cat) + '</div><div class="faq-box">' +
       qs.map(([id, q, a]) => '<details class="faq-q" id="faq-' + id + '"' + (id === open ? " open" : "") + "><summary>" + esc(nbsp(q)) + '</summary><div class="faq-a">' + nbsp(a) + "</div></details>").join("") + "</div></section>").join("") +
     '<p class="muted faq-none" hidden>Aucune question ne correspond. Essaie un autre mot.</p>' +
-    '<div class="card faq-more"><b>Tu n\'as pas trouvé ta réponse ?</b><div class="small muted" style="margin-top:4px">Écris-nous : l\'adresse de contact est dans Réglages › Informations légales › Mentions légales.</div></div>';
+    '<div class="card faq-more"><b>Tu n\'as pas trouvé ta réponse ?</b><div class="small muted" style="margin-top:4px">Écris-nous à <a class="link" href="mailto:contact@fiitday.com">contact@fiitday.com</a> : nous te répondons rapidement.</div></div>';
 }
 // recherche sans tenir compte des accents, des majuscules, des apostrophes (« jai » = « j'ai ») ni des petites fautes ; une seule réponse : elle s'ouvre
 const FAQ_STOP = new Set("je tu il on le la les de des du un une mon ma mes ton ta tes et ou a au aux en est que qui quoi comment pour par sur dans avec ce ca se sa son ses ne pas plus faire fait".split(" "));
@@ -3557,6 +3587,8 @@ function webPurchases() {
     return rcWeb.p;
   });
 }
+// message d'erreur montré tel quel seulement s'il est en français et court (sinon : message général, détail dans la console)
+const frTxt = t => !!t && t.length < 160 && /[àâçéèêëîïôûùüœ]|\b(le|la|les|de|du|des|une|un|est|pas|introuvable|indisponible)\b/i.test(t);
 // même réponse que l'appli Android : { st: "ok" | "cancel" | "error", txt }
 async function webBuy(pid) {
   try {
@@ -3737,7 +3769,7 @@ const consentText = () => premiumPick === "life"
 function pickTerms() {
   const store = billingMode() === "test" ? "Achat de test, sans paiement réel" : isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
   return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte. Tu as 14 jours pour te rétracter, remboursement intégral."
-    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation avant la date de renouvellement. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Abonnement") + ". Tu as 14 jours pour te rétracter.";
+    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation avant la date de renouvellement. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Tes achats Premium") + ". Tu as 14 jours pour te rétracter.";
 }
 // déjà Premium : d'où il vient, et comment le gérer
 function premiumOwned() {
@@ -3768,7 +3800,7 @@ function viewPremium() {
       '<p class="small muted plan-terms">' + pickTerms() + (LEGAL.cgv ? ' <a href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a>' : "") + "</p>") +
     (billingMode() && Native ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
-    '<p class="small muted" style="margin:10px 2px 0">Essai gratuit d\'un mois à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
+    '<p class="small muted" style="margin:10px 2px 0">Essai gratuit de 30 jours à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
     (premiumFor === "family" ? " Formule Famille : tu invites tes proches depuis Réglages › Abonnement ; une personne retirée ne peut être remplacée qu\'après 15 jours. Déjà abonné en Solo ? Résilie-le avant de rejoindre une Famille, pour ne pas payer deux fois." : "") + "</p>" +
     '<div class="section-title">Premium ou gratuit</div><div class="card plan-table"><table><thead><tr><th></th><th>Premium</th><th>Gratuit</th></tr></thead><tbody>' +
     rows.map(r => "<tr><th>" + esc(r[0]) + "</th><td>" + esc(r[1]) + "</td><td>" + esc(r[2]) + "</td></tr>").join("") + "</tbody></table></div>";
@@ -3918,6 +3950,7 @@ function viewContract(kind) {
       "<p>" + (d.mail_sent ? "Une confirmation t'a été envoyée par e-mail à <b>" + esc(ctr.email) + "</b>." : "L'e-mail de confirmation n'a pas pu partir pour l'instant : garde cet écran (par exemple en capture d'écran), il fait foi. Nous t'écrirons à " + esc(ctr.email) + ".") + "</p>" +
       '<a class="btn" href="#/settings">Retour aux réglages</a></div>';
   }
+  if (!db.auth) return head + '<div class="card empty">Tu utilises Fiitday sans compte : il n\'y a aucun achat à ' + (res ? "résilier" : "annuler") + '. <a class="link" href="#/settings">Retour aux réglages</a></div>';
   if (!contracts || (!contracts.ok && !contracts.err && contractsBusy)) { loadContracts(); return head + '<div class="card empty">Chargement de tes achats…</div>'; }
   if (!contracts.ok) return head + '<div class="card"><p class="msg err" style="margin:0">' + esc(contracts.err || "Tes achats n'ont pas pu être chargés") + '</p><button class="btn sm" style="margin-top:10px" data-act="ctrreload">Réessayer</button></div>';
   const items = ctrItems().filter(i => res ? i.type === "sub" : canRetract(i));
@@ -3965,7 +3998,7 @@ async function deleteWarnings() {
   let stop = null;
   if (p.source === "subscription" && p.renews !== false) {
     stop = p.store === "PLAY_STORE" ? "play" : "web";
-    w.push("Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements. Résilie-le d'abord " + (stop === "play" ? "dans Google Play (Abonnements)." : "dans Réglages › Abonnement."));
+    w.push("Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements. Résilie-le d'abord " + (stop === "play" ? "dans Google Play (Abonnements)." : "dans Réglages › Tes achats Premium."));
   } else if (p.source === "subscription") w.push("Il te reste du Premium jusqu'au " + until + " : il sera perdu.");
   if (p.source === "lifetime") w.push("Ton Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + " est lié à ce compte : il sera perdu.");
   if (p.source === "gift") w.push("Ton Premium offert sera perdu.");
@@ -4013,7 +4046,7 @@ function srvMemberBox() {
 async function famShareSrv(code, name) {
   const text = "Rejoins mon abonnement Fiitday Premium Famille : " + famLink(code) + "\nOu dans l'appli : Réglages › Abonnement › « J'ai une invitation Famille », code " + code + " (valable 7 jours).";
   const copy = await ask({ title: "Invitation" + (name ? " pour " + name : ""), html: '<div class="xfer-code" aria-label="Code ' + esc(code.split("").join(" ")) + '">' + esc(code) + "</div>",
-    text: "Envoie-lui ce code ou le lien : elle l'ouvre avec son compte Fiitday (ou en crée un) et rejoint ta famille. L'invitation est valable 7 jours.", ok: "Copier l'invitation", cancel: "Fermer" });
+    text: "Envoie-lui ce code ou le lien : la personne l'ouvre avec son compte Fiitday (ou en crée un) et rejoint ta famille. L'invitation est valable 7 jours.", ok: "Copier l'invitation", cancel: "Fermer" });
   if (copy) { try { await navigator.clipboard.writeText(text); toast("Invitation copiée : envoie-la" + (name ? " à " + name : "")); } catch (e) { toast("Code d'invitation : " + code); } }
 }
 async function famJoinSrv(raw) {
@@ -4404,7 +4437,7 @@ function viewAdminSubs() {
   const gifts = a.gifts || [], fams = a.families || [];
   return admBar(a.at, adminSubsBusy, "données des abonnements") +
     '<div class="card adm-launch' + (launch ? " on" : "") + '"><b>' + (launch ? "Abonnement lancé le " + esc(fmtDateLong(launch)) : "Abonnement pas encore lancé") + '</b><div class="small muted">' +
-    (launch ? "Essai d'un mois pour les nouveaux comptes, version gratuite ensuite, synchro réservée à Premium." : "Tant que la date de lancement n'est pas fixée, tout le monde a l'appli complète et la synchro reste ouverte. Premium offert et familles marchent déjà : ils compteront au lancement.") + "</div></div>" +
+    (launch ? "Essai de 30 jours pour les nouveaux comptes, version gratuite ensuite, synchro réservée à Premium." : "Tant que la date de lancement n'est pas fixée, tout le monde a l'appli complète et la synchro reste ouverte. Premium offert et familles marchent déjà : ils compteront au lancement.") + "</div></div>" +
     '<div class="stats adm-tiles">' + tile("Abonnés payants", c.subscribers || 0, (c.cancelled || 0) + " résilié" + ((c.cancelled || 0) > 1 ? "s" : "") + " (Premium jusqu'à la fin de leur période)") + tile("Premium à vie", c.lifetime || 0, "achats uniques") +
     tile("Premium offert", c.gifts || 0, "en cours") + tile("Familles", c.families || 0, (c.members || 0) + " membre" + ((c.members || 0) > 1 ? "s" : "") + " invité" + ((c.members || 0) > 1 ? "s" : "")) + "</div>" +
     '<div class="adm-grid"><div class="adm-main">' + adminCtrCard() + '<div class="section-title">Offrir Premium</div><div class="card adm-gift">' +
@@ -4781,7 +4814,9 @@ function viewSettings() {
     '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
     '<div class="card"><b>Informations légales</b><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
-    '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div></div>' +
+    '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div>' +
+    (LEGAL.cgv ? '<div class="row duo"><a class="btn sm" href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a></div>' : "") +
+    '<div class="small muted" style="margin-top:10px">Une question, un souci ? <a class="link" href="mailto:contact@fiitday.com">contact@fiitday.com</a></div></div>' +
     '<div class="credit"><div class="credit-msg">L\'équipe Fiitday te souhaite de belles séances</div><div class="appver"><img src="icon-192.png" alt="" width="24" height="24">' + esc(ver) + "</div></div></div>";
 }
 
@@ -4790,7 +4825,7 @@ function viewSettings() {
 function chronoKind(w, c) { const ex = w && w.exercises[c.i], lb = ex && exLib(ex); return c.cardio || (ex && ex.type === "cardio") ? "Cardio" : lb && lb.cat === "etirement" ? "Étirement" : c.dist || (ex && ex.type === "dist") ? "Chrono" : "Gainage"; }
 function tick() {
   const now = Date.now(), L = db.live || {};
-  document.querySelectorAll('[data-tick="elapsed"]').forEach(el => { const w = getItem(el.dataset.id); if (w) el.textContent = fmtDur((w.endedAt || now) - w.startedAt, "down"); });
+  document.querySelectorAll('[data-tick="elapsed"]').forEach(el => { const w = getItem(el.dataset.id); if (w) el.textContent = fmtDur(shownDur(w), "down"); });
   // repos
   if (L.restEnd && now >= L.restEnd && !L.restAlerted) {
     // déjà signalé par la notification Android (appli en arrière-plan) : pas de deuxième alerte en revenant
@@ -5077,7 +5112,7 @@ $app.addEventListener("click", async e => {
       try {
         await deleteAccountSrv();
       } catch (err) {
-        toast(err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous (voir Informations légales)." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
+        toast(err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous à contact@fiitday.com." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
         return;
       }
       const gone = db.auth && db.auth.user.id;
@@ -5212,7 +5247,10 @@ $app.addEventListener("click", async e => {
     } break;
     case "delworkout": if (w) {
       if (!await ask({ title: "Supprimer cette séance ?", text: "Elle disparaîtra de l'historique.", ok: "Supprimer", danger: true })) return;
-      remove(w.id); if (route().name === "history") { if (route().args[0]) go("history"); else render(); } else go("history");
+      remove(w.id);
+      if (route().name === "history") { if (route().args[0]) window.__navPane("#/history"); else render(); }
+      // page de la séance : on revient à la page d'où l'on venait (la séance supprimée ne reste pas derrière le bouton Retour)
+      else if ((history.state || {}).prev) history.back(); else window.__navReplace("#/history");
     } break;
 
     /* programmes */
@@ -5348,7 +5386,7 @@ $app.addEventListener("click", async e => {
       const r = Native ? await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life") : await webBuy(pid);
       buying = false; render();
       if (r.st === "cancel") { toast("Achat annulé"); break; }
-      if (r.st !== "ok") { toast("L'achat n'a pas abouti" + (r.txt ? " : " + r.txt : "")); break; }
+      if (r.st !== "ok") { if (r.txt) console.warn("achat :", r.txt); toast("L'achat n'a pas abouti" + (frTxt(r.txt) ? " : " + r.txt : ". Réessaie dans un instant ; si cela continue, écris-nous à contact@fiitday.com.")); break; }
       premiumConsent = false; // un autre achat demandera un nouvel accord
       const offTest = planTestOff(); // le mode test (simulation) cacherait le vrai achat
       toast(offTest ? (billingMode() === "test" ? "Achat de test réussi · " : "Merci ! ") + "Mode test désactivé pour afficher ton achat" : billingMode() === "test" ? "Achat de test réussi, Premium arrive…" : "Merci ! Premium arrive…");
@@ -5566,7 +5604,7 @@ $app.addEventListener("click", async e => {
     case "xferuse": {
       if (dataLocked()) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
       if (!db.auth) { toast("Connecte-toi au compte qui doit recevoir les données"); return; }
-      const c = await ask({ title: "J'ai un code", text: "Tape le code de 8 caractères créé dans l'autre compte (Réglages › Données › Créer un code). Il n'est valable qu'1 heure.", input: "", code: true, ok: "Récupérer" });
+      const c = await ask({ title: "J'ai un code", text: "Tape le code de 8 caractères créé dans l'autre compte (Réglages › Données › Créer un code). Il n'est valable qu'une heure.", input: "", code: true, ok: "Récupérer" });
       if (c) useTransferCode(c);
     } break;
     case "import": {
@@ -5783,6 +5821,7 @@ recoveryFromLink();
 try { const m = sessionStorage.getItem("fiitday-msg"); if (m) { sessionStorage.removeItem("fiitday-msg"); setTimeout(() => toast(m), 400); } } catch (e) { }
 if (unreadable) setTimeout(() => ask({ title: "Données illisibles", text: "Les données enregistrées sur cet appareil n'ont pas pu être lues (écriture interrompue ?). Une copie a été mise de côté sur l'appareil, rien n'est effacé.\n\nReconnecte-toi : avec Premium ou pendant l'essai, tes données reviennent avec la synchro. Sinon, écris-nous à contact@fiitday.com : nous t'aiderons à les récupérer.", ok: "Compris", cancel: false }), 600);
 setTimeout(() => { window.__fiitdayPending(); window.__fiitdayFileReady(); }, 300);
+setTimeout(staleWorkout, 1500);
 if ("serviceWorker" in navigator && location.protocol === "https:" && !Native && !window.claude) {
   navigator.serviceWorker.register("sw.js").catch(() => { });
 }

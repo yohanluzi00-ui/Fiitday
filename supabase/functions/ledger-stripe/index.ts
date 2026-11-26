@@ -28,7 +28,7 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false },
   });
   const { data: chk, error: ce } = await asUser.rpc("admin_ledger_auto");
-  if (ce) return json(401, { error: ce.message });
+  if (ce) return json(401, { error: "Connecte-toi" });
   if (!chk || chk.denied) return json(403, { denied: true, mfa: !!(chk && chk.mfa) });
   const srv = createClient(url, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const save = (livemode: boolean | null, ok: boolean, message: string, months: unknown) =>
@@ -90,6 +90,6 @@ Deno.serve(async (req: Request) => {
     };
   });
   const { error: se } = await save(livemode, true, "", rows);
-  if (se) return json(500, { error: se.message });
+  if (se) { console.error("ledger_sync : " + se.message); return json(500, { error: "Erreur du serveur, réessaie dans un instant." }); }
   return json(200, { ok: true, livemode, transactions: count });
 });

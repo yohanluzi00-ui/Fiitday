@@ -2,6 +2,8 @@
 // jamais dans le code ni dans le chat). Même fichier dans les fonctions « contrat » et « revenuecat ».
 
 export const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+// typographie française : espace insécable avant « ; : ! ? » et à l'intérieur des guillemets (dans le texte, pas dans les balises)
+export const fr = (h: string) => (">" + h + "<").replace(/>([^<]+)</g, (_m, t: string) => ">" + t.replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0") + "<").slice(1, -1);
 
 // date et heure de Paris, en français : « 25 novembre 2026 à 09:44 »
 export function quand(t: string | number | Date, heure = true): string {
@@ -31,14 +33,14 @@ export function page(titre: string, corps: string): string {
     '<div style="max-width:620px;margin:0 auto;padding:24px 16px">' +
     '<div style="font-size:22px;font-weight:bold;color:#C81E64;margin-bottom:16px">Fiitday</div>' +
     '<div style="background:#FFFFFF;border:1px solid #E4E0EC;border-radius:14px;padding:22px 20px">' +
-    '<h1 style="font-size:20px;line-height:1.3;margin:0 0 14px">' + esc(titre) + "</h1>" + corps + "</div>" +
+    '<h1 style="font-size:20px;line-height:1.3;margin:0 0 14px">' + fr(esc(titre)) + "</h1>" + corps + "</div>" +
     '<p style="font-size:12px;color:#5D586B;margin:16px 4px 0">Fiitday · contact@fiitday.com · fiitday.com<br>Cet e-mail t\'est envoyé parce que tu as un compte Fiitday ; il concerne ton contrat, tu ne peux pas t\'en désabonner.</p>' +
     "</div></body></html>";
 }
-export const p = (h: string) => '<p style="margin:0 0 12px">' + h + "</p>";
-export const encadre = (h: string) => '<div style="border:2px solid #C81E64;border-radius:12px;padding:12px 14px;margin:14px 0;font-size:16px">' + h + "</div>";
+export const p = (h: string) => '<p style="margin:0 0 12px">' + fr(h) + "</p>";
+export const encadre = (h: string) => '<div style="border:2px solid #C81E64;border-radius:12px;padding:12px 14px;margin:14px 0;font-size:16px">' + fr(h) + "</div>";
 export const lignes = (rows: [string, string][]) => '<table style="border-collapse:collapse;width:100%;margin:6px 0 14px;font-size:15px">' +
-  rows.map(([k, v]) => '<tr><td style="padding:6px 10px 6px 0;color:#5D586B;vertical-align:top;white-space:nowrap">' + esc(k) + '</td><td style="padding:6px 0;vertical-align:top">' + v + "</td></tr>").join("") + "</table>";
+  rows.map(([k, v]) => '<tr><td style="padding:6px 10px 6px 0;color:#5D586B;vertical-align:top;white-space:nowrap">' + esc(k) + '</td><td style="padding:6px 0;vertical-align:top">' + fr(v) + "</td></tr>").join("") + "</table>";
 export const texte = (html: string) => html.replace(/<(br|\/p|\/tr|\/h1|\/div)[^>]*>/gi, "\n").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
 
 // conditions générales de vente en ligne (incluses dans la confirmation de commande, avec le formulaire de rétractation)

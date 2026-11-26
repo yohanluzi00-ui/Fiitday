@@ -17,8 +17,8 @@ export function confirmationHtml(d: { prenom: string; email: string; product: st
     lignes([["Formule", esc(info.label)], ["Prix", esc(euros(info.amount)) + " " + esc(info.period) + " (TTC)"], ["Date", esc(quand(at))], ["Paiement", esc(boutique(String(r.store)))],
       ["Durée", life ? "à vie, sans renouvellement" : "renouvellement automatique " + (/annuel/.test(product) ? "chaque année" : "chaque mois") + " au même prix, sauf résiliation"]]) +
     (consent?.text ? p("Avant le paiement, tu as coché, le " + esc(quand(consent.at || Date.now())) + " : « " + esc(consent.text) + " »") : "") +
-    encadre("<b>Droit de rétractation</b> : tu peux te rétracter jusqu'au <b>" + esc(finRetractation(at)) + "</b> inclus, sans motif, avec un remboursement intégral : Réglages › Abonnement › « Renoncer au contrat ici », ou avec le formulaire ci-dessous, ou en répondant à cet e-mail.") +
-    (life ? "" : p("Pour arrêter ton abonnement : Réglages › Abonnement › « Résilier mon abonnement »" + (r.store === "PLAY_STORE" ? " (il ouvre ton abonnement dans Google Play)" : "") + ". Tu gardes Premium jusqu'à la fin de la période payée.")) +
+    encadre("<b>Droit de rétractation</b> : tu peux te rétracter jusqu'au <b>" + esc(finRetractation(at)) + "</b> inclus, sans motif, avec un remboursement intégral : Réglages › Tes achats Premium › « Renoncer au contrat ici », ou avec le formulaire ci-dessous, ou en répondant à cet e-mail.") +
+    (life ? "" : p("Pour arrêter ton abonnement : Réglages › Tes achats Premium › « Résilier mon abonnement »" + (r.store === "PLAY_STORE" ? " (il ouvre ton abonnement dans Google Play)" : "") + ". Tu gardes Premium jusqu'à la fin de la période payée.")) +
     p("Garde cet e-mail : il contient tes conditions de vente.") +
     (cg ? '<hr style="border:0;border-top:1px solid #E4E0EC;margin:20px 0"><h2 style="font-size:17px;margin:0 0 8px">Conditions générales de vente</h2><div style="font-size:14px">' + cg + "</div>"
       : p("Conditions générales de vente : <a href=\"https://fiitday.com/cgv.html\">fiitday.com/cgv.html</a>."));

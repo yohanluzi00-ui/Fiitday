@@ -132,8 +132,10 @@ h1,h2{font-family:"Space Grotesk",ui-sans-serif,sans-serif;line-height:1.2;text-
 footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:14px;display:flex;gap:16px;flex-wrap:wrap}
 .encadre{border:2px solid var(--accent);border-radius:12px;padding:2px 16px;margin:16px 0;background:var(--card)}p.encadre{padding:12px 16px}
 .loi{font-size:14px;color:var(--muted);border-left:3px solid var(--line);padding-left:14px}`;
+// typographie française : espace insécable avant « ; : ! ? » et à l'intérieur des guillemets (dans le texte, jamais dans les balises)
+const frSpaces = h => (">" + h + "<").replace(/>([^<]+)</g, (m, t) => ">" + t.replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0") + "<").slice(1, -1);
 for (const f of fs.readdirSync(path.join(__dirname, "src", "pages")).filter(f => f.endsWith(".html"))) {
-  const body = src("pages/" + f).replace(/\{\{CONTACT\}\}/g, CONTACT);
+  const body = frSpaces(src("pages/" + f).replace(/\{\{CONTACT\}\}/g, CONTACT));
   const title = (body.match(/<!-- title: (.+?) -->/) || [, "Fiitday"])[1];
   fs.writeFileSync(path.join(dist, f), `<!doctype html>
 <html lang="fr">

@@ -56,6 +56,6 @@ Deno.serve(async (req: Request) => {
   }
 
   const { error } = await asUser.rpc("delete_my_account");
-  if (error) return json(500, { error: error.message });
+  if (error) { console.error("delete_my_account : " + error.message); return json(500, { error: "La suppression a échoué, réessaie dans un instant." }); }
   return json(200, { ok: true, revenuecat });
 });

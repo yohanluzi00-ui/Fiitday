@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Registre des recettes automatique (24/11/2026) : la fonction Edge « ledger-stripe » lit les encaissements par carte
 -- dans Stripe (clé restreinte en lecture seule STRIPE_READ_KEY, enregistrée dans Supabase › Edge Functions › Secrets)
 -- et prépare une ligne par mois. Rien n'entre dans le registre sans validation dans Administration › Registre des recettes.

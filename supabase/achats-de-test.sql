@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Achats de test réservés au compte de test, et horloge séparée pour les achats à vie
 alter table public.entitlements add column if not exists life_event_at timestamptz;
 

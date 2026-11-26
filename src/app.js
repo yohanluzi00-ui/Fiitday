@@ -9,6 +9,12 @@ const WIDE = 900; // largeur (px) à partir de laquelle la séance s'affiche en 
 // grand écran (PC) : pages sur plusieurs colonnes (liste à gauche, détail à droite…) ; le téléphone n'est jamais concerné
 const PC = 1100, isPC = () => window.innerWidth >= PC;
 const Native = window.AndroidBridge || null;
+// fiitday.com affiché dans le cadre d'un autre site : on en sort, ou on n'affiche rien (pas de faux site autour de la vraie appli)
+if (!Native && window.top !== window.self) {
+  try { window.top.location.href = location.href; } catch (e) { }
+  document.documentElement.innerHTML = "";
+  throw new Error("Fiitday ne s'affiche pas dans le cadre d'un autre site");
+}
 const $app = document.getElementById("app");
 let flashTimer = null; // clignotement de fin de repos
 
@@ -1178,7 +1184,7 @@ function viewLanding() {
     '<section class="lp-hero"><div class="lp-in lp-hero-in"><div>' +
       '<h1>Ton carnet de musculation, <span class="lp-grad">simple et complet</span></h1>' +
       '<p class="lp-lead">Programmes, séances guidées, chrono de repos, plus de 100 exercices en 3D et le suivi de tes progrès. Sur ton téléphone et ton ordinateur.</p>' + cta +
-      '<p class="lp-small">' + (MONETIZATION ? "30 jours de Premium offerts à la création du compte, sans carte bancaire." : "Toute l'appli est gratuite pendant le lancement, sans carte bancaire.") + "</p></div>" +
+      '<p class="lp-small">' + (MONETIZATION ? TRIAL_DAYS + " jours de Premium offerts à la création du compte, sans carte bancaire." : "Toute l'appli est gratuite pendant le lancement, sans carte bancaire.") + "</p></div>" +
       '<div class="lp-hero-shot">' + shot("seance", LP_SHOTS[0][1]) + "</div></div></section>" +
     '<section class="lp-sec" id="lp-fonctions"><div class="lp-in"><h2>Tout pour t\'entraîner, rien de superflu</h2>' +
       '<p class="lp-lead">Pensé pour la salle comme pour la maison : tu lances ta séance, Fiitday s\'occupe du reste.</p>' +
@@ -1186,10 +1192,10 @@ function viewLanding() {
     '<section class="lp-sec lp-alt" id="lp-ecrans"><div class="lp-in"><h2>Un coup d\'œil à l\'appli</h2>' +
       '<div class="lp-shots">' + LP_SHOTS.slice(1).map(([k, alt]) => "<figure>" + shot(k, alt, true) + "<figcaption>" + esc(alt) + "</figcaption></figure>").join("") + "</div></div></section>" +
     '<section class="lp-sec" id="lp-tarifs"><div class="lp-in"><h2>Gratuit pour commencer</h2>' +
-      '<p class="lp-lead">À la création de ton compte, tu as <b>30 jours de Premium offerts</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
+      '<p class="lp-lead">À la création de ton compte, tu as <b>' + TRIAL_DAYS + ' jours de Premium offerts</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
       (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
       '<div class="lp-prices">' +
-        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et 2 séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des 30 derniers jours</li><li>Stats de la semaine</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
+        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et ' + FREE_VARIANTS + ' séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des ' + FREE_HIST_DAYS + ' derniers jours</li><li>Stats de la semaine</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
         [["solo", "Premium Solo", "Pour toi, sur tous tes appareils"], ["family", "Premium Famille", "Toi et 4 proches, chacun avec son compte et ses données"]].map(([k, t, d]) => { const pr = PRICES[k];
           return '<div class="lp-price' + (k === "solo" ? " best" : "") + '"><h3>' + t + '</h3><div class="amt num">' + pr.month + " <small>/ mois</small></div>" +
             '<div class="lp-small">ou ' + pr.year + " par an (soit " + pr.yearMonth + " par mois)<br>" + esc(lifeTxt(pr)) + "</div><ul><li>" + esc(d) + "</li><li>Tout illimité, toutes les stats</li><li>Synchro téléphone et ordinateur</li><li>Les programmes Fiitday</li></ul></div>"; }).join("") +
@@ -2105,11 +2111,11 @@ function viewProgram(tid, vid) {
   bl.forEach((blk, bi) => {
     const nextField = bi < bl.length - 1 ? '<div class="fl next-rest"><span>Repos avant l\'exercice suivant</span><button type="button" class="f pick" data-act="picksec" data-sf="next" data-e="' + blk.items[0].i + '">' + fmtSecs(restNextOf(blk.items[0].e, v)) + "</button>" +
       '<span class="small">Démarre quand toutes les séries ' + (blk.groupId ? "du groupe" : "de cet exercice") + " sont validées. « Aucun » : le repos habituel.</span></div>" : "";
-    const moves = ""; // l'ordre se change en glissant la poignée ⠿
+
     if (blk.groupId) {
       const f = blk.items[0].e, fi = blk.items[0].i, label = GROUP_LABEL[f.groupKind] || "Enchaînement";
       const k = "t:" + blk.groupId, fo = folded.has(k);
-      h += '<div class="card group' + (fo ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread">' + grip + foldTitle(k, '<span class="group-tag">' + esc(label) + " · " + blk.items.length + " exercices enchaînés</span>", fo) + '<div class="row">' + moves + "</div></div>";
+      h += '<div class="card group' + (fo ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread">' + grip + foldTitle(k, '<span class="group-tag">' + esc(label) + " · " + blk.items.length + " exercices enchaînés</span>", fo) + '<div class="row">' + "</div></div>";
       if (fo) { h += '<div class="fold-sum muted small">' + blk.items.map((y, n) => LETTERS[n] + ". " + esc(y.e.name)).join(" · ") + " — " + esc(f.sets) + " tours</div></div>"; return; }
       h += '<div class="blk-body">' +
         '<div class="ed-grid"><label class="fl">Enchaînement<select class="f" data-p="gkind" data-e="' + fi + '">' +
@@ -2123,7 +2129,7 @@ function viewProgram(tid, vid) {
     } else {
       const x = blk.items[0];
       const k = "t:" + x.e.id, f = folded.has(k);
-      h += '<div class="card' + (f ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread cfg-head">' + grip + foldTitle(k, '<b><span data-title="' + x.i + '">' + esc(x.e.name) + "</span></b>", f) + '<div class="row">' + moves +
+      h += '<div class="card' + (f ? " folded" : "") + '" data-sort-id="' + esc(k) + '"><div class="spread cfg-head">' + grip + foldTitle(k, '<b><span data-title="' + x.i + '">' + esc(x.e.name) + "</span></b>", f) + '<div class="row">' +
         '<button class="link" data-act="cfgrename" data-e="' + x.i + '">Renommer</button><button class="btn sm danger" data-act="delex" data-e="' + x.i + '">Supprimer</button></div></div>' + (f ? '<div class="fold-sum muted small">' + esc(tplLine(x.e)) + "</div>" : '<div class="blk-body">' + exFields(x.e, x.i, "", false) + nextField +
         (bi < bl.length - 1 && !bl[bi + 1].groupId ? '<button class="link" style="margin-top:6px" data-act="link" data-b="' + bi + '">Enchaîner avec l\'exercice suivant (superset / biset)</button>' : "") + "</div>") + "</div>";
     }
@@ -2134,13 +2140,6 @@ function viewProgram(tid, vid) {
 // blocs réduits (configuration d'une séance et séance en cours) : un appui sur le nom réduit / déplie le bloc
 const folded = new Set();
 const foldTitle = (k, inner, f) => '<button type="button" class="fold-t" data-act="fold" data-k="' + esc(k) + '" aria-expanded="' + !f + '" title="' + (f ? "Déplier" : "Réduire") + '">' + inner + '<span class="fold-i" aria-hidden="true">' + (f ? "▸" : "▾") + "</span></button>";
-function moveBlock(v, bi, dir) {
-  const bl = blocks(v.exercises), j = bi + dir;
-  if (j < 0 || j >= bl.length) return false;
-  const x = bl[bi]; bl[bi] = bl[j]; bl[j] = x;
-  v.exercises = bl.flatMap(b => b.items.map(it => it.e));
-  return true;
-}
 const ADD_CHOICES = [
   ["simple", "Exercice simple", "Séries classiques avec repos entre chaque série"],
   ["degressif", "Dégressif", "Après la série, tu baisses la charge et tu continues sans repos"],
@@ -3490,11 +3489,23 @@ function viewGuide() {
     GUIDE.map(([t, href, lead, pts]) => '<section class="card guide-p"><div class="spread"><h2>' + esc(t) + "</h2>" + (href ? '<a class="link small" href="' + href + '">Ouvrir ›</a>' : "") + "</div>" +
       '<p class="muted small">' + esc(lead) + '</p><ul class="exo-tips">' + pts.map(x => "<li>" + esc(x) + "</li>").join("") + "</ul></section>").join("");
 }
+// limites de la version gratuite et prix : un seul endroit, les textes (FAQ, page de présentation, écran Premium) en découlent
+const TRIAL_DAYS = 30, FREE_VARIANTS = 2, FREE_OWN = 5, FREE_HIST_DAYS = 30, FREE_SWITCH_DAYS = 30, DAY = 86400000;
+// Solo : 1 compte · Famille : l'acheteur + 4 personnes, chacune avec son propre compte (invitées depuis Réglages › Abonnement)
+const FAMILY_SIZE = 5;
+const PRICE_EUR = { solo: { month: 1.99, year: 19.9, life: 49.9, lifeAfter: 79.9 }, family: { month: 6.99, year: 69.9, life: 149.9, lifeAfter: 229.9 } };
+const fmtEur = n => (Math.round(n * 100) / 100).toFixed(2).replace(".", ",") + " €";
+const priceTexts = p => ({ year: fmtEur(p.year), month: fmtEur(p.month), yearMonth: fmtEur(p.year / 12), life: fmtEur(p.life), lifeAfter: fmtEur(p.lifeAfter),
+  lifeVs: "moins cher que 3 ans d'abonnement annuel (" + fmtEur(p.year * 3) + ")" });
+const PRICES = { solo: priceTexts(PRICE_EUR.solo), family: priceTexts(PRICE_EUR.family) };
+// Premium à vie : prix de lancement jusqu'au 31 décembre 2027, puis prix normal (affiché tout seul à partir de cette date).
+// Pas de prix barré : la loi demande qu'un prix barré ait vraiment été pratiqué dans les 30 jours d'avant.
+const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028", LIFE_LAST_TXT = "31 décembre 2027";
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
-  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>30 jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
-  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et 2 séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les 30 jours), 5 exercices perso, l'historique des 30 derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
-  ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : 1,99 € par mois ou 19,90 € par an. <b>Famille</b> (toi + 4 proches, chacun son compte) : 6,99 € par mois ou 69,90 € par an. <b>À vie</b>, en un seul paiement : 49,90 € en Solo ou 149,90 € en Famille jusqu'au 31 décembre 2027, puis 79,90 € et 229,90 €. Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
+  ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : " + PRICES.solo.month + " par mois ou " + PRICES.solo.year + " par an. <b>Famille</b> (toi + " + (FAMILY_SIZE - 1) + " proches, chacun son compte) : " + PRICES.family.month + " par mois ou " + PRICES.family.year + " par an. <b>À vie</b>, en un seul paiement : " + PRICES.solo.life + " en Solo ou " + PRICES.family.life + " en Famille jusqu'au " + LIFE_LAST_TXT + ", puis " + PRICES.solo.lifeAfter + " et " + PRICES.family.lifeAfter + ". Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
   ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite, plus limitée, et gardent leurs données."],
@@ -3541,14 +3552,6 @@ $app.addEventListener("input", e => {
 // Le compte testeur voit seulement le mode test (Réglages) pour essayer l'essai, la version gratuite et Premium sur son appareil.
 const MONETIZATION = false;
 const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
-const TRIAL_DAYS = 30, FREE_VARIANTS = 2, FREE_OWN = 5, FREE_HIST_DAYS = 30, FREE_SWITCH_DAYS = 30, DAY = 86400000;
-// Solo : 1 compte · Famille : l'acheteur + 4 personnes, chacune avec son propre compte (invitées depuis Réglages › Abonnement)
-const PRICES = { solo: { year: "19,90 €", month: "1,99 €", yearMonth: "1,66 €", life: "49,90 €", lifeAfter: "79,90 €", lifeVs: "moins cher que 3 ans d'abonnement annuel (59,70 €)" },
-  family: { year: "69,90 €", month: "6,99 €", yearMonth: "5,83 €", life: "149,90 €", lifeAfter: "229,90 €", lifeVs: "moins cher que 3 ans d'abonnement annuel (209,70 €)" } };
-// Premium à vie : prix de lancement jusqu'au 31 décembre 2027, puis prix normal (affiché tout seul à partir de cette date).
-// Pas de prix barré : la loi demande qu'un prix barré ait vraiment été pratiqué dans les 30 jours d'avant.
-const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028";
-const FAMILY_SIZE = 5;
 // Premium ou gratuit : écran Premium et page de présentation du site
 const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives (changement tous les " + FREE_SWITCH_DAYS + " jours)"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
   ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
@@ -4113,7 +4116,11 @@ function jwtClaims() {
   try { const p = db.auth.access_token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"); return JSON.parse(decodeURIComponent(escape(atob(p + "===".slice((p.length + 3) % 4))))); }
   catch (e) { return {}; }
 }
-const isAal2 = () => !!db.auth && jwtClaims().aal === "aal2";
+const isAal2 = () => {
+  if (!db.auth) return false;
+  const c = jwtClaims(), t = (Array.isArray(c.amr) ? c.amr : []).filter(a => a && a.method === "totp").map(a => +a.timestamp || 0);
+  return c.aal === "aal2" && (!t.length || Date.now() / 1000 - Math.max(...t) < 12 * 3600); // code validé il y a moins de 12 h
+};
 let mfa = { factors: null, enroll: null, err: "", busy: false };
 async function mfaLoad() {
   try { const u = await authApi("GET", "user"); mfa.factors = (u.factors || []).filter(f => f.factor_type === "totp"); }
@@ -4471,10 +4478,10 @@ let ledgerAuto = null, ledgerAutoBusy = false, ledgerAutoTried = false;
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const eur = v => EUR.format(+v || 0);
 const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
-const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const MOIS = MONTHS;
 const LEDGER_STORES = ["Google Play", "App Store"];
 const LEDGER_METHODS = ["Virement bancaire", "Carte bancaire", "PayPal", "Chèque", "Espèces", "Autre"];
-const isoDay = t => { const d = new Date(t); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+const isoDay = ymd;
 const dayFr = s => s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
 const ledgerInfo = () => Object.assign({ name: "", siret: "", addr: "", vat: "" }, settings().ledgerInfo || {});
 async function loadLedger(manual) {
@@ -5068,7 +5075,6 @@ $app.addEventListener("click", async e => {
       render(); toast((isT ? "Objectif : " : isN ? "Avant l'exercice suivant : " : "Repos : ") + (val ? fmtSecs(val) : "aucun") + (scope === "always" ? " · pour toutes les séances" : " · aujourd'hui"));
     } break;
     /* connexion */
-    case "local": db.mode = "local"; saveNow(); render(); break;
     case "loginmode": { const em = $app.querySelector('input[name="email"]'); if (em) loginEmail = em.value; const fn = $app.querySelector('input[name="firstname"]'); if (fn) loginName = fn.value; loginMode = b.dataset.m === "up" ? "up" : "in"; render(); const f = $app.querySelector(loginEmail ? 'input[name="password"]' : 'input[name="email"]'); if (f) f.focus(); } break;
     case "tologin": db.mode = null; saveNow(); render(); break;
     case "changemail": db.verify = null; saveNow(); render(); break;
@@ -5362,7 +5368,6 @@ $app.addEventListener("click", async e => {
       put("template", t); render();
     } break;
     case "delex": { const { t, v } = currentProgram(); if (!v) return; const ex = v.exercises[+b.dataset.e]; if (!await ask({ title: (ex.groupId ? "Retirer" : "Supprimer") + " « " + ex.name + " » ?", ok: ex.groupId ? "Retirer" : "Supprimer", danger: true })) return; v.exercises.splice(+b.dataset.e, 1); cleanGroups(v); put("template", t); render(); } break;
-    case "up": case "down": { const { t, v } = currentProgram(); if (!v) return; if (moveBlock(v, +b.dataset.b, a === "up" ? -1 : 1)) { put("template", t); render(); } } break;
     case "sharevar": { const { t, v } = currentProgram(); if (!v) return; if (isFree()) { premiumGate("En version gratuite, tu peux recevoir des séances, mais pas partager les tiennes."); return; } shareVariant(t, v); } break;
     case "freepick": changeActive(b.dataset.t, b.dataset.v); break;
     case "freereset": if (planTesting()) { setSetting("freeActive", Object.assign({}, settings().freeActive || {}, { at: 0 })); toast("Mode test : changement de séances actives possible tout de suite"); } break;
@@ -5382,6 +5387,7 @@ $app.addEventListener("click", async e => {
       // la demande cochée est gardée sur le serveur (preuve, et rappel dans l'e-mail de confirmation de la commande)
       try { const c = await rpc("record_purchase_consent", { p_product: pid, p_text: consentText() }); if (c && c.ok === false) throw new Error("refus"); }
       catch (e) { toast("Connexion au serveur impossible : réessaie dans un instant"); break; }
+      if (isPlanTester() && billingMode() === "test") { try { await rpc("open_test_purchases"); } catch (e) { } } // achats de test acceptés 2 h par le serveur
       buying = true; render();
       const r = Native ? await billingCall("billingBuy", db.auth.user.id, pid, premiumPick !== "life") : await webBuy(pid);
       buying = false; render();
@@ -5563,11 +5569,6 @@ $app.addEventListener("click", async e => {
       setSetting("alert", vib && son ? "les deux" : vib ? "vibration" : son ? "son" : "aucune");
     } break;
     case "notifon": if (Native && typeof Native.enableNotifications === "function") Native.enableNotifications(); break;
-    case "testwatch": {
-      if (!nativeWatch() || typeof Native.testWatch !== "function") return;
-      askNotif(); Native.testWatch();
-      toast("Notification de test dans 5 secondes : verrouille ton téléphone et regarde ta montre");
-    } break;
     case "testalert": {
       b.classList.remove("lit"); void b.offsetWidth; b.classList.add("lit"); setTimeout(() => b.classList.remove("lit"), 1300);
       audio();
@@ -5607,11 +5608,6 @@ $app.addEventListener("click", async e => {
       const c = await ask({ title: "J'ai un code", text: "Tape le code de 8 caractères créé dans l'autre compte (Réglages › Données › Créer un code). Il n'est valable qu'une heure.", input: "", code: true, ok: "Récupérer" });
       if (c) useTransferCode(c);
     } break;
-    case "import": {
-      if (dataLocked()) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
-      const txt = await ask({ title: "Restaurer une sauvegarde", text: "Colle le texte de la sauvegarde. Ce qui a été supprimé depuis revient ; ce que tu as modifié depuis garde sa version la plus récente.", input: "", multiline: true, ok: "Restaurer" });
-      if (txt) restoreBackup(txt);
-    } break;
   }
 });
 // sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
@@ -5625,7 +5621,7 @@ async function restoreBackup(txt, badMsg) {
   const take = [], back = []; let bad = 0, same = 0;
   for (const it of j.items) {
     if (it && it.kind === "workout" && it.data) it.data = fatWorkout(it.data);
-    if (!it || !KINDS[it.kind] || it.deleted || !validItem(it) || typeof it.updated_at !== "number" || JSON.stringify(it.data).length > 400000) { bad++; continue; }
+    if (!it || !KINDS[it.kind] || it.deleted || !validItem(it) || typeof it.updated_at !== "number" || JSON.stringify(it.data).length > 190000) { bad++; continue; }
     const cur = db.items[it.id];
     if (cur && !cur.deleted && it.updated_at <= cur.updated_at) { same++; continue; }
     take.push(it); if (cur && cur.deleted) back.push(it);
@@ -5809,6 +5805,20 @@ document.addEventListener("pointermove", e => { if (peekTimer && peekStart && Ma
 // après un appui prolongé, le toucher ne lance pas la séance (et pas de menu du navigateur)
 document.addEventListener("click", e => { if (peekDone && e.target.closest && e.target.closest('.variant[data-act="start"]')) { e.stopPropagation(); e.preventDefault(); peekDone = false; } }, true);
 document.addEventListener("contextmenu", e => { if (e.target.closest && e.target.closest('.variant[data-act="start"]')) e.preventDefault(); });
+
+/* ================= Erreurs inattendues ================= */
+// une action qui échoue sans raison prévue affiche un message au lieu de sembler ne rien faire (le détail reste dans la console)
+let lastOops = 0;
+function oops(err) {
+  const m = String((err && (err.message || err)) || "");
+  if (/Failed to fetch|NetworkError|AbortError|Load failed|cadre d'un autre site/i.test(m)) return; // réseau : déjà signalé ailleurs
+  console.error("Erreur inattendue :", err);
+  if (Date.now() - lastOops < 8000) return;
+  lastOops = Date.now();
+  toast("Un problème est survenu : réessaie. Si cela continue, écris-nous à contact@fiitday.com.");
+}
+window.addEventListener("unhandledrejection", e => oops(e.reason));
+window.addEventListener("error", e => { if (e.error instanceof Error && (!e.filename || e.filename.indexOf(location.origin) === 0)) oops(e.error); });
 
 /* ================= Démarrage ================= */
 applyTheme();

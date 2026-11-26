@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Abonnements multiples (24/11/2026) : chaque abonnement est suivi à part (une boutique + un produit),
 -- et Premium vient du meilleur abonnement encore actif. Avant, le dernier message de RevenueCat écrasait le précédent :
 -- quelqu'un qui avait deux abonnements (par carte et Google Play, ou Solo puis Famille) pouvait perdre Premium à tort

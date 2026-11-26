@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Base de données de MuscuApp (à exécuter une seule fois dans Supabase › SQL Editor).
 -- Une seule table : chaque ligne est un élément (séance-type, séance réalisée, réglages)
 -- appartenant à l'utilisateur connecté. Personne d'autre ne peut lire ni modifier ses lignes.

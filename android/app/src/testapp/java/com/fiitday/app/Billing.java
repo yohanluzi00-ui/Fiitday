@@ -21,7 +21,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Achats avec RevenueCat, dans l'appli « Fiitday Test » seulement (variante debug) :
+ * Achats avec RevenueCat, dans l'appli « Fiitday Test » seulement (variantes staging et debug) :
  * clé du magasin de test RevenueCat (achats factices, aucun paiement). L'appli publiée (release) a sa propre
  * version de cette classe, qui ne fait rien tant que le paiement Google n'est pas branché.
  * Chaque achat est lié au compte Fiitday (identifiant Supabase) : le serveur reçoit ensuite le message de RevenueCat.

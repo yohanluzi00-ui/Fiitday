@@ -8,3 +8,4 @@ android/release.p12
 *.apk
 *.p12
 node_modules/
+dist.tmp/

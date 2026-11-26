@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Suppression de compte depuis l'appli (Réglages › Supprimer mon compte) — à exécuter une fois dans
 -- Supabase › SQL Editor, avec le rôle « postgres ».
 -- Supprime le compte de la personne connectée ; ses données (items, shares) partent avec lui (on delete cascade).

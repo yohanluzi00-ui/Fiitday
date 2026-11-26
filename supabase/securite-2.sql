@@ -1,6 +1,9 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Fiitday · correctifs du Security Advisor de Supabase (V1.36)
 -- À exécuter une fois dans Supabase › SQL Editor (rôle « postgres »), puis cliquer sur « Refresh » dans le Security Advisor.
--- Sans risque : à relancer autant de fois que nécessaire.
+-- (Autrefois « relançable sans risque » : ce n'est plus vrai, voir l'avertissement ci-dessus.)
 
 -- 1. « Public Can Execute SECURITY DEFINER Function » sur get_share :
 --    l'import d'une séance partagée se fait toujours une fois connecté (l'appli affiche d'abord la connexion),

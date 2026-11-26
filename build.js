@@ -28,8 +28,13 @@ for (const m0 of exoSrc.matchAll(/\{ id: "([a-z0-9-]+)", n: "([^"]+)",(.*?) p: \
     (rest.match(/\bg: "(\w+)"/) || [])[1] || MUSG[prim[0]] || ""]); // groupe de la page Exercices (pectoraux, dos, bras, cardio, hyrox…)
 }
 if (EXO_INDEX.length < 50) throw new Error("Index des exercices incomplet (" + EXO_INDEX.length + ") : vérifier le format de src/exercices.js");
-const bootJs = `window.APP_BUILD = ${JSON.stringify(VERSION)}; window.APP_VERSION = ${JSON.stringify(process.env.VERSION_NAME || "")}; window.EXO_INDEX = ${JSON.stringify(EXO_INDEX)};`;
+// chaque exercice de la bibliothèque doit être dans l'index (sinon il manquerait à la recherche, sans autre signe)
+const exoCount = (exoSrc.match(/\{ id: "[a-z0-9-]+", n: "/g) || []).length;
+if (exoCount !== EXO_INDEX.length) throw new Error("Index des exercices : " + EXO_INDEX.length + " lus sur " + exoCount + " (format inattendu dans src/exercices.js)");
+const bootJs = `window.APP_BUILD = ${JSON.stringify(VERSION)}; window.APP_VERSION = ${JSON.stringify(process.env.VERSION_NAME || "")}; window.EXO_INDEX = ${JSON.stringify(EXO_INDEX).replace(/</g, "\\u003c")};`;
 const appJs = "\n" + src("app.js") + "\n";
+// le code est collé dans des balises <script> : « </script » ou « <!-- » couperait la page en deux
+if (/<\/script|<!--/i.test(appJs + bootJs)) throw new Error("app.js contient « </script » ou « <!-- » : écrire « <\\/script » à la place");
 if (!src("app.js").includes(SUPABASE)) throw new Error("Adresse Supabase différente dans app.js : mettre à jour SUPABASE dans build.js");
 // paiement par carte sur fiitday.com : module RevenueCat (purchases.js, servi par le site) qui charge le formulaire de carte de Stripe
 const STRIPE_JS = "https://js.stripe.com https://*.js.stripe.com", RC_ASSETS = "https://da08ctfrofx1b.cloudfront.net"; // icône et police de la page de paiement RevenueCat
@@ -47,6 +52,9 @@ const CSP = [
   "form-action 'none'",
   "object-src 'none'",
 ].join("; ");
+// appli Android : pas de paiement par carte, donc aucun cadre ni script de Stripe (le pont Android n'est jamais exposé à une page tierce)
+const CSP_APP = CSP.replace(" " + STRIPE_JS, "").replace(/frame-src [^;]+/, "frame-src 'none'");
+if (CSP_APP === CSP || !/frame-src 'none'/.test(CSP_APP)) throw new Error("CSP de l'appli Android non construite");
 const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; font-src data:; base-uri 'none'; form-action 'none'";
 
 const html = `<!doctype html>
@@ -81,7 +89,9 @@ ${src("style.css")}
 </html>
 `;
 
-const dist = path.join(__dirname, "dist");
+// tout est d'abord écrit dans un dossier temporaire : une erreur en cours de route ne laisse jamais un dist/ à moitié neuf
+const distFinal = path.join(__dirname, "dist"), dist = path.join(__dirname, "dist.tmp");
+fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
 fs.writeFileSync(path.join(dist, "index.html"), html);
 // logo 6 « Haltère épuré » (src/icons/logo.svg) : icônes du site, de l'écran d'accueil (Android, iPhone) et de l'appli
@@ -108,12 +118,19 @@ const CACHE = "muscu-${CACHE}";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "exercices.js", "three.module.min.js"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
+// copie hors ligne (même adresse, ou la page de l'appli pour une navigation)
+const fromCache = req => caches.match(req, { ignoreSearch: true }).then(r => r || (req.mode === "navigate" ? caches.match("index.html") : undefined));
 self.addEventListener("fetch", e => {
   const u = new URL(e.request.url);
   if (e.request.method !== "GET" || u.origin !== location.origin) return;
-  // réseau d'abord (pour recevoir les mises à jour), cache si hors ligne
-  e.respondWith(fetch(e.request).then(r => { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return r; })
-    .catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match("index.html"))));
+  // réseau d'abord (pour recevoir les mises à jour) ; seules les vraies réponses (200) sont gardées pour le hors ligne
+  const net = fetch(e.request).then(r => {
+    if (r.ok && r.status === 200 && r.type === "basic") { const copy = r.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}); }
+    return r;
+  });
+  // réseau très faible (salle en sous-sol) : au bout de 3 s, la copie hors ligne s'affiche (le réseau met quand même le cache à jour)
+  const slow = new Promise(res => setTimeout(res, 3000)).then(() => fromCache(e.request)).then(r => r || net);
+  e.respondWith(Promise.race([net.catch(() => fromCache(e.request).then(r => r || Response.error())), slow]));
 });
 `);
 fs.writeFileSync(path.join(dist, ".nojekyll"), "");
@@ -161,9 +178,13 @@ ${body}
 `);
 }
 
-// Appli Android : la même page, embarquée dans l'APK
+// dist/ remplacé d'un coup
+fs.rmSync(distFinal, { recursive: true, force: true });
+fs.renameSync(dist, distFinal);
+
+// Appli Android : la même page, embarquée dans l'APK (avec sa propre politique de sécurité : aucun cadre)
 const www = path.join(__dirname, "android", "app", "src", "main", "assets", "www");
 fs.mkdirSync(www, { recursive: true });
-fs.copyFileSync(path.join(dist, "index.html"), path.join(www, "index.html"));
-for (const f of ["icon-192.png", "icon-512.png", "exercices.js", "three.module.min.js"]) fs.copyFileSync(path.join(dist, f), path.join(www, f));
+fs.writeFileSync(path.join(www, "index.html"), html.replace(CSP, CSP_APP));
+for (const f of ["icon-192.png", "icon-512.png", "exercices.js", "three.module.min.js"]) fs.copyFileSync(path.join(distFinal, f), path.join(www, f));
 console.log("Construit :", VERSION, "—", (html.length / 1024).toFixed(0), "Ko");

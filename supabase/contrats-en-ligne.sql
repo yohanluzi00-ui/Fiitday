@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Résiliation et rétractation en ligne, e-mails obligatoires (25/11/2026)
 -- Code de la consommation : L215-1-1 et D215-1 à D215-3 (résilier en ligne), L224-25-9 (fin au plus tard 10 jours
 -- après la demande, sauf si le client choisit plus tard), L221-21 et D221-5 (« Renoncer au contrat ici » pendant 14 jours),

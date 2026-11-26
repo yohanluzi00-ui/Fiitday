@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Liens de partage courts (https://fiitday.com/#/s/CODE) — à exécuter une fois dans Supabase › SQL Editor.
 -- Une séance partagée est enregistrée avec un code. Seul quelqu'un qui connaît le code peut la lire
 -- (fonction get_share) : personne ne peut lister les séances partagées.

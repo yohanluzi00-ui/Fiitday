@@ -1,6 +1,9 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Renforcement de la sécurité (audit de novembre 2026) — à exécuter une fois dans Supabase › SQL Editor,
 -- avec le rôle « postgres », après schema.sql, partage.sql et suppression-compte.sql.
--- Peut être relancé sans risque. Ne supprime aucune donnée.
+-- (Autrefois « relançable sans risque » : ce n'est plus vrai, voir l'avertissement ci-dessus.)
 
 -- 1. Fonctions avec un chemin de recherche vide (avertissement « Function Search Path Mutable »
 --    du conseiller de sécurité Supabase) : une fonction ne peut pas être détournée vers une autre table.

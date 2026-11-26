@@ -1,4 +1,7 @@
 # Compile l'APK, le signe et publie une « Release » (lue par Obtainium) à chaque modification.
+# Sécurité de la clé de signature : les actions sont épinglées sur une empreinte fixe ; la compilation n'a que le droit
+# de lire le dépôt (aucun jeton gardé), le fichier de la clé est effacé juste après ; seule l'étape de publication,
+# dans un travail à part qui n'exécute aucun code du projet, peut créer les Releases.
 name: Construire l'APK
 on:
   push:
@@ -11,30 +14,45 @@ on:
         type: boolean
         default: false
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: apk
   cancel-in-progress: false
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Numéro de version (nombre de modifications du code)
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           n=$(git rev-list --count HEAD)
+          # garde-fou : le numéro ne doit jamais redescendre (historique réécrit) ; Android refuserait la mise à jour
+          last=$(gh api "repos/${{ github.repository }}/releases?per_page=100" --jq '[.[].tag_name | select(test("^v1\\.[0-9]+$")) | ltrimstr("v1.") | tonumber] | max // 0')
+          if [ "$n" -lt "$last" ]; then
+            echo "Numéro de version $n plus petit que la dernière version publiée ($last) : l'historique de main a été réécrit ?"
+            exit 1
+          fi
           echo "VERSION_CODE=$n" >> "$GITHUB_ENV"
           echo "VERSION_NAME=1.$n" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@v4
+          echo "name=1.$n" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '20'
-      - uses: gradle/actions/setup-gradle@v4
+          node-version: '22'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           gradle-version: '8.14.3'
       - name: Préparer l'appli web
@@ -51,34 +69,57 @@ jobs:
             exit 1
           fi
           echo "$KEYSTORE_B64" | base64 -d > android/release.p12
-          cd android && gradle assembleRelease assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
+          cd android && gradle assembleRelease assembleStaging --no-daemon --stacktrace 2>&1 | tee ../build.log
+      - name: Effacer la clé de signature
+        if: always()
+        run: rm -f android/release.p12
+      - name: Garder les APK pour la publication
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: apk
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/apk/staging/app-staging.apk
+          retention-days: 3
+          if-no-files-found: error
+      # en cas d'échec : le journal reste dans les fichiers du travail (visible seulement dans l'onglet Actions, 7 jours)
+      - name: Garder le journal en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: journal
+          path: build.log
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION_NAME: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: apk
+          path: apk
       # appli « Fiitday Test » (achats factices) : pré-version à part, publiée AVANT la vraie pour que la vraie
       # reste la plus récente ; Obtainium ignore les pré-versions
       - name: Publier l'appli de test
         continue-on-error: true # un souci ici ne doit jamais bloquer la vraie version
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk Fiitday-Test.apk
+          cp apk/staging/app-staging.apk Fiitday-Test.apk
           gh release delete appli-test --cleanup-tag --yes 2>/dev/null || true
           printf 'Appli « Fiitday Test » %s : installée à côté de Fiitday, achats factices du magasin de test RevenueCat (aucun paiement). Pas pour Obtainium.\n' "$VERSION_NAME" > test-notes.md
           gh release create appli-test Fiitday-Test.apk --prerelease --title "Fiitday Test $VERSION_NAME" --notes-file test-notes.md --target "$GITHUB_SHA"
       - name: Publier la Release
         if: ${{ !inputs.appli_test_seule }}
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           apk="Fiitday-$VERSION_NAME.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk "$apk"
-          git log -1 --pretty=%B > notes.md
+          cp apk/release/app-release.apk "$apk"
+          gh api "repos/$GH_REPO/commits/$GITHUB_SHA" --jq .commit.message > notes.md
           if gh release view "v$VERSION_NAME" >/dev/null 2>&1; then echo "v$VERSION_NAME existe déjà (relance manuelle) : seule l'appli de test est mise à jour"; exit 0; fi
           gh release create "v$VERSION_NAME" "$apk" --title "Fiitday $VERSION_NAME" --notes-file notes.md --target "$GITHUB_SHA"
-      - name: Garder le journal en cas d'échec
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p /tmp/log && cp build.log /tmp/log/ 2>/dev/null || echo "pas de journal de compilation" > /tmp/log/build.log
-          cd /tmp/log && git init -q && git checkout -q -b ci-logs && git add . \
-            && git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Échec du build ${{ github.run_number }}" \
-            && git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" ci-logs

@@ -1,5 +1,8 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Fiitday · codes de transfert (V1.39) — à exécuter une fois dans Supabase › SQL Editor (rôle « postgres »).
--- Sans risque : à relancer autant de fois que nécessaire.
+-- (Autrefois « relançable sans risque » : ce n'est plus vrai, voir l'avertissement ci-dessus.)
 --
 -- Réglages › Données › « Créer un code » : la sauvegarde est rangée ici avec un code de 8 caractères
 -- (lettres majuscules et chiffres, sans 0 / O / 1 / I pour éviter les confusions), valable 1 heure.

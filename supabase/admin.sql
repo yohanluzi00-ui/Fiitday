@@ -1,3 +1,6 @@
+-- ⚠ HISTORIQUE — NE PAS RELANCER. Ce fichier a déjà été appliqué ; la base a évolué depuis (abonnement, Premium,
+-- verrous de la version gratuite). Le relancer remplacerait des protections actuelles par d'anciennes versions.
+-- Référence : l'historique des migrations de Supabase (Database › Migrations) et supabase/migrations/ ; voir supabase/LISEZMOI.md.
 -- Fiitday : tableau de bord de l'administration (Réglages › Administration).
 -- Une fonction qui ne modifie aucune donnée de l'appli : elle renvoie des totaux (aucun e-mail, prénom ni contenu de séance)
 -- et refuse de répondre à tout autre compte que celui de l'administrateur, et sans double authentification (code à 6 chiffres).

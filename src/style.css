@@ -311,7 +311,8 @@ h1, .page-head h1, .ex-name, .tpl h2, .rp-time, .rp-end, .stat .v, .nav .brand, 
 .credit .appver img { width: 24px; height: 24px; border-radius: 7px; flex: none; } /* logo 6 à gauche de « Fiitday V… » */
 .consent { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); text-align: left; line-height: 1.45; }
 .consent input { width: 20px; height: 20px; flex: none; margin-top: 1px; accent-color: var(--accent); }
-.consent a { color: var(--accent); }
+.consent a, .consent-info a { color: var(--accent); }
+.consent-info { margin: -4px 0 0; text-align: left; line-height: 1.45; }
 .welcome h2 { font-family: var(--display); font-size: 22px; }
 .welcome p { margin: 8px 0 14px; }
 /* propositions de noms d'exercices (sous le champ, sans rien recouvrir) */
@@ -1189,3 +1190,7 @@ input.f::placeholder, textarea.f::placeholder { color: var(--muted); opacity: 1;
 .recap-rec li { display: flex; align-items: center; gap: 8px; }
 .recap-rec svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
 .recap-go { align-self: flex-start; padding: 0; }
+
+/* version gratuite : rappel de sauvegarde sur l'accueil */
+.backup-nudge { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.backup-nudge p { margin: 0; }

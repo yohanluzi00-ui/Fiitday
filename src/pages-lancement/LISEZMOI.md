@@ -13,6 +13,7 @@ Relecture juridique complète le 25 novembre 2026 (Code de la consommation à jo
 - `{{SIRET}}` : numéro SIRET (14 chiffres) ;
 - `{{MEDIATEUR}}` : nom, site et adresse du médiateur de la consommation choisi ;
 - `{{DATE}}` : date de mise en ligne ;
+- `{{ADRESSE_SUPABASE}}` et `{{CONTACT_SUPABASE}}` (mentions légales) : adresse postale et e-mail ou téléphone de Supabase, Inc., tels qu'écrits sur supabase.com/privacy (obligation de la LCEN pour l'hébergeur des données) ;
 - `{{CONTACT}}` est remplacé automatiquement par la fabrication du site.
 
 « TVA non applicable, article 293 B du CGI » : à garder seulement si l'entreprise est en franchise de TVA.
@@ -26,4 +27,16 @@ RevenueCat API v2 (RC_V2_SECRET_KEY), puis vérifier dans Administration › Abo
 
 ## Le jour de la publication
 
-Changer `LEGAL.version` dans `src/app.js` (l'appli redemande l'accord à la confidentialité), mettre `LEGAL.cgv = "https://fiitday.com/cgv.html"` (lien sur l'écran Premium et sur la page de présentation) et ajouter le lien « CGV » dans le pied des pages (`build.js`).
+Changer `LEGAL.version` dans `src/app.js` (l'appli remontre la politique de confidentialité), mettre `LEGAL.cgv = "https://fiitday.com/cgv.html"` (lien sur l'écran Premium et sur la page de présentation) et ajouter le lien « CGV » dans le pied des pages (`build.js`).
+
+## Garde-fou
+
+`build.js` refuse de publier une page qui contient encore un champ `{{…}}` (hors `{{CONTACT}}`). Et l'écran Premium
+n'active le bouton d'achat (hors achats de test) que si `LEGAL.cgv` est rempli, que le serveur a ouvert les ventes
+(date de lancement atteinte) et que cette version de l'appli sait encaisser (`MONETIZATION`).
+
+## Ordre conseillé le jour du lancement
+
+1. Remplir les champs et publier ces pages (copie dans `src/pages/`), mettre `LEGAL.cgv` et `MONETIZATION = true`.
+2. Publier cette version et laisser quelques jours aux appareils pour se mettre à jour.
+3. Seulement ensuite, remplir la date de lancement dans Supabase (`app_config.launch_at`).

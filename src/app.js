@@ -9,6 +9,7 @@ const WIDE = 900; // largeur (px) à partir de laquelle la séance s'affiche en 
 // grand écran (PC) : pages sur plusieurs colonnes (liste à gauche, détail à droite…) ; le téléphone n'est jamais concerné
 const PC = 1100, isPC = () => window.innerWidth >= PC;
 const Native = window.AndroidBridge || null;
+const PW_MIN = 12; // longueur minimale d'un nouveau mot de passe, partout (inscription, mot de passe oublié, changement)
 // fiitday.com affiché dans le cadre d'un autre site : on en sort, ou on n'affiche rien (pas de faux site autour de la vraie appli)
 if (!Native && window.top !== window.self) {
   try { window.top.location.href = location.href; } catch (e) { }
@@ -219,7 +220,8 @@ const CARDIO_M = {
   niv: { n: "Vitesse", s: "Niveau", u: "niveau" }, t500: { n: "Temps aux 500 m", s: "Temps / 500 m", u: "/500 m", clock: true, low: true }, cpm: { n: "Coups de rame", s: "Coups", u: "/min", int: true },
   cal: { n: "Calories", s: "Calories", u: "kcal", add: true, int: true }, fc: { n: "Fréquence cardiaque moyenne", s: "FC moy.", u: "bpm", int: true }
 };
-// indicateurs de départ de chaque machine (la fréquence cardiaque partout) ; une activité perso : distance, calories, fréquence cardiaque
+// indicateurs de départ de chaque machine ; une activité perso : distance, calories, fréquence cardiaque.
+// La fréquence cardiaque peut renseigner sur la santé : elle n'apparaît qu'après un accord exprès (Ajouter un indicateur), retirable à tout moment
 const CARDIO_MACH = {
   "tapis-course": ["dist", "vit", "incl", "cal", "fc"], "tapis-incurve": ["dist", "vit", "cal", "fc"],
   "velo-droit": ["dist", "res", "cad", "watts", "cal", "fc"], "velo-semi-allonge": ["dist", "res", "watts", "cal", "fc"], "velo-biking": ["dist", "res", "cad", "cal", "fc"],
@@ -237,7 +239,9 @@ function cardioDefs(e) {
 }
 // indicateurs retirés par l'utilisateur pour une machine (ils restent proposés dans « + Ajouter un indicateur »)
 function cardioHidden(key) { const h = settings().cardioHidden, l = h && typeof h === "object" ? h[key] : null; return Array.isArray(l) ? l.filter(k => typeof k === "string") : []; }
-const cardioShown = e => { const h = cardioHidden(cardioKey(e)); return cardioDefs(e).filter(d => !h.includes(d.k)); };
+const hrOk = () => !!settings().hrOk; // accord donné pour noter la fréquence cardiaque
+const hasHr = e => (e.sets || []).some(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "");
+const cardioShown = e => { const h = cardioHidden(cardioKey(e)), hr = hrOk() || hasHr(e); return cardioDefs(e).filter(d => !h.includes(d.k) && (d.k !== "fc" || hr)); };
 function setCardioHidden(key, list) { const st = settings(), hh = Object.assign({}, st.cardioHidden); hh[key] = list; st.cardioHidden = hh; put("settings", st); }
 // définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
 function cvDef(k) {
@@ -503,7 +507,24 @@ function expireSession() {
     toast("Ta connexion a expiré : continue ta séance, tu te reconnecteras à la fin");
     return;
   }
+  db.checkGone = db.auth.user.id; // au redémarrage : le compte a-t-il été supprimé depuis un autre appareil ?
   db.auth = null; db.mode = null; saveNow(); restart();
+}
+// compte supprimé (depuis un autre appareil) : ses données sont effacées de cet appareil aussi, comme annoncé à la suppression.
+// Le serveur répond seulement « existe / n'existe plus » pour cet identifiant ; sans réseau, on revérifiera au prochain lancement.
+async function accountGoneCheck(uid) {
+  uid = uid || (db.auth && db.auth.user.id) || db.checkGone; if (!uid || !ID_RE.test(uid)) return false;
+  let r;
+  try {
+    const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/account_exists", { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ p_uid: uid }) });
+    if (!res.ok) return false; r = await res.json();
+  } catch (e) { return false; }
+  if (r !== false) { if (db.checkGone === uid) { delete db.checkGone; saveNow(); } return false; }
+  if (db.auth && db.auth.user.id === uid && activeWorkout()) return false; // séance en cours : elle se finit, on revérifiera ensuite
+  billingLogout(); db = emptyDb(); dataRev++; saveNow();
+  try { localStorage.removeItem(asideKey(uid)); } catch (e) { }
+  try { sessionStorage.setItem("fiitday-msg", "Ce compte a été supprimé : ses données ont été effacées de cet appareil"); } catch (e) { }
+  restart("#/home"); return true;
 }
 async function rest(method, path, body, headers) {
   await ensureToken();
@@ -633,6 +654,27 @@ function purgeTombs() {
 }
 let syncTimer = null, syncing = false, syncAgain = false, syncRun = null;
 function scheduleSync() { if (!db.auth || db.auth.dead) return; clearTimeout(syncTimer); syncTimer = setTimeout(sync, 2500); }
+// lit ce qui a changé sur le serveur depuis la dernière lecture (avec 5 s de marge : une écriture validée juste après la
+// dernière lecture n'est jamais sautée ; relire deux fois la même ligne est sans effet) ; renvoie true si quelque chose a changé
+async function pullServer(gone) {
+  let since = db.lastServerAt, maxSeen = db.lastServerAt, changed = false;
+  if (since) { const t = Date.parse(since); if (t) since = new Date(t - 5000).toISOString(); }
+  for (let page = 0; page < 50; page++) {
+    let q = "items?select=id,kind,data,updated_at,deleted,server_at&order=server_at.asc&limit=1000";
+    if (since) q += "&server_at=gte." + encodeURIComponent(since);
+    const rows = await rest("GET", q);
+    if (gone()) return false;
+    if (!Array.isArray(rows)) throw Object.assign(new Error("réponse inattendue"), { status: 502 });
+    for (const r of rows) {
+      if (r && (!maxSeen || r.server_at > maxSeen)) maxSeen = r.server_at;
+      if (takeRow(r)) { changed = true; dataRev++; }
+    }
+    if (rows.length < 1000) break;
+    since = rows[rows.length - 1].server_at;
+  }
+  db.lastServerAt = maxSeen || new Date().toISOString(); // compte vide : la relecture est faite quand même
+  return changed;
+}
 // attend la fin de la synchro en cours (avant une déconnexion ou une suppression de compte)
 async function syncIdle() { while (syncRun) { try { await syncRun; } catch (e) { } } }
 async function sync() {
@@ -643,31 +685,25 @@ async function sync() {
   if (!planTesting()) await loadPlan();
   if (gone()) return;
   if (!db.base) { db.base = {}; for (const it of Object.values(db.items)) if (!it.dirty) keepBase(it); } // première fois : versions de référence
-  if (isFree() && !planTesting()) { syncState.status = "free"; updateSyncBadges(); return; } // version gratuite : les données restent sur l'appareil
+  if (isFree()) { // version gratuite (mode test « essai terminé » compris) : rien n'est envoyé, les données restent sur l'appareil
+    // juste après la connexion : on relit une fois ce que le serveur a gardé (séances de l'essai ou de Premium), sans rien envoyer
+    if (!db.lastServerAt && !syncing && navigator.onLine !== false) {
+      syncing = true;
+      try { if (await pullServer(gone)) { saveNow(); softRender(); } else saveNow(); }
+      catch (e) { console.warn("relecture du serveur impossible", e); }
+      finally { syncing = false; }
+    }
+    syncState.status = "free"; updateSyncBadges(); return;
+  }
   if (syncing) { syncAgain = true; return; }
   if (navigator.onLine === false) { syncState.status = "offline"; updateSyncBadges(); return; }
   syncing = true; if (syncState.status !== "ok") { syncState.status = "busy"; updateSyncBadges(); } // déjà synchronisé : la synchro de fond ne change pas le texte (pas de saut à l'écran)
   let changed = false, endRun;
   syncRun = new Promise(r => { endRun = r; });
   try {
-    // 1) récupérer ce qui a changé sur le serveur (avec 5 s de marge : une écriture validée juste après la dernière lecture
-    //    n'est jamais sautée ; relire deux fois la même ligne est sans effet)
-    let since = db.lastServerAt, maxSeen = db.lastServerAt;
-    if (since) { const t = Date.parse(since); if (t) since = new Date(t - 5000).toISOString(); }
-    for (let page = 0; page < 50; page++) {
-      let q = "items?select=id,kind,data,updated_at,deleted,server_at&order=server_at.asc&limit=1000";
-      if (since) q += "&server_at=gte." + encodeURIComponent(since);
-      const rows = await rest("GET", q);
-      if (gone()) return;
-      if (!Array.isArray(rows)) throw Object.assign(new Error("réponse inattendue"), { status: 502 });
-      for (const r of rows) {
-        if (r && (!maxSeen || r.server_at > maxSeen)) maxSeen = r.server_at;
-        if (takeRow(r)) { changed = true; dataRev++; }
-      }
-      if (rows.length < 1000) break;
-      since = rows[rows.length - 1].server_at;
-    }
-    db.lastServerAt = maxSeen;
+    // 1) récupérer ce qui a changé sur le serveur
+    if (await pullServer(gone)) changed = true;
+    if (gone()) return;
     purgeBody(); // plus de page Corps : les anciennes mesures sont effacées, contenu compris
     freezeNotes(); renameVariants(); // après la récupération : les données sont à jour, aucun risque d'écraser une modif récente
     // 2) envoyer ce qui a changé ici, par paquets de 200 ; le serveur renvoie ce qu'il a enregistré (il garde sa version
@@ -717,6 +753,7 @@ async function sync() {
     console.error(e);
     if (gone()) return;
     if ((e.status === 403 || e.code === "42501") && !planTesting()) { await loadPlan(true); if (isFree()) { syncState.status = "free"; return; } } // le serveur refuse : abonnement fini
+    if (e.code === "23503") { accountGoneCheck(); } // le compte n'existe plus côté serveur (supprimé depuis un autre appareil)
     syncState.status = "err";
     syncState.error = syncErrText(e);
   } finally {
@@ -948,7 +985,7 @@ async function askConsentIfNeeded() {
   // attendre une première synchro réussie (même si le compte est encore vide)
   if (consentAsked || !db.auth || (!db.lastServerAt && !syncState.at) || settings().consentAt) return;
   consentAsked = true;
-  const ok = await ask({ title: "Confidentialité", text: "Pour continuer à utiliser ton compte, confirme que tu as 15 ans ou plus et que tu acceptes la politique de confidentialité (lisible dans Réglages › Informations légales), y compris l'enregistrement de tes données d'entraînement.", ok: "J'accepte", cancel: "Plus tard" });
+  const ok = await ask({ title: "Confidentialité", text: "Tes séances et tes réglages sont enregistrés pour faire fonctionner ton compte, comme expliqué dans la politique de confidentialité (Réglages › Informations légales). Pour continuer, confirme que tu as 15 ans ou plus.", ok: "J'ai 15 ans ou plus", cancel: "Plus tard" });
   if (!ok) return;
   const st = settings(); st.consentAt = new Date().toISOString(); st.consentVersion = LEGAL.version; put("settings", st);
 }
@@ -974,7 +1011,7 @@ let localFixed = false; // sans compte : anciens noms et anciennes mesures corri
 function renderNow() {
   applyTheme();
   if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
-  if (db.auth && db.auth.dead && !activeWorkout()) { db.auth = null; db.mode = null; saveNow(); restart(); return; } // séance finie après une session expirée : reconnexion
+  if (db.auth && db.auth.dead && !activeWorkout()) { db.checkGone = db.auth.user.id; db.auth = null; db.mode = null; saveNow(); restart(); return; } // séance finie après une session expirée : reconnexion
   if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
@@ -986,6 +1023,7 @@ function renderNow() {
     case "session": {
       const gone = db.items[r.args[0]];
       if (gone && gone.deleted) { history.replaceState(history.state, "", "#/history"); body = viewHistory(); break; } // séance supprimée (retour arrière) : l'historique
+      if (gone && histHidden(gone.data)) { body = '<a class="back" href="#/history">‹ Historique</a>' + planCard("En version gratuite, tu vois le détail de tes séances des " + FREE_HIST_DAYS + " derniers jours. Celle-ci est gardée : elle revient avec Premium."); break; }
       const v = viewSession(r.args[0]); body = v.html; wide = v.wide; immersive = v.active; break;
     }
     case "programs": body = viewPrograms(); break;
@@ -1170,6 +1208,8 @@ async function addLibraryExercise(x) {
 
 /* ================= Écran : connexion ================= */
 let loginMode = "in", loginEmail = "", loginName = ""; // écran de connexion : « in » se connecter, « up » créer un compte
+// écran de connexion ouvert par le lien « Résilier un abonnement » ou « Renoncer au contrat » : on dit pourquoi
+const loginForContract = () => { const n = route().name; return n === "resilier" ? "Connecte-toi pour résilier ton abonnement : le formulaire s'ouvre juste après." : n === "retractation" ? "Connecte-toi pour renoncer à ton achat : le formulaire s'ouvre juste après." : ""; };
 function viewLogin() {
   if (db.verify) return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Vérifie ton e-mail</h1>' +
     '<p class="muted">Nous avons envoyé un code à <b>' + esc(db.verify) + '</b>. Saisis-le ci-dessous pour activer ton compte.</p>' +
@@ -1183,14 +1223,16 @@ function viewLogin() {
   const up = loginMode === "up", em = esc(loginEmail || (!up && db.expired && db.expired.email) || "");
   // (le mode « sans compte » existe toujours dans le code, mais n'est plus proposé sur cet écran)
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Fiitday</h1>' +
-    '<p class="muted">' + (up ? "Crée ton compte pour enregistrer tes séances sur ton téléphone et sur ton ordinateur." : "Connecte-toi pour retrouver tes séances sur ton téléphone et sur ton ordinateur.") + "</p>" +
+    '<p class="muted">' + (loginForContract() || (up ? "Crée ton compte pour enregistrer tes séances (et les retrouver sur ton téléphone et ton ordinateur avec Premium)." : "Connecte-toi pour retrouver tes séances.")) + "</p>" +
     (db.expired && !up ? '<p class="msg warn" role="status">Ta connexion a expiré (mot de passe changé ou déconnexion sur un autre appareil ?). Reconnecte-toi : tes données sont gardées sur cet appareil.</p>' : "") +
     '<form data-form="login" class="stack">' +
     (up ? '<label class="fl">Prénom<input class="f" name="firstname" autocomplete="given-name" maxlength="40" value="' + esc(loginName) + '"></label>' : "") +
     '<label class="fl">E-mail<input class="f" type="email" name="email" autocomplete="email" value="' + em + '" required></label>' +
-    '<label class="fl">Mot de passe<input class="f" type="password" name="password" minlength="' + (up ? 8 : 6) + '" autocomplete="' + (up ? "new-password" : "current-password") + '" required></label>' +
+    '<label class="fl">Mot de passe<input class="f" type="password" name="password" minlength="' + (up ? PW_MIN : 6) + '" autocomplete="' + (up ? "new-password" : "current-password") + '" required></label>' +
     (up
-      ? '<label class="consent"><input type="checkbox" name="consent" id="consent"><span>Pour créer un compte : j\'ai 15 ans ou plus et j\'accepte la <a href="' + LEGAL.privacy + '" target="_blank" rel="noopener">politique de confidentialité</a>, y compris l\'enregistrement de mes données d\'entraînement.</span></label>' +
+      // le compte et les séances reposent sur le contrat (service demandé), pas sur un « accord » : on informe, et on fait confirmer l'âge
+      ? '<label class="consent"><input type="checkbox" name="consent" id="consent"><span>J\'ai 15 ans ou plus.</span></label>' +
+        '<p class="small muted consent-info">Tes séances et tes réglages sont enregistrés pour faire fonctionner ton compte, comme expliqué dans la <a href="' + LEGAL.privacy + '" target="_blank" rel="noopener">politique de confidentialité</a>.</p>' +
         '<button class="btn primary big" type="submit" value="up">Créer mon compte</button>'
       : '<button class="btn primary big" type="submit" value="in">Se connecter</button>') +
     "</form>" +
@@ -1223,14 +1265,14 @@ const LP_FEATURES = [
   ["body", "Étirements conseillés", "23 étirements guidés en 3D et, après ta séance, ceux qui correspondent aux muscles que tu viens de travailler."],
   ["chart", "Tes progrès en clair", "La courbe de chaque exercice, tes records, ton temps de sport, le tonnage et le calendrier de tes séances."],
   ["pulse", "Musculation, cardio, Hyrox", "Poids et répétitions, répétitions seules, temps, distance ou machines de cardio : chaque exercice se note à sa façon."],
-  ["devices", "Téléphone et ordinateur", "Ton compte garde tout à jour entre l'appli Android et fiitday.com. Sans réseau, ta séance continue et s'envoie au retour."]
+  ["devices", "Téléphone et ordinateur", "Avec Premium, ton compte garde tout à jour entre l'appli Android et fiitday.com. Sans réseau, ta séance continue et s'envoie au retour."]
 ];
 const LP_SHOTS = [["seance", "Une séance : charges de la dernière fois, séries validées, repos"], ["exercice", "Chaque exercice en 3D, avec les muscles travaillés"],
   ["evolution", "La courbe de chaque exercice et tes records"], ["programmes", "Des séances prêtes, pour débutants et intermédiaires"], ["accueil", "Tes programmes, et ta séance en cours"]];
 // questions de la page : celles de l'abonnement et de la synchro (sans les liens vers les pages de l'appli), plus la confidentialité
 const LP_FAQ = () => {
   const all = FAQ.concat([FAQ_PLAN]).flatMap(c => c[1]), pick = id => all.find(q => q[0] === id);
-  return ["essai", "gratuit", "formules", "souscrire", "resilier", "rembourser", "synchro"].map(pick).filter(Boolean)
+  return (MONETIZATION ? ["essai", "gratuit", "formules", "souscrire", "resilier", "rembourser", "synchro"] : ["gratuit", "formules", "synchro"]).map(pick).filter(Boolean)
     .map(q => [q[0], q[1], q[2].replace(/<a [^>]*>(.*?)<\/a>/g, "$1")])
     .concat([["donnees", "Qui voit mes données ?", "Toi seul. Fiitday n'a <b>aucune publicité</b> ni aucun outil de pistage, et tes données ne sont <b>jamais vendues</b>. Tu peux les enregistrer dans un fichier ou supprimer ton compte quand tu veux. Le détail est dans la <a href=\"" + LEGAL.privacy + "\" target=\"_blank\" rel=\"noopener\">politique de confidentialité</a>."]]);
 };
@@ -1266,7 +1308,7 @@ function viewLanding() {
       "</div>" +
       '<details class="lp-compare"><summary>Comparer Premium et gratuit</summary><div class="card plan-table"><table><thead><tr><th></th><th>Premium</th><th>Gratuit</th></tr></thead><tbody>' +
         PLAN_ROWS.map(r => "<tr><th>" + esc(r[0]) + "</th><td>" + esc(r[1]) + "</td><td>" + esc(r[2]) + "</td></tr>").join("") + "</tbody></table></div></details>" +
-      '<p class="lp-small">Prix TTC, en euros. Abonnements sans engagement, résiliables à tout moment. Sur Android, paiement par Google Play ; sur iPhone et sur ordinateur, par carte bancaire sur fiitday.com.</p></div></section>' +
+      '<p class="lp-small">Prix TTC, en euros. Abonnements sans engagement, résiliables à tout moment. Paiement par carte bancaire sur fiitday.com (ordinateur, iPhone ou Android) : Premium marche ensuite aussi dans l\'appli Android.</p></div></section>' +
     '<section class="lp-sec lp-alt" id="lp-ou"><div class="lp-in"><h2>Sur ton téléphone et ton ordinateur</h2><div class="lp-where">' +
       '<div class="lp-feat">' + ic("phone") + "<h3>Android</h3><p>" + esc(nbsp("L'appli Android arrive bientôt sur Google Play. En attendant, Fiitday marche aussi dans le navigateur du téléphone.")) + "</p></div>" +
       '<div class="lp-feat">' + ic("phone") + "<h3>iPhone</h3><p>" + esc(nbsp("Ouvre fiitday.com dans Safari, puis Partager › « Sur l'écran d'accueil » : Fiitday s'ouvre comme une appli.")) + "</p></div>" +
@@ -1291,8 +1333,8 @@ function viewReset() {
   if (resetStep === "password") return head("Nouveau mot de passe") +
     '<p class="muted">Code validé. Choisis maintenant ton nouveau mot de passe.</p>' +
     '<form data-form="reset3" class="stack" autocomplete="on"><input type="email" name="username" autocomplete="username" value="' + esc(resetEmail) + '" readonly hidden tabindex="-1" aria-hidden="true">' +
-    '<label class="fl">Nouveau mot de passe<input class="f" type="password" name="password" minlength="8" autocomplete="new-password" required></label>' +
-    '<label class="fl">Confirme le nouveau mot de passe<input class="f" type="password" name="password2" minlength="8" autocomplete="new-password" required></label>' +
+    '<label class="fl">Nouveau mot de passe<input class="f" type="password" name="password" minlength="' + PW_MIN + '" autocomplete="new-password" required></label>' +
+    '<label class="fl">Confirme le nouveau mot de passe<input class="f" type="password" name="password2" minlength="' + PW_MIN + '" autocomplete="new-password" required></label>' +
     '<button class="btn primary big" type="submit">Enregistrer</button></form><p class="msg" data-msg role="status"></p></div>';
   if (resetStep === "code") return head("Code reçu par e-mail") +
     '<p class="muted">Si un compte existe avec <b>' + esc(resetEmail) + '</b>, un code vient d\'y être envoyé. Saisis-le ci-dessous.</p>' +
@@ -1344,7 +1386,7 @@ async function onReset2(form) {
 async function onReset3(form) {
   const msg = $app.querySelector("[data-msg]"), pw = form.password.value;
   const err = t => { msg.className = "msg err"; msg.textContent = t; };
-  if (pw.length < 8) return err("Choisis un mot de passe d'au moins 8 caractères.");
+  if (pw.length < PW_MIN) return err("Choisis un mot de passe d'au moins " + PW_MIN + " caractères.");
   if (pw !== form.password2.value) return err("Les deux mots de passe ne sont pas identiques.");
   msg.className = "msg"; msg.textContent = "Enregistrement…"; form.querySelectorAll("button").forEach(b => { b.disabled = true; });
   try {
@@ -1364,9 +1406,9 @@ async function recoveryFromLink() {
     const r = await fetch(SUPABASE_URL + "/auth/v1/user", { headers: { apikey: SUPABASE_KEY, Authorization: "Bearer " + q.get("access_token") } });
     const user = await r.json(); if (!r.ok || !user.id) throw new Error("lien");
     setSession({ access_token: q.get("access_token"), refresh_token: q.get("refresh_token"), expires_in: +q.get("expires_in") || 3600, user });
-    const pw = await ask({ title: "Nouveau mot de passe", text: "Choisis ton nouveau mot de passe (8 caractères au moins).", input: "", ok: "Enregistrer" });
-    if (pw && pw.length >= 8) { await setNewPassword(pw); toast("Mot de passe changé"); }
-    else if (pw) toast("8 caractères au moins : recommence depuis « Mot de passe oublié »");
+    const pw = await ask({ title: "Nouveau mot de passe", text: "Choisis ton nouveau mot de passe (" + PW_MIN + " caractères au moins).", input: "", ok: "Enregistrer" });
+    if (pw && pw.length >= PW_MIN) { await setNewPassword(pw); toast("Mot de passe changé"); }
+    else if (pw) toast(PW_MIN + " caractères au moins : recommence depuis « Mot de passe oublié »");
     await afterLogin();
   } catch (e) { toast("Ce lien ne fonctionne plus : demande un nouveau code"); }
 }
@@ -1379,7 +1421,7 @@ function authMessage(e) {
   if (/rate limit/i.test(m)) return "Trop d'e-mails envoyés pour le moment. Réessaie un peu plus tard.";
   if (/security purposes|only request this after/i.test(m)) return "Patiente une minute avant de redemander un code.";
   if (/already registered|already exists/i.test(m)) return "Un compte existe déjà avec cet e-mail : " + (isPC() ? "clique" : "touche") + " « Se connecter ».";
-  if (/password/i.test(m) && /6|8|short|weak|characters/i.test(m)) return "Mot de passe trop faible : au moins 8 caractères.";
+  if (/password/i.test(m) && /6|8|short|weak|characters/i.test(m)) return "Mot de passe trop faible : au moins " + PW_MIN + " caractères.";
   if (m === "Failed to fetch") return "Pas de connexion internet.";
   console.warn("connexion :", e.status, m);
   if (e.status >= 500 || !m) return "Le serveur ne répond pas pour le moment. Réessaie dans un instant.";
@@ -1462,9 +1504,9 @@ async function onLogin(form, mode) {
   try {
     if (mode === "up") {
       const fname = form.firstname.value.trim().slice(0, 40);
-      if (password.length < 8) { msg.className = "msg err"; msg.textContent = "Choisis un mot de passe d'au moins 8 caractères."; return; }
+      if (password.length < PW_MIN) { msg.className = "msg err"; msg.textContent = "Choisis un mot de passe d'au moins " + PW_MIN + " caractères."; return; }
       if (!fname) { msg.className = "msg err"; msg.textContent = "Indique ton prénom."; return; }
-      if (!form.consent.checked) { msg.className = "msg err"; msg.textContent = "Coche la case de consentement pour créer ton compte."; return; }
+      if (!form.consent.checked) { msg.className = "msg err"; msg.textContent = "Coche la case pour confirmer que tu as 15 ans ou plus."; return; }
       const consentAt = new Date().toISOString();
       const j = await authReq("signup", { email, password, data: { consent_at: consentAt, consent_version: LEGAL.version, first_name: fname } });
       // e-mail déjà inscrit : Supabase renvoie un utilisateur sans identité
@@ -1500,7 +1542,7 @@ function variantStats(t) {
 function viewHome() {
   const act = activeWorkout();
   let h = '<div class="home-top"><div class="page-head"><div><div class="muted small">' + esc(fmtDateLong(Date.now())) + '</div><h1>Bonjour' + (firstName() ? " " + esc(firstName()) : "") + '</h1></div></div>' +
-    homeRecap(act) + homeStretch(act) + planBanner() +
+    homeRecap(act) + homeStretch(act) + planBanner() + backupNudge() +
     '<div class="home-actions"><button class="btn primary" data-act="newtpl">+ Nouveau programme</button><button class="btn" data-act="importvar">Importer</button>' +
       '<button class="btn free-go" data-act="freestart">' + ICON.play + "Séance libre, sans programme</button></div></div>";
   if (act) {
@@ -1530,7 +1572,7 @@ function viewHome() {
   h += "</div></div><div class=\"pc-side\">";
   h += '<div class="section-title">Découvrir</div><div class="home-more"><button type="button" class="card" data-act="cardiohome"><b>Séance cardio</b><span class="muted small">Tapis, vélo, elliptique, rameur… avec tes indicateurs</span></button>' +
     '<a class="card" href="#/programs"><b>Programmes Fiitday</b><span class="muted small">' + (isFree() ? '<span class="tag">Premium</span> ' : "") + 'Programmes prêts à l\'emploi et circuit training</span></a></div>';
-  const recent = finished().slice(0, 3);
+  const recent = finished().filter(w => !histHidden(w)).slice(0, 3);
   if (recent.length) {
     h += '<div class="section-title">Dernières séances</div><div class="list">' + recent.map(w => historyRow(w)).join("") + "</div>" +
       '<a class="home-hist" href="#/history">Voir l\'historique ›</a>';
@@ -2390,6 +2432,18 @@ function zonesOf(e) {
     if (/develop|pompe|curl|tirage|rowing|traction|dips|epaule|biceps|triceps|pec|oiseau|elevation|face pull/.test(n)) out.add("haut"); }
   return out;
 }
+/* Version gratuite : les données ne sont que sur l'appareil ; un rappel discret propose une sauvegarde de temps en temps
+   (séances terminées depuis la dernière sauvegarde faite ici, et pas plus d'une fois tous les 14 jours) */
+const lsNum = k => { try { return Number(localStorage.getItem(k)) || 0; } catch (e) { return 0; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch (e) { } };
+function backupNudge() {
+  if (!isFree()) return "";
+  const last = lsNum("fiitday-backup-at"), later = lsNum("fiitday-backup-later"), now = Date.now();
+  if (now - Math.max(last, later) < 14 * DAY || !finished().some(w => w.endedAt > last)) return "";
+  return '<div class="card backup-nudge"><h2 class="card-h">Pense à ta sauvegarde</h2><p class="small muted">En version gratuite, tes séances sont enregistrées seulement sur cet appareil. ' +
+    "Une sauvegarde de temps en temps (fichier à garder sur ton téléphone, ton ordinateur ou un cloud) te permet de tout retrouver si tu changes d'appareil.</p>" +
+    '<div class="row duo"><button class="btn sm primary" data-act="filesave">Faire une sauvegarde</button><button class="btn sm" data-act="backuplater">Plus tard</button></div></div>';
+}
 /* Fin de séance : récapitulatif en haut de l'accueil (15 min, ou jusqu'à « Masquer »), au-dessus des étirements conseillés */
 function recapDismissed(id) { try { return localStorage.getItem("fiitday-recap-ok") === id; } catch (e) { return false; } }
 // records de la séance : meilleur 1RM estimé de l'exercice, au-dessus de tout ce qui a été fait avant (même règle que pendant la séance)
@@ -2552,7 +2606,9 @@ $app.addEventListener("click", e => {
   if (justSwiped || row === swOpen) { e.preventDefault(); e.stopPropagation(); if (!justSwiped) swClose(row); }
 }, true);
 // séances visibles dans l'historique (version gratuite : les 30 derniers jours)
-function histList() { const every = finished(), cut = Date.now() - FREE_HIST_DAYS * DAY; return { every, ws: isFree() ? every.filter(w => w.startedAt >= cut) : every }; }
+function histList() { const every = finished(), cut = freeHistCut(); return { every, ws: isFree() ? every.filter(w => w.startedAt >= cut) : every }; }
+const freeHistCut = () => nowSafe() - FREE_HIST_DAYS * DAY; // version gratuite : historique des 30 derniers jours (heure sûre)
+const histHidden = w => isFree() && !!w.endedAt && w.startedAt < freeHistCut();
 // PC : séance affichée à droite de l'historique (celle de l'adresse, sinon la plus récente)
 function histSel(id) { const ws = histList().ws; return ws.find(w => w.id === id) || ws[0] || null; }
 function viewHistory(id) {
@@ -3024,9 +3080,23 @@ async function importShared(code) {
     }
     if (!data || data.app !== "muscuapp-share" || !Array.isArray(data.ex) || !data.ex.length || data.ex.length > 60) throw new Error();
   } catch (e) { toast("Ce lien de séance n'est pas valide"); return; }
-  const ts = templates();
-  const dest = await choose("Importer « " + data.prog + " · " + data.name + " » (" + data.ex.length + " exercices)", [["new", "Nouveau programme « " + data.prog + " »", "Crée un programme avec cette séance"]].concat(ts.map(t => ["t:" + t.id, "Ajouter à « " + t.name + " »", "Comme nouvelle séance de ce programme"])));
+  const ts = templates(), title = "Importer « " + data.prog + " · " + data.name + " » (" + data.ex.length + " exercices)";
+  let opts;
+  if (isFree()) {
+    // version gratuite : 1 programme et 2 séances actives ; la séance reçue va dans le programme actif (place libre, ou à la
+    // place d'une séance active si le changement des 30 jours est possible), jamais dans un nouveau programme ni un programme verrouillé
+    const at = ts.length ? getItem(freeActive().t) : null;
+    if (!at) opts = [["new", "Nouveau programme « " + data.prog + " »", "Crée ton programme avec cette séance"]];
+    else if (at.variants.length < FREE_VARIANTS) opts = [["t:" + at.id, "Ajouter à « " + at.name + " »", "Elle sera une de tes 2 séances actives"]];
+    else if (freeCanSwitch()) opts = [["swap:" + at.id, "Remplacer une de mes séances actives", "Ajoutée à « " + at.name + " », puis tu choisis tes 2 séances actives (prochain changement dans " + FREE_SWITCH_DAYS + " jours)"]];
+    else {
+      if (await ask({ title: "Séance reçue", text: "En version gratuite, tu as 2 séances actives. " + freeSwitchTxt() + " Avec Premium, toutes tes séances sont actives.", ok: "Voir Premium", cancel: "Plus tard" })) go("premium");
+      return;
+    }
+  } else opts = [["new", "Nouveau programme « " + data.prog + " »", "Crée un programme avec cette séance"]].concat(ts.map(t => ["t:" + t.id, "Ajouter à « " + t.name + " »", "Comme nouvelle séance de ce programme"]));
+  let dest = await choose(title, opts);
   if (!dest) return;
+  const swap = dest.startsWith("swap:"); if (swap) dest = "t:" + dest.slice(5);
   const gmap = {};
   const exercises = data.ex.map(x => {
     const e = { id: "e-" + uid(), name: cutStr(x.n || "Exercice", 80) || "Exercice", lib: libById[x.li] ? x.li : undefined, type: x.t === "time" ? "time" : x.t === "dist" ? "dist" : x.t === "rep" ? "rep" : x.t === "cardio" ? "cardio" : "reps", machine: x.t === "cardio" && CARDIO_MACH[x.m] ? x.m : undefined, load: x.t === "dist" && !!x.l, sets: Math.max(1, Math.min(20, num(x.s) || 3)), target: cutStr(x.c, 20), rest: Math.max(0, num(x.r) || 0), restNext: Math.max(0, Math.min(1200, num(x.rn) || num(data.rb) || 0)), note: cutStr(x.no, NOTE_MAX), drops: x.t !== "reps" && x.t ? 0 : Math.max(0, Math.min(3, num(x.d) || 0)), dropScope: x.ds === "last" ? "last" : "all" };
@@ -3043,6 +3113,7 @@ async function importShared(code) {
     t.variants.push({ id: vid, name, exercises });
   }
   put("template", t); toast("Séance importée"); go("program/" + t.id + "/" + vid);
+  if (swap) setTimeout(() => changeActive(t.id, vid), 300); // choisir l'autre séance active à garder
 }
 
 /* ================= Minuteur de repos dans les notifications (appli Android) ================= */
@@ -3455,7 +3526,7 @@ function fatWorkout(d) {
 // contenu complet d'une sauvegarde (fichier, code de transfert, ancien texte)
 async function backupText() {
   flushPending();
-  return packBackup(JSON.stringify({ app: "muscuapp", v: 2, at: Date.now(), items: Object.values(db.items).filter(x => !x.deleted).map(x => ({ id: x.id, kind: x.kind, data: slimData(x), updated_at: x.updated_at })) }));
+  return packBackup(JSON.stringify({ app: "muscuapp", v: 2, at: Date.now(), owner: db.auth ? db.auth.user.id : undefined, items: Object.values(db.items).filter(x => !x.deleted).map(x => ({ id: x.id, kind: x.kind, data: slimData(x), updated_at: x.updated_at })) }));
 }
 const backupName = () => { const d = new Date(); return "fiitday-sauvegarde-" + d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + ".txt"; };
 // fichier : dans l'appli Android, le téléphone demande où l'enregistrer (Téléchargements, Drive…) ; sur le site, téléchargement classique
@@ -3544,10 +3615,10 @@ const FAQ = [
     ["etirements", "Quand et comment m'étirer ?", "L'onglet <a href=\"#/exercices/etirements\">Exercices › Étirements</a> propose 23 étirements avec le mannequin 3D, et le guide « Bien s'étirer » explique quand et comment le faire. Après une séance, l'accueil te propose pendant 15 minutes des étirements adaptés aux muscles travaillés (tu peux couper ces propositions dans Réglages › Étirements après la séance)."],
     ["mannequin", "Comment utiliser le mannequin 3D ?", "Fais glisser l'image pour tourner autour du mannequin, pince pour zoomer et appuie deux fois pour revenir au cadrage de départ. Fais glisser la fiche (sous l'image) vers la gauche ou la droite pour passer à l'exercice suivant ou précédent."]]],
   ["Données et compte", [
-    ["synchro", "Mes données sont-elles sur mon téléphone et sur mon ordinateur ?", "Oui : avec ton compte, tout se synchronise automatiquement entre l'appli et fiitday.com. L'heure de la dernière synchro est dans Réglages › Compte. Sans réseau, fais ta séance normalement : elle sera envoyée au retour du réseau."],
-    ["sauvegarde", "Comment faire une sauvegarde de mes données ?", "<a href=\"#/settings\">Réglages</a> › Données › « Sauvegarde » crée un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…). « Restaurer » le relit : ce qui a été supprimé depuis revient, et ce que tu as modifié depuis garde sa version la plus récente."],
-    ["transfert", "Comment passer mes données sur un autre compte ?", "Dans l'ancien compte : Réglages › Données › « Créer un code ». Tu obtiens un code de 8 caractères, valable 1 heure. Dans le nouveau compte : « J'ai un code », puis tape-le. Ne le donne à personne d'autre : il donne accès à toutes tes données."],
-    ["partage", "Comment partager une séance avec un ami ?", "Dans la configuration de la séance, appuie sur « Partager » et envoie le lien (WhatsApp, SMS…). Ton ami, connecté à son compte Fiitday, ouvre le lien ou le colle dans Accueil › Importer, puis choisit où ajouter la séance."],
+    ["synchro", "Mes données sont-elles sur mon téléphone et sur mon ordinateur ?", "Avec Premium (et pendant l'essai) : oui, tout se synchronise automatiquement entre l'appli et fiitday.com. L'heure de la dernière synchro est dans Réglages › Compte. Sans réseau, fais ta séance normalement : elle sera envoyée au retour du réseau. En version gratuite, tes données restent sur l'appareil où tu les notes : pense à faire une sauvegarde de temps en temps."],
+    ["sauvegarde", "Comment faire une sauvegarde de mes données ?", "<a href=\"#/settings\">Réglages</a> › Données › « Sauvegarde » crée un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…). « Restaurer » le relit : ce qui a été supprimé depuis revient, et ce que tu as modifié depuis garde sa version la plus récente. Une sauvegarde faite avec ton compte se restaure toujours, même en version gratuite ; celle d'un autre compte est réservée aux abonnés payants."],
+    ["transfert", "Comment passer mes données sur un autre compte ?", "Dans l'ancien compte : Réglages › Données › « Créer un code ». Tu obtiens un code de 8 caractères, valable 1 heure. Dans le nouveau compte : « J'ai un code », puis tape-le. Ne le donne à personne d'autre : il donne accès à toutes tes données. Le code de transfert est réservé aux abonnés payants (pas pendant l'essai)."],
+    ["partage", "Comment partager une séance avec un ami ?", "Dans la configuration de la séance, appuie sur « Partager » et envoie le lien (WhatsApp, SMS…). Ton ami, connecté à son compte Fiitday, ouvre le lien ou le colle dans Accueil › Importer, puis choisit où ajouter la séance. Partager ses séances est réservé à Premium ; en recevoir est possible pour tout le monde (en version gratuite, la séance reçue prend la place d'une de tes 2 séances actives)."],
     ["mot-de-passe", "J'ai oublié mon mot de passe, que faire ?", "Sur l'écran de connexion, appuie sur « Mot de passe oublié ? » et indique l'e-mail de ton compte. Tu reçois un code par e-mail (regarde aussi dans les spams) : saisis-le avec ton nouveau mot de passe, et tu es connecté. Une fois connecté, tu peux aussi le changer dans <a href=\"#/settings\">Réglages</a> › Compte › « Changer mon mot de passe »."],
     ["supprimer-compte", "Comment supprimer mon compte ?", "Réglages › Compte › « Supprimer mon compte », puis tape SUPPRIMER pour confirmer. Ton compte et toutes tes données sont effacés définitivement : fais une sauvegarde avant si tu veux les garder."]]],
   ["Appli et montre", [
@@ -3610,11 +3681,11 @@ const PRICES = { solo: priceTexts(PRICE_EUR.solo), family: priceTexts(PRICE_EUR.
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028", LIFE_LAST_TXT = "31 décembre 2027";
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
-  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Pendant l'essai, tout Premium est ouvert, sauf le code de transfert et la restauration d'une sauvegarde faite avec un autre compte, réservés aux abonnés payants. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
   ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : " + PRICES.solo.month + " par mois ou " + PRICES.solo.year + " par an. <b>Famille</b> (toi + " + (FAMILY_SIZE - 1) + " proches, chacun son compte) : " + PRICES.family.month + " par mois ou " + PRICES.family.year + " par an. <b>À vie</b>, en un seul paiement : " + PRICES.solo.life + " en Solo ou " + PRICES.family.life + " en Famille jusqu'au " + LIFE_LAST_TXT + ", puis " + PRICES.solo.lifeAfter + " et " + PRICES.family.lifeAfter + ". Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
-  ["souscrire", "Comment m'abonner ?", "Sur Android, dans l'appli : Réglages › Abonnement › « Passer à Premium », le paiement passe par Google Play. Sur iPhone ou sur ordinateur : sur fiitday.com, par carte bancaire. Premium est lié à ton compte : il marche sur tous tes appareils."],
-  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (à la fin de la période déjà payée, ou tout de suite avec le remboursement de la part non utilisée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
+  ["souscrire", "Comment m'abonner ?", "Sur fiitday.com, connecté à ton compte (ordinateur, iPhone ou téléphone Android) : page <a href=\"#/premium\">Premium</a>, paiement par carte bancaire. Premium est lié à ton compte : il marche ensuite sur tous tes appareils, dans l'appli Android aussi. Le paiement par Google Play arrivera avec l'appli sur le Play Store."],
+  ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (tout de suite, avec le remboursement de la part non utilisée, ou à la fin de la période déjà payée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite, plus limitée, et gardent leurs données."],
   ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Tes achats Premium › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
@@ -3729,10 +3800,26 @@ const trialLeft = () => Math.max(0, Math.ceil(((planTesting() ? db.planTestEnd :
 // « off » : pas d'abonnement (appli complète) · « trial » : essai, tout comme Premium · « free » : version gratuite · « premium » : abonné
 function planState() {
   if (planTesting()) return db.planTest === "trial" && trialLeft() <= 0 ? "free" : db.planTest === "family" || db.planTest === "member" ? "premium" : db.planTest;
+  // ancien mode « sans compte » (plus proposé) : une fois les ventes ouvertes, il vaut la version gratuite
+  if (!db.auth) return db.mode === "local" && MONETIZATION ? "free" : "off";
   // statut donné par le serveur (my_plan) : « off » tant que la date de lancement n'est pas atteinte
-  const p = db.auth && db.plan;
+  const p = db.plan;
   if (!p || !p.launched) return "off";
-  return p.state === "premium" || p.state === "trial" || p.state === "free" ? p.state : "off";
+  let st = p.state === "premium" || p.state === "trial" || p.state === "free" ? p.state : "off";
+  // hors ligne, le dernier statut connu ne vaut pas sans fin : l'essai ou l'abonnement dont la date de fin est passée s'arrête,
+  // et au-delà de 14 jours sans vérification, retour à la version gratuite jusqu'à la prochaine connexion (les données ne bougent pas)
+  const now = nowSafe(), life = p.source === "lifetime";
+  if (st === "trial" && p.trial_ends && Date.parse(p.trial_ends) <= now) st = "free";
+  if (st === "premium" && !life && p.until && Date.parse(p.until) <= now) st = "free";
+  if ((st === "premium" || st === "trial") && !life && p.at && now - Date.parse(p.at) > 14 * DAY) st = "free";
+  return st;
+}
+// heure « sûre » : jamais avant la dernière heure donnée par le serveur (un téléphone remis à une date passée ne rouvre ni le
+// changement de séances actives ni l'historique de la version gratuite)
+function nowSafe() {
+  const n = Date.now(), p = db.plan;
+  const srv = p && p.at && p.at_ms ? Date.parse(p.at) + Math.max(0, n - p.at_ms) : 0;
+  return Math.max(n, srv || 0);
 }
 // statut du compte calculé par le serveur (essai, abonnement, achat à vie, Premium offert, famille) ; gardé sur l'appareil pour le hors-ligne
 let planLoading = null;
@@ -3745,7 +3832,13 @@ function loadPlan(force) {
     try {
       const p = await rpc("my_plan");
       if (db !== base0) return null; // déconnecté pendant l'attente
-      if (p && p.state && p.state !== "none") { const before = planState() + "|" + JSON.stringify(db.plan && db.plan.source); db.plan = Object.assign(p, { at_ms: Date.now() }); saveNow(); if (planState() + "|" + JSON.stringify(p.source) !== before) render(); }
+      if (p && p.state && p.state !== "none") {
+        const was = planState(), before = was + "|" + JSON.stringify(db.plan && db.plan.source);
+        db.plan = Object.assign(p, { at_ms: Date.now() });
+        // retour en version gratuite après l'essai ou Premium : le premier changement de séances actives est libre
+        if ((was === "premium" || was === "trial") && planState() === "free" && !planTesting()) { const fa = settings().freeActive; if (fa && fa.at) setSetting("freeActive", Object.assign({}, fa, { at: 0 })); }
+        saveNow(); if (planState() + "|" + JSON.stringify(p.source) !== before) render();
+      }
     } catch (e) { /* hors ligne : le dernier statut connu reste valable, et le serveur vérifie de toute façon */ }
     finally { planLoading = null; }
     return db.plan;
@@ -3753,11 +3846,14 @@ function loadPlan(force) {
   return planLoading;
 }
 const isFree = () => planState() === "free";
-// restaurer une sauvegarde et le code de transfert : abonnés seulement, même pendant l'essai (sinon un nouveau compte par mois avec un nouvel essai, et tout transféré)
+// code de transfert et sauvegarde d'un AUTRE compte : abonnés payants seulement, même pendant l'essai (sinon un nouveau compte par
+// mois avec un nouvel essai, et tout transféré) ; une sauvegarde faite avec son propre compte se restaure toujours
 const dataLocked = () => { const s = planState(); return s === "free" || s === "trial"; };
+const LOCK_XFER = "Le code de transfert et la restauration d'une sauvegarde faite avec un autre compte sont réservés aux abonnés payants, même pendant l'essai. Une sauvegarde faite avec ce compte se restaure toujours, et faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde.";
 const ownCount = () => ownNames().length;
 async function premiumGate(text) {
-  if (await ask({ title: "Réservé à Premium", text: text + "\n\nAvec Premium : programmes, séances et exercices illimités, les programmes Fiitday prêts à l'emploi, tout l'historique, toutes les stats et la synchro entre tes appareils.", ok: "Voir Premium", cancel: "Plus tard" })) go("premium");
+  const trial = planState() === "trial"; // pendant l'essai, on ne vante pas ce que l'essai donne déjà
+  if (await ask({ title: trial ? "Réservé aux abonnés" : "Réservé à Premium", text: text + (trial ? "" : "\n\nAvec Premium : programmes, séances et exercices illimités, les programmes Fiitday prêts à l'emploi, tout l'historique, toutes les stats et la synchro entre tes appareils."), ok: "Voir Premium", cancel: "Plus tard" })) go("premium");
 }
 // version gratuite : 1 programme actif et 2 séances actives (choisies librement) ; les autres restent visibles avec un cadenas
 let faCache = { key: "" };
@@ -3769,8 +3865,10 @@ function freeActive() {
     const cnt = {}, tc = {};
     finished().forEach(w => { cnt[w.templateId + "|" + w.variantId] = (cnt[w.templateId + "|" + w.variantId] || 0) + 1; tc[w.templateId] = (tc[w.templateId] || 0) + 1; });
     const t = ts.find(x => x.id === fa.t) || ts.slice().sort((a, b) => (tc[b.id] || 0) - (tc[a.id] || 0))[0]; // par défaut : le programme le plus utilisé
-    const ids = t.variants.map(v => v.id), v = (fa.t === t.id && Array.isArray(fa.v) ? fa.v : []).filter(id => ids.includes(id)).slice(0, FREE_VARIANTS);
-    t.variants.slice().sort((a, b) => (cnt[t.id + "|" + b.id] || 0) - (cnt[t.id + "|" + a.id] || 0)).forEach(x => { if (v.length < FREE_VARIANTS && !v.includes(x.id)) v.push(x.id); });
+    const ids = t.variants.map(v => v.id), chosen = fa.t === t.id && Array.isArray(fa.v) && fa.v.length > 0, v = (chosen ? fa.v : []).filter(id => ids.includes(id)).slice(0, FREE_VARIANTS);
+    // séances choisies : une place libérée (séance supprimée) ne se remplit pas toute seule avec une séance verrouillée ;
+    // un programme de 2 séances au plus les a toutes actives ; sans choix encore fait, les plus utilisées
+    if (!chosen || t.variants.length <= FREE_VARIANTS) t.variants.slice().sort((a, b) => (cnt[t.id + "|" + b.id] || 0) - (cnt[t.id + "|" + a.id] || 0)).forEach(x => { if (v.length < FREE_VARIANTS && !v.includes(x.id)) v.push(x.id); });
     val = { t: t.id, v };
   }
   faCache = { key, val }; return val;
@@ -3781,7 +3879,7 @@ const LOCK = '<svg class="lock-i" viewBox="0 0 24 24" fill="none" stroke="curren
 // changer de programme ou de séances actifs : une fois tous les 30 jours (le premier changement après l'essai ou
 // après Premium est libre), sinon il suffirait d'avoir plusieurs programmes et de passer de l'un à l'autre
 const freeNextSwitch = () => { const a = Number((settings().freeActive || {}).at) || 0; return a ? a + FREE_SWITCH_DAYS * DAY : 0; };
-const freeCanSwitch = () => Date.now() >= freeNextSwitch();
+const freeCanSwitch = () => nowSafe() >= freeNextSwitch();
 const freeSwitchTxt = () => freeCanSwitch() ? "Tu peux changer tes séances actives maintenant ; ensuite, une fois tous les " + FREE_SWITCH_DAYS + " jours."
   : "Tu changes tes séances actives une fois tous les " + FREE_SWITCH_DAYS + " jours : prochain changement possible le " + ctrDate(freeNextSwitch()) + ".";
 // séance verrouillée touchée : changer ses séances actives (si le délai est passé), voir ses exercices, ou Premium
@@ -3836,7 +3934,7 @@ function changeActive(tid, vid) {
     const t = getItem(pt), names = sel.map(id => "« " + vLabel(t.variants.find(x => x.id === id).name) + " »");
     const ok = await ask({ title: "Activer ces séances ?", text: "Programme « " + t.name + " »" + (names.length ? " : " + names.join(" et ") : "") + ".\nLes autres restent gardées, avec un cadenas. Prochain changement possible le " + ctrDate(Date.now() + FREE_SWITCH_DAYS * DAY) + ".", ok: "Activer" });
     if (!ok) return;
-    setSetting("freeActive", { t: pt, v: sel.slice(), at: Date.now() });
+    setSetting("freeActive", { t: pt, v: sel.slice(), at: nowSafe() });
     toast(names.length > 1 ? names.join(" et ") + " sont maintenant actives" : names.length ? names[0] + " est maintenant active" : "« " + t.name + " » est maintenant ton programme actif");
   });
 }
@@ -3888,10 +3986,26 @@ function premiumOwned() {
   if (p.source === "subscription") return '<button class="btn block" data-act="planmanage">Gérer mon abonnement</button>';
   return "";
 }
+// achat possible ici ? Les ventes sont ouvertes par le serveur (date de lancement) ; il faut aussi une version de l'appli qui sait
+// encaisser (MONETIZATION), un moyen de paiement ici, et des CGV publiées (garde-fou : jamais de vente sans elles). L'achat de test passe toujours.
+const salesSrv = () => !!(db.plan && (db.plan.can_buy || db.plan.launched));
+function buyState(s) {
+  if (s === "premium") return "owned";
+  if (billingMode() === "test") return "ok";
+  if (!salesSrv()) return "soon";
+  if (!MONETIZATION) return "update"; // version de l'appli trop ancienne pour encaisser
+  if (!billingMode()) return Native ? "web" : "soon"; // appli Android sans paiement : on s'abonne sur fiitday.com
+  if (!LEGAL.cgv) return "soon";
+  return "ok";
+}
+const SITE_PREMIUM = "https://fiitday.com/#/premium";
+// sous le bouton d'achat : CGV acceptées en payant, vendeur, garanties, rétractation et médiateur (obligatoires avant le paiement)
+const buyLegal = () => '<p class="small muted plan-legal">En payant, tu acceptes les ' + (LEGAL.cgv ? '<a href="' + LEGAL.cgv + '" target="_blank" rel="noopener">conditions générales de vente</a>' : "conditions générales de vente") +
+  '. Vendeur : voir les <a href="' + LEGAL.legal + '" target="_blank" rel="noopener">mentions légales</a>. Garanties légales, droit de rétractation et médiateur de la consommation : dans les CGV.</p>';
 function viewPremium() {
   const s = planState(), prev = (history.state && history.state.prev) || "#/settings";
-  const rows = PLAN_ROWS;
-  const live = (MONETIZATION || billingMode() === "test") && s !== "premium";
+  const rows = PLAN_ROWS, bs = buyState(s);
+  const live = bs === "ok";
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div>" +
     (s !== "premium" && !Native && billingMode() === "test" && ((!planTesting() && db.plan) || {}).source === "subscription" ? '<button class="btn sm" style="margin-top:8px" data-act="planmanage">Gérer mon abonnement (test)</button>' : "") + "</div>" + contractsCard() +
@@ -3906,8 +4020,10 @@ function viewPremium() {
       ? '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><span class="tag">Offre de lancement</span><b>À vie</b><div class="plan-price num">' + pr.life + ' <small>en une fois</small></div><div class="small">Prix de lancement, puis ' + pr.lifeAfter + " à partir du " + LIFE_END_TXT + '.</div><div class="small muted">Sans abonnement, ' + pr.lifeVs + ".</div></button>"
       : '<button type="button" role="radio" aria-checked="' + (premiumPick === "life") + '" data-act="planpick" data-val="life" class="card plan-opt life' + (premiumPick === "life" ? " picked" : "") + '"><b>À vie</b><div class="plan-price num">' + pr.lifeAfter + ' <small>en une fois</small></div><div class="small muted">Sans abonnement : un seul paiement.</div></button>')(PRICES[premiumFor]) + "</div>" +
     (s === "premium" ? premiumOwned() : (live ? '<label class="plan-consent"><input type="checkbox" data-act="planconsent"' + (premiumConsent ? " checked" : "") + "><span>" + esc(consentText()) + "</span></label>" : "") +
-      '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
-      '<p class="small muted plan-terms">' + pickTerms() + (LEGAL.cgv ? ' <a href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a>' : "") + "</p>") +
+      (bs === "web" ? '<a class="btn primary block big" href="' + SITE_PREMIUM + '" target="_blank" rel="noopener">S\'abonner sur fiitday.com</a><p class="small muted plan-terms">Ouvre fiitday.com connecté à ce compte : le paiement se fait par carte bancaire, et Premium marche aussi dans cette appli.</p>'
+        : bs === "update" ? '<button class="btn primary block big" disabled>Mets à jour Fiitday pour t\'abonner</button><p class="small muted plan-terms">Cette version ne sait pas encore encaisser. Mets à jour l\'appli, ou abonne-toi sur <a href="' + SITE_PREMIUM + '" target="_blank" rel="noopener">fiitday.com</a> connecté à ce compte.</p>'
+        : '<button class="btn primary block big" ' + (live && !buying ? 'data-act="planbuy"' : "disabled") + ">" + (buying ? "Achat en cours…" : live ? pickLabel() : "Paiement bientôt disponible") + "</button>" +
+          (live ? '<p class="small muted plan-terms">' + pickTerms() + "</p>" + buyLegal() : '<p class="small muted plan-terms">Les abonnements ne sont pas encore ouverts : les prix ci-dessus sont ceux prévus.</p>'))) +
     (billingMode() && Native ? '<button class="link small" style="margin-top:8px" data-act="planrestore">Restaurer mes achats</button>' : "") +
     (planTesting() && s !== "premium" ? '<button class="link small" style="margin-top:8px" data-act="plantest" data-val="premium">Simuler l\'abonnement (mode test)</button>' : "") +
     '<p class="small muted" style="margin:10px 2px 0">Essai gratuit de 30 jours à la création du compte. Résiliable à tout moment ; à la fin, tu gardes toutes tes données.' +
@@ -4050,7 +4166,7 @@ function ctrGrab() {
 function viewContract(kind) {
   const r = route(), res = kind === "resiliation";
   const head = '<a class="back" href="#/settings">‹ Réglages</a><div class="page-head"><h1>' + (res ? "Résilier votre contrat" : "Renoncer au contrat") + "</h1></div>";
-  if (!ctr || ctr.kind !== kind) ctr = { kind, step: "form", name: firstName(), email: (db.auth && db.auth.user.email) || "", key: "", wish: "fin", err: "", busy: false, res: null };
+  if (!ctr || ctr.kind !== kind) ctr = { kind, step: "form", name: firstName(), email: (db.auth && db.auth.user.email) || "", key: "", wish: "", err: "", busy: false, res: null }; // date de fin : aucune pré-cochée, le client choisit
   if (ctr.step === "done" && ctr.res) {
     const d = ctr.res;
     return head + '<div class="card ctr-done"><h2 class="card-h">' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</h2><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
@@ -4069,6 +4185,7 @@ function viewContract(kind) {
   if (!ctr.key || !items.some(i => ctrKey(i) === ctr.key)) ctr.key = items.some(i => ctrKey(i) === want) ? want : ctrKey(items[0]);
   const it = items.find(i => ctrKey(i) === ctr.key);
   if (res && it.renews === false) ctr.wish = "maintenant";
+  ctr.need = !!(res && it && it.store !== "PLAY_STORE"); // date de fin à choisir (pas pour Google Play, résilié chez Google)
   const msg = '<p class="msg' + (ctr.err ? " err" : "") + '" role="status">' + esc(ctr.err) + "</p>";
   if (ctr.step === "recap") {
     const rows = [["Nom", ctr.name], ["E-mail", ctr.email], ["Contrat", it.label + " · " + (STORE_TXT[it.store] || it.store)]];
@@ -4087,8 +4204,9 @@ function viewContract(kind) {
     '<div class="fl">Contrat concerné<div class="ctr-opts">' + items.map(i => '<label class="ctr-opt"><input type="radio" name="ctrkey" data-act="ctrkey" value="' + esc(ctrKey(i)) + '"' + (ctrKey(i) === ctr.key ? " checked" : "") + "><span><b>" + esc(i.label) + '</b><span class="small muted">' +
       esc((STORE_TXT[i.store] || i.store) + (i.type === "sub" ? " · " + (i.renews ? "se renouvelle le " : "Premium jusqu'au ") + ctrDate(Date.parse(i.until)) : "")) + "</span></span></label>").join("") + "</div></div>" +
     (res && !play ? '<div class="fl">Date de fin souhaitée<div class="ctr-opts">' +
+      '<label class="ctr-opt"><input type="radio" name="ctrwish" data-act="ctrwish" value="maintenant"' + (ctr.wish === "maintenant" ? " checked" : "") + '><span><b>Dès maintenant</b><span class="small muted">Premium s\'arrête aujourd\'hui et la part non utilisée t\'est remboursée</span></span></label>' +
       (it.renews !== false ? '<label class="ctr-opt"><input type="radio" name="ctrwish" data-act="ctrwish" value="fin"' + (ctr.wish === "fin" ? " checked" : "") + '><span><b>À la fin de la période déjà payée</b><span class="small muted">le ' + esc(ctrDate(Date.parse(it.until))) + " : tu gardes Premium jusque-là, rien n'est remboursé</span></span></label>" : "") +
-      '<label class="ctr-opt"><input type="radio" name="ctrwish" data-act="ctrwish" value="maintenant"' + (ctr.wish === "maintenant" ? " checked" : "") + '><span><b>Dès maintenant</b><span class="small muted">Premium s\'arrête aujourd\'hui et la part non utilisée t\'est remboursée</span></span></label></div></div>' : "") +
+      '</div></div>' : "") +
     (play ? '<p class="small" style="margin:4px 0 10px">Cet abonnement a été payé par Google Play : il se résilie dans Google Play, qui t\'envoie la confirmation.</p><a class="btn primary block" href="' + esc(playSubUrl(it)) + '" target="_blank" rel="noopener">Résilier dans Google Play</a>'
       : '<button class="btn primary block" data-act="ctrnext">Continuer</button>') + msg + "</div>";
 }
@@ -4108,7 +4226,7 @@ async function deleteWarnings() {
   let stop = null;
   if (p.source === "subscription" && p.renews !== false) {
     stop = p.store === "PLAY_STORE" ? "play" : "web";
-    w.push("Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements. Résilie-le d'abord " + (stop === "play" ? "dans Google Play (Abonnements)." : "dans Réglages › Tes achats Premium."));
+    w.push(stop === "play" ? "Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements Google Play. Résilie-le d'abord dans Google Play (Abonnements)." : "Ton abonnement Premium par carte sera résilié automatiquement (plus aucun prélèvement) ; le temps restant est perdu.");
   } else if (p.source === "subscription") w.push("Il te reste du Premium jusqu'au " + until + " : il sera perdu.");
   if (p.source === "lifetime") w.push("Ton Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + " est lié à ce compte : il sera perdu.");
   if (p.source === "gift") w.push("Ton Premium offert sera perdu.");
@@ -4131,6 +4249,8 @@ async function deleteAccountSrv() {
   let r = null;
   try { r = await call(); if (r.status === 401) { await ensureToken(true); r = await call(); } } catch (e) { r = null; }
   if (r && r.ok) return;
+  if (r && r.status >= 400 && r.status < 500) { let m = ""; try { m = (await r.json()).error || ""; } catch (e) { } throw Object.assign(new Error(m || "refus"), { status: r.status, srv: m }); } // refus motivé (ex. abonnement impossible à arrêter)
+  // fonction injoignable : suppression directe (le serveur refuse s'il reste un abonnement par carte à arrêter)
   await rest("POST", "rpc/delete_my_account", {}, { Prefer: "return=minimal" });
 }
 function srvFamilyBox() {
@@ -4313,7 +4433,7 @@ function askPassword() {
       if (b.dataset.r !== "1") { d.remove(); res(null); return; }
       const cur = $i("pw-cur").value, nw = $i("pw-new").value, nw2 = $i("pw-new2").value;
       if (!cur) { m.textContent = "Tape ton mot de passe actuel."; return; }
-      if (nw.length < 12) { m.textContent = "Le nouveau mot de passe doit faire 12 caractères au moins."; return; }
+      if (nw.length < PW_MIN) { m.textContent = "Le nouveau mot de passe doit faire " + PW_MIN + " caractères au moins."; return; }
       if (nw !== nw2) { m.textContent = "Les deux nouveaux mots de passe ne sont pas identiques."; return; }
       if (nw === cur) { m.textContent = "Choisis un mot de passe différent de l'actuel."; return; }
       if (pwStrength(nw)[1] === "weak") { m.textContent = "Trop facile à deviner : allonge-le ou mélange majuscules, chiffres et symboles."; return; }
@@ -5058,6 +5178,7 @@ $app.addEventListener("click", async e => {
     case "stretchgo": { const ids = String(b.dataset.seq || "").split(",").filter(x => /^[a-z0-9-]{1,60}$/.test(x)); if (ids.length) { exoReturn = location.hash || "#/home"; stretchSeq = ids; go("exercices/" + ids[0]); } break; }
     case "stretchtips": exoReturn = location.hash || "#/home"; stretchSeq = null; break;
     case "stretchok": try { localStorage.setItem("fiitday-stretch-ok", b.dataset.id); } catch (err) { } render(); break;
+    case "backuplater": lsSet("fiitday-backup-later", Date.now()); render(); break;
     case "recapok": try { localStorage.setItem("fiitday-recap-ok", b.dataset.id); } catch (err) { } render(); break;
     case "evometric": evo.m[b.dataset.k] = b.dataset.v; render(); break;
     case "evoper": evo.per = b.dataset.v; render(); break;
@@ -5148,10 +5269,18 @@ $app.addEventListener("click", async e => {
     } break;
     case "cvadd": if (w && w.exercises[i]) {
       const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key), hid = cardioHidden(key);
-      const back = cardioDefs(e).filter(d => hid.includes(d.k)); // indicateurs retirés : on peut les remettre
+      const back = cardioDefs(e).filter(d => hid.includes(d.k) || (d.k === "fc" && !hrOk() && !hasHr(e))); // indicateurs retirés (ou pas encore activés) : on peut les ajouter
       if (back.length) {
-        const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
-        if (c !== "new") { const k = c.slice(2); setCardioHidden(key, hid.filter(x => x !== k)); render(); return; }
+        const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.k === "fc" && !hrOk() ? "Facultatif : demande ton accord" : d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
+        if (c !== "new") {
+          const k = c.slice(2);
+          if (k === "fc" && !hrOk()) {
+            // accord exprès, séparé et retirable : la fréquence cardiaque peut être une donnée de santé (art. 9 du RGPD)
+            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux : enlève l'indicateur avec « × », tes valeurs déjà notées restent effaçables avec la séance.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
+            setSetting("hrOk", new Date().toISOString());
+          }
+          setCardioHidden(key, hid.filter(x => x !== k)); render(); return;
+        }
       }
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
       const r = await askIndicator(e.name); if (!r) return;
@@ -5162,6 +5291,7 @@ $app.addEventListener("click", async e => {
     case "cvdel": if (w && w.exercises[i]) { // retiré de la carte (pour cette machine) ; il reste dans « + Ajouter un indicateur » et ses valeurs restent dans tes séances
       const e = w.exercises[i], key = cardioKey(e), d = cardioDefs(e).find(x => x.k === b.dataset.k); if (!d) return;
       const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
+      if (d.k === "fc" && hrOk()) { setSetting("hrOk", null); toast("Fréquence cardiaque retirée : ton accord est retiré, elle ne sera plus proposée"); } // retrait de l'accord
       render();
     } break;
     case "sesspick": if (w) {
@@ -5197,7 +5327,7 @@ $app.addEventListener("click", async e => {
       catch (err) { msg.className = "msg err"; msg.textContent = authMessage(err); }
     } break;
     case "logout": {
-      const local = isFree() && !planTesting(); // version gratuite : pas de synchro, les données ne sont que sur cet appareil
+      const local = isFree(); // version gratuite (mode test « essai terminé » compris) : pas de synchro, les données ne sont que sur cet appareil
       if (!await ask({ title: "Se déconnecter ?", text: local ? "En version gratuite, tes données ne sont enregistrées que sur cet appareil. Elles y restent gardées et reviendront quand tu te reconnecteras ici (pas sur un autre appareil)." : "Tes données restent enregistrées dans ton compte. Elles seront effacées de cet appareil.", ok: "Se déconnecter", danger: true })) return;
       flushPending(); await syncIdle();
       if (!local) { await sync(); await syncIdle(); }
@@ -5218,17 +5348,19 @@ $app.addEventListener("click", async e => {
     case "delaccount": {
       const pre = await deleteWarnings();
       if (pre.stop) {
-        const c = await choose("Ton abonnement est toujours actif", [["manage", pre.stop === "play" ? "Résilier dans Google Play" : "Gérer mon abonnement", "Supprimer ton compte n'arrête pas les paiements : résilie d'abord"], ["go", "Supprimer quand même", "Les paiements continueront tant que tu n'auras pas résilié"]]);
+        const play = pre.stop === "play";
+        const c = await choose("Ton abonnement est toujours actif", [["manage", play ? "Résilier dans Google Play" : "Résilier mon abonnement", play ? "Supprimer ton compte n'arrête pas les paiements Google Play : résilie d'abord" : "Choisis la date de fin, avec le remboursement de la part non utilisée si tu arrêtes tout de suite"],
+          ["go", "Supprimer quand même", play ? "Les paiements Google Play continueront tant que tu n'auras pas résilié" : "Ton abonnement par carte sera résilié automatiquement : plus aucun prélèvement, le temps restant est perdu"]]);
         if (!c) return;
-        if (c === "manage") { if (pre.stop === "play") openOut(PLAY_SUBS); else toast("La gestion de l'abonnement par carte arrive avec le paiement sur fiitday.com"); return; }
+        if (c === "manage") { if (play) openOut(PLAY_SUBS); else go("resilier"); return; }
       }
-      const conf = await ask({ title: "Supprimer ton compte ?", text: "Ton compte et toutes tes données (programmes, séances, historique, séances partagées) seront définitivement effacés, sur tous tes appareils. Cette action est irréversible." + (pre.w.length ? "\n\n" + pre.w.map(x => "• " + x).join("\n") : "") + "\n\nTape SUPPRIMER pour confirmer.", input: "", ok: "Supprimer définitivement", danger: true });
+      const conf = await ask({ title: "Supprimer ton compte ?", text: "Ton compte et toutes tes données (programmes, séances, historique, séances partagées) seront définitivement effacés : tout de suite sur le serveur et sur cet appareil, et sur tes autres appareils dès leur prochaine ouverture avec Internet. Cette action est irréversible." + (pre.w.length ? "\n\n" + pre.w.map(x => "• " + x).join("\n") : "") + "\n\nTape SUPPRIMER pour confirmer.", input: "", ok: "Supprimer définitivement", danger: true });
       if (conf == null) return;
       if (conf.trim().toUpperCase() !== "SUPPRIMER") { toast("Suppression annulée : tape SUPPRIMER pour confirmer"); return; }
       try {
         await deleteAccountSrv();
       } catch (err) {
-        toast(err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous à contact@fiitday.com." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
+        toast(err.srv && frTxt(err.srv) ? err.srv : /abonnement/i.test(err.message || "") ? "Ton abonnement par carte n'a pas pu être arrêté : résilie-le d'abord (Réglages › Tes achats Premium), puis supprime ton compte." : err.status === 404 ? "Suppression indisponible pour le moment. Écris-nous à contact@fiitday.com." : (err.message === "Failed to fetch" ? "Pas de connexion internet" : "La suppression a échoué, réessaie"));
         return;
       }
       const gone = db.auth && db.auth.user.id;
@@ -5492,7 +5624,7 @@ $app.addEventListener("click", async e => {
     } break;
     case "plantestskip": if (planTesting()) { db.planTestEnd = (db.planTestEnd || Date.now()) - 7 * DAY; saveNow(); render(); toast(trialLeft() ? "Encore " + trialLeft() + " jour" + (trialLeft() > 1 ? "s" : "") + " d'essai" : "Essai terminé : version gratuite"); } break;
     case "planbuy": {
-      if (!billingMode()) { toast("Le paiement arrive bientôt"); break; }
+      if (buyState(planState()) !== "ok") { toast("Le paiement arrive bientôt"); break; }
       if (!db.auth) { toast("Connecte-toi d'abord : l'achat est lié à ton compte"); break; }
       if (buying) break;
       if (!premiumConsent) { toast("Coche la case au-dessus du bouton pour continuer"); const cb = document.querySelector('[data-act="planconsent"]'); if (cb) { cb.focus(); cb.closest(".plan-consent").classList.add("need"); } break; }
@@ -5626,13 +5758,14 @@ $app.addEventListener("click", async e => {
     case "planfor": premiumFor = b.dataset.val === "family" ? "family" : "solo"; render(); break;
     case "planpick": { const pk = ["year", "month", "life"].includes(b.dataset.val) ? b.dataset.val : "year"; if ((pk === "life") !== (premiumPick === "life")) premiumConsent = false; premiumPick = pk; render(); } break; // le texte de l'accord change entre abonnement et achat à vie
     case "planconsent": premiumConsent = !!b.checked; break;
-    case "ctrkey": ctrGrab(); if (ctr) { ctr.key = b.value; ctr.err = ""; ctr.wish = "fin"; } render(); break;
+    case "ctrkey": ctrGrab(); if (ctr) { ctr.key = b.value; ctr.err = ""; ctr.wish = ""; } render(); break;
     case "ctrwish": ctrGrab(); if (ctr) { ctr.wish = b.value === "maintenant" ? "maintenant" : "fin"; ctr.err = ""; } render(); break;
     case "ctrnext": {
       ctrGrab(); if (!ctr) break;
       ctr.name = ctr.name.trim(); ctr.email = ctr.email.trim();
       if (ctr.name.length < 2) { ctr.err = "Indique ton nom et ton prénom."; render(); break; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ctr.email)) { ctr.err = "Indique une adresse e-mail valide pour recevoir la confirmation."; render(); break; }
+      if (ctr.kind === "resiliation" && ctr.need && !ctr.wish) { ctr.err = "Choisis la date de fin de ton abonnement."; render(); break; }
       ctr.err = ""; ctr.step = "recap"; render(); window.scrollTo(0, 0);
     } break;
     case "ctredit": if (ctr) { ctr.step = "form"; ctr.err = ""; } render(); break;
@@ -5667,7 +5800,7 @@ $app.addEventListener("click", async e => {
       catch (err) { toast("Page de gestion indisponible : " + ((err && err.message) || "réessaie plus tard")); }
     } break;
     case "importvar": { const code = await ask({ title: "Importer une séance", text: "Colle le lien de la séance qu'on t'a envoyé.", input: "", ok: "Continuer" }); if (!code) return;
-      if (dataLocked() && (/^\s*FIITDAY\d:/.test(code) || (XFER_RE.test(normCode(code)) && code.trim().length <= 12))) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
+      if (dataLocked() && XFER_RE.test(normCode(code)) && code.trim().length <= 12) { premiumGate(LOCK_XFER); return; } // une sauvegarde collée : vérifiée par restoreBackup (compte d'origine)
       if (/^\s*FIITDAY\d:/.test(code)) { if (await ask({ title: "C'est une sauvegarde", text: "Ce texte est une sauvegarde complète (programmes, séances, réglages), pas un lien de séance. La restaurer dans ce compte ?", ok: "Restaurer" })) restoreBackup(code); return; }
       if (XFER_RE.test(normCode(code)) && code.trim().length <= 12) { if (await ask({ title: "C'est un code de transfert", text: "Ce code sert à récupérer toutes les données d'un autre compte (programmes, séances, réglages). Les récupérer dans ce compte ?", ok: "Récupérer" })) useTransferCode(code); return; }
       importShared(code); } break;
@@ -5694,18 +5827,20 @@ $app.addEventListener("click", async e => {
     } break;
     case "filesave": {
       const r = await saveFile(backupName(), await backupText());
+      if (r === "ok" || r === "download") { lsSet("fiitday-backup-at", Date.now()); if (route().name === "home") render(); }
       if (r === "ok") toast("Sauvegarde enregistrée");
       else if (r === "download") toast("Sauvegarde enregistrée dans tes téléchargements (" + backupName() + ")");
       else if (r === "error") toast("La sauvegarde n'a pas pu être enregistrée");
     } break;
     case "fileopen": {
-      if (dataLocked()) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
+      // une sauvegarde de CE compte se restaure toujours (version gratuite et essai compris) ; celle d'un autre compte : abonnés seulement
+      if (!db.auth) { toast("Connecte-toi à ton compte pour restaurer une sauvegarde"); return; }
       const txt = await openFile();
       if (txt === false) toast("Ce fichier n'a pas pu être lu");
       else if (txt != null) restoreBackup(txt, "Ce fichier n'est pas une sauvegarde Fiitday");
     } break;
     case "xfercreate": {
-      if (dataLocked()) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
+      if (dataLocked()) { premiumGate(LOCK_XFER); return; }
       if (!db.auth) { toast("Connecte-toi à ton compte pour créer un code"); return; }
       const txt = await backupText();
       let row; try { row = await rpc("create_transfer", { p_payload: txt }); } catch (err) { toast(xferErr(err)); return; }
@@ -5716,7 +5851,7 @@ $app.addEventListener("click", async e => {
       if (copy) { try { await navigator.clipboard.writeText(row.transfer_code); toast("Code copié"); } catch (err) { toast("Note le code : " + row.transfer_code); } }
     } break;
     case "xferuse": {
-      if (dataLocked()) { premiumGate("Restaurer une sauvegarde et le code de transfert sont réservés aux abonnés Premium, pendant l'essai aussi. Faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde."); return; }
+      if (dataLocked()) { premiumGate(LOCK_XFER); return; }
       if (!db.auth) { toast("Connecte-toi au compte qui doit recevoir les données"); return; }
       const c = await ask({ title: "J'ai un code", text: "Tape le code de 8 caractères créé dans l'autre compte (Réglages › Données › Créer un code). Il n'est valable qu'une heure.", input: "", code: true, ok: "Récupérer" });
       if (c) useTransferCode(c);
@@ -5726,11 +5861,13 @@ $app.addEventListener("click", async e => {
 // sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
 // Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
 // repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
-const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt"];
+const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk"]; // hrOk : accord pour la fréquence cardiaque, jamais repris d'une sauvegarde
 async function restoreBackup(txt, badMsg) {
   let j;
   try { j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items) || (j.v != null && !(j.v >= 1 && j.v <= 2))) throw new Error(); }
   catch (err) { toast(badMsg || "Ce texte n'est pas une sauvegarde valide"); return; }
+  if (!db.auth) { toast("Connecte-toi à ton compte pour restaurer une sauvegarde"); return; }
+  if (dataLocked() && j.owner !== db.auth.user.id) { premiumGate(LOCK_XFER); return; }
   const take = [], back = []; let bad = 0, same = 0;
   for (const it of j.items) {
     if (it && it.kind === "workout" && it.data) it.data = fatWorkout(it.data);
@@ -5942,6 +6079,9 @@ if (db.auth) sync();
 recoveryFromLink();
 // message laissé avant un rechargement (compte supprimé…) ; données illisibles retrouvées au démarrage
 try { const m = sessionStorage.getItem("fiitday-msg"); if (m) { sessionStorage.removeItem("fiitday-msg"); setTimeout(() => toast(m), 400); } } catch (e) { }
+if (!db.auth && db.checkGone) setTimeout(() => accountGoneCheck(db.checkGone), 1500);
+// version gratuite sur le site : on demande au navigateur de ne pas effacer les données de lui-même (elles ne sont que sur l'appareil)
+if (!Native && navigator.storage && navigator.storage.persist) setTimeout(() => { if (db.auth && isFree()) navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist(); }).catch(() => { }); }, 4000);
 if (unreadable) setTimeout(() => ask({ title: "Données illisibles", text: "Les données enregistrées sur cet appareil n'ont pas pu être lues (écriture interrompue ?). Une copie a été mise de côté sur l'appareil, rien n'est effacé.\n\nReconnecte-toi : avec Premium ou pendant l'essai, tes données reviennent avec la synchro. Sinon, écris-nous à contact@fiitday.com : nous t'aiderons à les récupérer.", ok: "Compris", cancel: false }), 600);
 setTimeout(() => { window.__fiitdayPending(); window.__fiitdayFileReady(); }, 300);
 setTimeout(staleWorkout, 1500);

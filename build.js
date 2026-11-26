@@ -153,6 +153,8 @@ footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);color:v
 const frSpaces = h => (">" + h + "<").replace(/>([^<]+)</g, (m, t) => ">" + t.replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0") + "<").slice(1, -1);
 for (const f of fs.readdirSync(path.join(__dirname, "src", "pages")).filter(f => f.endsWith(".html"))) {
   const body = frSpaces(src("pages/" + f).replace(/\{\{CONTACT\}\}/g, CONTACT));
+  // garde-fou : jamais de page légale publiée avec un champ encore à remplir ({{NOM}}, {{ADRESSE}}…)
+  if (/\{\{[A-Z_]+\}\}/.test(body)) throw new Error("Champ à remplir dans src/pages/" + f + " : " + body.match(/\{\{[A-Z_]+\}\}/)[0]);
   const title = (body.match(/<!-- title: (.+?) -->/) || [, "Fiitday"])[1];
   fs.writeFileSync(path.join(dist, f), `<!doctype html>
 <html lang="fr">

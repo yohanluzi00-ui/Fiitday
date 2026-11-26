@@ -8,7 +8,7 @@
 // Clés (Supabase › Edge Functions › Secrets, jamais dans le code ni dans le chat) : RC_V2_SECRET_KEY (clé secrète
 // RevenueCat « API v2 » : Customer information en lecture et écriture, Project configuration en lecture), BREVO_API_KEY.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { envoyer, euros } from "./mail.ts";
+import { envoyer, esc, euros, lignes, p, page, quand } from "./mail.ts";
 import { mailRappel, mailResiliation, mailRetractation } from "./mails.ts";
 
 const cors = {
@@ -70,6 +70,15 @@ async function rcAction(uid: string, product: string, what: "cancel" | "refund")
   }
 }
 
+/* ---------- alertes pour le propriétaire (contact@fiitday.com) ---------- */
+// remboursement à faire à la main (Google Play, remboursement partiel Stripe, échec RevenueCat) : au plus tard 14 jours après
+// la demande (L221-24, sinon majorations L242-4) ; et rétractations répétées d'un même compte ou d'une même adresse (abus possible)
+async function alerte(sujet: string, rows: [string, string][], texte: string) {
+  const html = page(sujet, p(texte) + lignes(rows) + p("Le détail est dans Réglages › Administration › Abonnements."));
+  const st = await envoyer("contact@fiitday.com", "Fiitday", "[Fiitday] " + sujet, html);
+  if (!st.startsWith("envoyé")) console.error("alerte non envoyée (" + sujet + ") : " + st);
+}
+
 /* ---------- demandes ---------- */
 async function demande(token: string, b: any) {
   const asUser = createClient(URL_, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: "Bearer " + token } }, auth: { persistSession: false } });
@@ -104,7 +113,18 @@ async function demande(token: string, b: any) {
     : mailRetractation({ name, label: sv.label, store, at: sv.at, bought: chk.at || "", refund: Number(sv.refund), email });
   const mail = await envoyer(email, name, sujet, html);
   await sb.rpc("contract_mail_status", { p_id: sv.id, p_mail: mail });
-  return json(200, { ok: true, kind, at: sv.at, end_at: sv.end_at, refund: Number(sv.refund), refund_all: sv.refund_all, label: sv.label, mail_sent: mail.startsWith("envoyé") });
+  const rows: [string, string][] = [["Demande", kind === "resiliation" ? "Résiliation" : "Rétractation"], ["Contrat", esc(sv.label) + " · " + esc(store)], ["Client", esc(name) + " · " + esc(email)],
+    ["Reçue le", esc(quand(sv.at))], ["Remboursement", Number(sv.refund) > 0 ? esc(euros(Number(sv.refund))) + (sv.refund_all ? " (intégral)" : "") : "aucun"], ["Automatique", esc(auto)]];
+  if (/À faire/.test(auto)) {
+    const limite = quand(new Date(Date.parse(sv.at) + 14 * 864e5), false);
+    await alerte("À faire avant le " + limite + " : " + (kind === "resiliation" ? "résiliation" : "rétractation"), rows,
+      "Cette demande nécessite une action à la main. Le remboursement doit être fait au plus tard le <b>" + esc(limite) + "</b> (14 jours après la demande), puis note-le avec « C'est fait ».");
+  }
+  if (kind === "retractation" && Number(sv.retractations) >= 2) {
+    await alerte("Rétractations répétées (" + Number(sv.retractations) + ") : " + name, rows,
+      "Ce compte (ou cette adresse e-mail) s'est rétracté " + Number(sv.retractations) + " fois. La rétractation reste un droit à chaque nouvel achat : elle a été appliquée normalement ; à toi de voir s'il s'agit d'un abus (achats et remboursements à répétition).");
+  }
+  return json(200, { ok: true, kind, at: sv.at, end_at: sv.end_at, refund: Number(sv.refund), refund_all: sv.refund_all, label: sv.label, mail_sent: mail.startsWith("envoyé"), auto });
 }
 
 // Brevo : une clé restreinte n'a parfois accès qu'aux e-mails transactionnels ; elle expire après 90 jours sans
@@ -122,9 +142,26 @@ async function brevoPing(): Promise<string> {
   } catch { return "Brevo injoignable"; }
 }
 
+// clients RevenueCat d'un compte supprimé sans passer par la fonction delete-account (repli) : effacés ici chaque jour
+// deno-lint-ignore no-explicit-any
+async function rcNettoyage(sb: any): Promise<number> {
+  if (rcKey().length < 20) return 0;
+  const { data } = await sb.from("rc_pending_delete").select("user_id").limit(50);
+  let n = 0;
+  for (const row of (data || []) as { user_id: string }[]) {
+    try {
+      const pid = await project();
+      const r = await rc("/projects/" + pid + "/customers/" + encodeURIComponent(row.user_id), "DELETE");
+      if (r.ok || r.status === 404) { await sb.from("rc_pending_delete").delete().eq("user_id", row.user_id); n++; }
+    } catch (e) { console.error("effacement RevenueCat : " + String((e as Error).message || e)); }
+  }
+  return n;
+}
+
 async function rappels() {
   await brevoPing();
   const sb = srv();
+  await rcNettoyage(sb);
   const { data, error } = await sb.rpc("renewal_due");
   if (error) return oops("renewal_due", error);
   let sent = 0;

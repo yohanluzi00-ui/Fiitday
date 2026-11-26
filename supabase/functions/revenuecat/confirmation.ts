@@ -2,11 +2,26 @@
 // délai de rétractation, conditions générales de vente et formulaire de rétractation.
 import { boutique, encadre, esc, euros, lignes, p, page, PRIX, quand } from "./mail.ts";
 
-// fin du délai de rétractation : 14 jours après le jour de l'achat (heure de Paris), repoussé au lundi si samedi ou dimanche
+// Pâques (calendrier grégorien) : sert aux jours fériés mobiles (lundi de Pâques, Ascension, lundi de Pentecôte)
+function paques(y: number): Date {
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const n = h + l - 7 * m + 114;
+  return new Date(Date.UTC(y, Math.floor(n / 31) - 1, (n % 31) + 1, 12));
+}
+// jour férié en France (même liste que la fonction jour_ferie de la base)
+function ferie(dt: Date): boolean {
+  const md = String(dt.getUTCMonth() + 1).padStart(2, "0") + "-" + String(dt.getUTCDate()).padStart(2, "0");
+  if (["01-01", "05-01", "05-08", "07-14", "08-15", "11-01", "11-11", "12-25"].includes(md)) return true;
+  const p = paques(dt.getUTCFullYear()).getTime(), day = 864e5, t = Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), 12);
+  return t === p + day || t === p + 39 * day || t === p + 50 * day;
+}
+// fin du délai de rétractation : 14 jours après le jour de l'achat (heure de Paris), prolongé jusqu'au premier jour
+// ouvrable si le dernier jour est un samedi, un dimanche ou un jour férié (L221-19) ; même calcul que retract_until
 export function finRetractation(at: number): string {
   const d = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(at));
   const last = new Date(d + "T12:00:00Z"); last.setUTCDate(last.getUTCDate() + 14);
-  const wd = last.getUTCDay(); if (wd === 6) last.setUTCDate(last.getUTCDate() + 2); else if (wd === 0) last.setUTCDate(last.getUTCDate() + 1);
+  while (last.getUTCDay() === 6 || last.getUTCDay() === 0 || ferie(last)) last.setUTCDate(last.getUTCDate() + 1);
   return quand(last, false);
 }
 

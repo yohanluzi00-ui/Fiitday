@@ -180,6 +180,19 @@ ${body}
 `);
 }
 
+// CGV dans la fonction « revenuecat » : la confirmation de commande (L221-13) les contient toujours, sans lire le site au
+// moment de l'achat ; version = empreinte du texte (gardée dans le journal des confirmations) ; « complet » = aucun champ à remplir
+{
+  const raw = frSpaces(src("pages-lancement/cgv.html").replace(/\{\{CONTACT\}\}/g, CONTACT)).replace(/<!--[^]*?-->/g, "").replace(/<h1>[^]*?<\/h1>/, "")
+    .replace(/class="encadre"/g, 'style="border:2px solid #C81E64;border-radius:10px;padding:4px 12px;margin:12px 0"')
+    .replace(/class="loi"/g, 'style="font-size:13px;color:#5D586B;border-left:3px solid #E4E0EC;padding-left:12px"').replace(/class="meta"/g, 'style="color:#5D586B;font-size:13px"').trim();
+  const ver = require("crypto").createHash("sha256").update(raw).digest("hex").slice(0, 12);
+  const out = "// Fichier créé par build.js à partir de src/pages-lancement/cgv.html : ne pas modifier à la main.\n" +
+    "export const CGV_VERSION = " + JSON.stringify(ver) + ";\nexport const CGV_COMPLET = " + !/\{\{[A-Z_]+\}\}/.test(raw) + ";\nexport const CGV_HTML = " + JSON.stringify(raw) + ";\n";
+  const dest = path.join(__dirname, "supabase", "functions", "revenuecat", "cgv-texte.ts");
+  if (!fs.existsSync(dest) || fs.readFileSync(dest, "utf8") !== out) fs.writeFileSync(dest, out);
+}
+
 // dist/ remplacé d'un coup
 fs.rmSync(distFinal, { recursive: true, force: true });
 fs.renameSync(dist, distFinal);

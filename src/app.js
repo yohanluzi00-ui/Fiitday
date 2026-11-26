@@ -240,7 +240,8 @@ function cardioDefs(e) {
 // indicateurs retirés par l'utilisateur pour une machine (ils restent proposés dans « + Ajouter un indicateur »)
 function cardioHidden(key) { const h = settings().cardioHidden, l = h && typeof h === "object" ? h[key] : null; return Array.isArray(l) ? l.filter(k => typeof k === "string") : []; }
 const hrOk = () => !!settings().hrOk; // accord donné pour noter la fréquence cardiaque
-const hasHr = e => (e.sets || []).some(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "");
+// (dans un programme, sets est un nombre de séries ; en séance, la liste des séries)
+const hasHr = e => Array.isArray(e.sets) && e.sets.some(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "");
 const cardioShown = e => { const h = cardioHidden(cardioKey(e)), hr = hrOk() || hasHr(e); return cardioDefs(e).filter(d => !h.includes(d.k) && (d.k !== "fc" || hr)); };
 function setCardioHidden(key, list) { const st = settings(), hh = Object.assign({}, st.cardioHidden); hh[key] = list; st.cardioHidden = hh; put("settings", st); }
 // définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
@@ -4132,8 +4133,9 @@ const ctrLastDay = t => ctrDate(Date.parse(t) - 60000); // échéance à minuit 
 function ctrItems() {
   if (!contracts || !contracts.ok) return [];
   const out = (contracts.subs || []).map(x => ({ type: "sub", store: x.store, product: x.product, label: x.label, until: x.until, renews: x.renews, retract: x.retract_until }));
-  const l = contracts.life;
-  if (l) out.push({ type: "life", store: l.store, product: l.product, label: l.kind === "family" ? "Premium Famille à vie" : "Premium Solo à vie", at: l.at, retract: l.retract_until });
+  // achats à vie : chacun à part (Solo et Famille ont chacun leur date et leur délai de rétractation) ; ancien serveur : un seul
+  const lifes = Array.isArray(contracts.lifes) ? contracts.lifes : contracts.life ? [contracts.life] : [];
+  lifes.forEach(l => out.push({ type: "life", store: l.store, product: l.product, label: l.kind === "family" ? "Premium Famille à vie" : "Premium Solo à vie", at: l.at, retract: l.retract_until }));
   return out;
 }
 const ctrKey = i => i.store + "/" + i.product;
@@ -4226,7 +4228,7 @@ async function deleteWarnings() {
   let stop = null;
   if (p.source === "subscription" && p.renews !== false) {
     stop = p.store === "PLAY_STORE" ? "play" : "web";
-    w.push(stop === "play" ? "Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements Google Play. Résilie-le d'abord dans Google Play (Abonnements)." : "Ton abonnement Premium par carte sera résilié automatiquement (plus aucun prélèvement) ; le temps restant est perdu.");
+    w.push(stop === "play" ? "Ton abonnement Premium est toujours actif : supprimer ton compte n'arrête pas les paiements Google Play. Résilie-le d'abord dans Google Play (Abonnements)." : "Ton abonnement Premium par carte sera résilié tout de suite (plus aucun prélèvement), avec le remboursement de la part non utilisée et un e-mail de confirmation.");
   } else if (p.source === "subscription") w.push("Il te reste du Premium jusqu'au " + until + " : il sera perdu.");
   if (p.source === "lifetime") w.push("Ton Premium à vie" + (p.kind === "family" ? " (Famille)" : "") + " est lié à ce compte : il sera perdu.");
   if (p.source === "gift") w.push("Ton Premium offert sera perdu.");
@@ -4639,13 +4641,18 @@ let adminCtr = null, ctrCheck = null, ctrCheckBusy = false; // résiliations et 
 function adminCtrCard() {
   const a = adminCtr; if (!a) return "";
   const reqs = a.requests || [], todo = r => !r.done_at && /À faire/.test(r.auto || "");
-  return '<div class="section-title">Résiliations et rétractations</div><div class="card adm-ctr"><div class="spread"><span class="small muted">' + reqs.filter(todo).length + " à traiter · " +
+  const late = r => todo(r) && r.deadline && Date.parse(r.deadline) - Date.now() < 3 * DAY; // remboursement à faire dans moins de 3 jours (ou en retard)
+  const warns = (a.conf_fail ? '<p class="msg err" style="margin:8px 0 0">' + a.conf_fail + " confirmation" + (a.conf_fail > 1 ? "s" : "") + " de commande pas encore envoyée" + (a.conf_fail > 1 ? "s" : "") + " (nouvel essai chaque jour ; vérifie Brevo et les CGV).</p>" : "") +
+    (a.rc_pending ? '<p class="small muted" style="margin:8px 0 0">' + a.rc_pending + " client" + (a.rc_pending > 1 ? "s" : "") + " RevenueCat de comptes supprimés encore à effacer (nouvel essai automatique chaque jour).</p>" : "");
+  return '<div class="section-title">Résiliations et rétractations</div><div class="card adm-ctr">' + warns + '<div class="spread"><span class="small muted">' + reqs.filter(todo).length + " à traiter · " +
     (a.reminders || 0) + " rappel" + ((a.reminders || 0) > 1 ? "s" : "") + ' avant renouvellement envoyé' + ((a.reminders || 0) > 1 ? "s" : "") + ' en 30 jours</span><button class="btn sm" data-act="ctrcheck"' + (ctrCheckBusy ? " disabled" : "") + ">" + (ctrCheckBusy ? "Vérification…" : "Vérifier RevenueCat et Brevo") + "</button></div>" +
     (ctrCheck ? '<div class="small adm-ctr-check">RevenueCat : ' + esc(ctrCheck.revenuecat) + "<br>Brevo (e-mails) : " + esc(ctrCheck.brevo) + "<br>Rappels quotidiens : " + esc(ctrCheck.cron) + "</div>" : "") +
     (reqs.length ? '<ul class="adm-ctr-list">' + reqs.map(r => '<li class="' + (todo(r) ? "todo" : "") + '"><div><b>' + (r.kind === "resiliation" ? "Résiliation" : "Rétractation") + " · " + esc(r.label) + '</b></div><div class="small muted">' +
       esc(ctrWhen(r.at) + " · " + r.name + " · " + r.email + " · " + (STORE_TXT[r.store] || r.store)) + '</div><div class="small">' +
       esc((r.kind === "resiliation" ? (r.wish === "maintenant" ? "Fin immédiate" : "Fin le " + ctrDate(Date.parse(r.end_at))) : "Fin immédiate") + (+r.refund > 0 ? " · remboursement " + (r.refund_all ? "intégral, " : "") + ctrEur(r.refund) : "")) + '</div><div class="small muted">' +
       esc(r.auto || "") + (r.mail ? " · E-mail " + esc(r.mail) : "") + "</div>" +
+      (todo(r) && r.deadline ? '<div class="small' + (late(r) ? " msg err" : "") + '" style="margin:2px 0 0">À faire au plus tard le ' + esc(ctrDate(Date.parse(r.deadline))) + " (14 jours après la demande)</div>" : "") +
+      (r.repeat >= 2 ? '<div class="small msg err" style="margin:2px 0 0">⚠ ' + r.repeat + " rétractations pour ce compte ou cette adresse e-mail : abus possible (achats et remboursements à répétition)</div>" : "") +
       (todo(r) ? '<button class="btn sm" style="margin-top:6px" data-act="ctrdone" data-id="' + esc(r.id) + '">C\'est fait</button>' : r.done_at ? '<div class="small ok-txt">Traité le ' + esc(ctrDate(Date.parse(r.done_at))) + "</div>" : "") + "</li>").join("") + "</ul>"
       : '<p class="small muted" style="margin:8px 0 0">Aucune demande pour l\'instant.</p>') + "</div>";
 }
@@ -5025,7 +5032,7 @@ function viewSettings() {
   const num_ = (Native && Native.version && Native.version()) || window.APP_VERSION || "";
   const ver = "Fiitday " + (num_ && num_ !== "1.0-dev" ? "V" + num_ : "(version de développement)");
   const fr = dataLocked(), lk = fr ? " locked-btn" : "", li = fr ? LOCK : "";
-  const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Restaurer et le code de transfert sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
+  const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Le code de transfert et la restauration d\'une sauvegarde d\'un autre compte sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. Ta propre sauvegarde se restaure toujours. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
   return '<div class="page-head"><h1>Réglages</h1></div><div class="stack set-stack">' + planSettings() +
     '<div class="card"><h2 class="card-h">Apparence</h2><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
     '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
@@ -5035,7 +5042,7 @@ function viewSettings() {
     '<div class="card"><h2 class="card-h">Objectif de séances par semaine</h2><div style="margin-top:10px">' + seg("goal", [["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"]]) + "</div></div>" +
     '<div class="card"><h2 class="card-h">Données</h2><div class="small muted" style="margin-top:4px">Tes programmes, séances et réglages.</div>' +
     '<div class="data-sec"><div class="data-t">Sauvegarde</div><div class="small muted">Un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…).</div>' +
-    '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-act="filesave">Sauvegarde</button><button class="btn sm' + lk + '" data-act="fileopen">' + li + 'Restaurer</button></div></div>' +
+    '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-act="filesave">Sauvegarde</button><button class="btn sm" data-act="fileopen">Restaurer</button></div></div>' +
     '<div class="data-sec"><div class="data-t">Transfert vers un autre compte</div><div class="small muted">Un code de 8 caractères, valable 1 heure, à taper dans l\'autre compte.</div>' +
     '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm' + lk + '" data-act="xfercreate">' + li + 'Créer un code</button><button class="btn sm' + lk + '" data-act="xferuse">' + li + 'J\'ai un code</button></div></div>' + frNote +
     '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px 14px"><a class="link small" style="padding:0;display:inline-flex;align-items:center" href="#/faq/sauvegarde">Comment ça marche ?</a></div></div>' +
@@ -5350,7 +5357,7 @@ $app.addEventListener("click", async e => {
       if (pre.stop) {
         const play = pre.stop === "play";
         const c = await choose("Ton abonnement est toujours actif", [["manage", play ? "Résilier dans Google Play" : "Résilier mon abonnement", play ? "Supprimer ton compte n'arrête pas les paiements Google Play : résilie d'abord" : "Choisis la date de fin, avec le remboursement de la part non utilisée si tu arrêtes tout de suite"],
-          ["go", "Supprimer quand même", play ? "Les paiements Google Play continueront tant que tu n'auras pas résilié" : "Ton abonnement par carte sera résilié automatiquement : plus aucun prélèvement, le temps restant est perdu"]]);
+          ["go", "Supprimer quand même", play ? "Les paiements Google Play continueront tant que tu n'auras pas résilié" : "Ton abonnement par carte sera résilié tout de suite : plus aucun prélèvement, la part non utilisée t'est remboursée"]]);
         if (!c) return;
         if (c === "manage") { if (play) openOut(PLAY_SUBS); else go("resilier"); return; }
       }

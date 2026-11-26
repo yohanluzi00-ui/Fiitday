@@ -151,7 +151,7 @@ function flushPending() {
 }
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { flushPending(); saveNow(); return; }
-  sync(); if (window.__fiitdayPending) window.__fiitdayPending();
+  tick(); sync(); if (window.__fiitdayPending) window.__fiitdayPending();
   if (Native && route().name === "settings") softRender(); // retour des réglages de notification d'Android
 });
 
@@ -377,8 +377,8 @@ function lastPerfCompute(w, ex) {
 /* ================= Thème, son, vibration ================= */
 const darkQuery = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
 // couleurs de l'appli (Réglages › Apparence) : nom, libellé, les 3 teintes du dégradé
-const ACCENTS = [["rose", "Rose", "#FF8A32,#FF3D7F,#E0209A"], ["bleu", "Bleu", "#1E9BE8,#2A62E6,#4A2FD8"], ["vert", "Vert", "#B8F03A,#2FD27A,#0FA89A"], ["jaune", "Jaune", "#FFE14D,#FFC21A,#FF9F0A"],
-  ["violet", "Violet", "#C93FE8,#8636E6,#5A2FD6"], ["orange", "Orange", "#FFB23D,#FF7A1A,#F2492C"], ["marron", "Marron", "#B87A4B,#8E5530,#5E341C"]];
+const ACCENTS = [["rose", "Rose", "#FF8A32,#FF3D7F,#E0209A"], ["bleu", "Bleu", "#1677C9,#2A62E6,#4A2FD8"], ["vert", "Vert", "#B8F03A,#2FD27A,#0FA89A"], ["jaune", "Jaune", "#FFE14D,#FFC21A,#FF9F0A"],
+  ["violet", "Violet", "#A532C9,#8636E6,#5A2FD6"], ["orange", "Orange", "#FFB23D,#FF7A1A,#F2492C"], ["marron", "Marron", "#9A6238,#8E5530,#5E341C"]];
 function applyTheme() {
   if (flashTimer) return; // pendant le clignotement de fin de repos
   const t = settings().theme;
@@ -425,9 +425,16 @@ function keepScreen(on) { if (on === screenOn) return; screenOn = on; try { if (
 /* ================= Petites fenêtres ================= */
 // typographie française : espace insécable avant « ? : ! ; » et à l'intérieur des guillemets (messages et fenêtres)
 function frNb(t) { return String(t == null ? "" : t).replace(/ ([?:!;»])/g, "\u00a0$1").replace(/« /g, "«\u00a0"); }
+// lecteurs d'écran : deux zones d'annonce vides créées une seule fois (un message inséré tout prêt est souvent ignoré) ;
+// le message visible n'est pas lu en double
+const srZone = role => { const z = document.createElement("div"); z.className = "sr"; z.setAttribute("role", role); if (role === "status") z.setAttribute("aria-live", "polite"); document.body.appendChild(z); return z; };
+const SR = { status: srZone("status"), alert: srZone("alert") };
+const URGENT = /impossible|erreur|échou|problème|incorrect|refusé|invalide|expiré|introuvable/i;
+function announce(msg, urgent) { const z = urgent ? SR.alert : SR.status; z.textContent = ""; setTimeout(() => { z.textContent = msg; }, 60); }
 function toast(msg) {
-  const d = document.createElement("div"); d.className = "toast"; d.setAttribute("role", "status"); d.textContent = frNb(msg);
+  const t = frNb(msg), d = document.createElement("div"); d.className = "toast"; d.setAttribute("aria-hidden", "true"); d.textContent = t;
   document.body.appendChild(d); setTimeout(() => d.remove(), 2600);
+  announce(t, URGENT.test(t));
 }
 function ask(o) {
   return new Promise(res => {
@@ -788,6 +795,43 @@ window.addEventListener("hashchange", e => {
 let modalStale = false; // l'entrée actuelle vient d'une fenêtre fermée par un bouton : le prochain retour doit changer de page
 const openModals = () => Array.from(document.querySelectorAll("body > .modal"));
 const cancelModal = m => m.dispatchEvent(new MouseEvent("click", { bubbles: true })); // comme un appui à côté de la fenêtre : toutes les fenêtres le traitent comme « Annuler »
+/* Clavier et lecteurs d'écran : à l'ouverture d'une fenêtre, le focus y entre et y reste (Tab / Maj+Tab tournent dedans),
+   la page derrière est mise de côté (inert) ; à la fermeture, le focus revient sur le bouton qui l'a ouverte
+   (ou sur le même bouton redessiné, retrouvé par ses attributs data-*). */
+const isTextField = el => !!el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !/^(button|checkbox|radio|range|submit|reset|file|color)$/i.test(el.type)));
+function focusSig(el) { let k = el.tagName + "|" + (el.id || "") + "|" + (el.getAttribute("href") || "") + "|" + (el.getAttribute("name") || ""); for (const a of el.attributes) if (a.name.startsWith("data-")) k += "|" + a.name + "=" + a.value; return k; }
+function focusMark(el, root) {
+  if (!el || el === document.body || !el.tagName || !root.contains(el)) return null;
+  const sig = focusSig(el), same = [...root.querySelectorAll(el.tagName)].filter(x => focusSig(x) === sig);
+  return { el, sig, tag: el.tagName, n: Math.max(0, same.indexOf(el)), text: isTextField(el) };
+}
+function focusBack(m, root) {
+  if (!m) return false;
+  let el = m.el.isConnected && root.contains(m.el) ? m.el : null;
+  if (!el) { const same = [...root.querySelectorAll(m.tag)].filter(x => focusSig(x) === m.sig); el = same[Math.min(m.n, same.length - 1)] || null; }
+  if (!el || el.disabled || !el.getClientRects().length) return false;
+  el.focus({ preventScroll: true });
+  return document.activeElement === el;
+}
+const focusLost = () => !document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected;
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const focusables = box => [...box.querySelectorAll(FOCUSABLE)].filter(x => x.getClientRects().length && !x.closest("[inert]"));
+function modalFocus(m) { // le focus va sur la fenêtre elle-même (son titre est lu), le Tab suivant atteint le premier bouton
+  if (!m || !m.isConnected || m.contains(document.activeElement)) return;
+  const box = m.querySelector(".modal-box") || m;
+  if (!box.hasAttribute("tabindex")) box.setAttribute("tabindex", "-1");
+  box.focus({ preventScroll: true });
+}
+function modalLayers() { const ms = openModals(); $app.inert = ms.length > 0; ms.forEach((m, k) => { m.inert = k < ms.length - 1; }); }
+let lastFocusEl = null; // dernier élément touché hors des fenêtres (une fenêtre avec un champ y met le focus avant qu'on l'observe)
+document.addEventListener("focusin", e => { const t = e.target; if (t && t.closest && !t.closest("body > .modal")) lastFocusEl = t; });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab") return;
+  const ms = openModals(); if (!ms.length) return;
+  const top = ms[ms.length - 1], box = top.querySelector(".modal-box") || top, f = focusables(box); if (!f.length) return;
+  const a = document.activeElement, i = f.indexOf(a);
+  if (e.shiftKey ? i <= 0 : i === f.length - 1 || i < 0 && !box.contains(a)) { e.preventDefault(); (e.shiftKey ? f[f.length - 1] : f[0]).focus(); }
+});
 new MutationObserver(muts => {
   for (const mu of muts) {
     mu.addedNodes.forEach(n => {
@@ -795,8 +839,22 @@ new MutationObserver(muts => {
       const st = Object.assign({}, history.state, { modal: true });
       if (history.state && history.state.modal && openModals().length === 1) history.replaceState(st, ""); else history.pushState(st, ""); // une entrée laissée par une fenêtre fermée resert
       modalStale = false; n.__hist = true;
+      const a = document.activeElement, opener = a && a !== document.body && !n.contains(a) ? a : lastFocusEl && lastFocusEl.isConnected ? lastFocusEl : null;
+      n.__ret = opener ? focusMark(opener, document.body) : null;
+      modalLayers();
+      setTimeout(() => modalFocus(n), 0);
     });
-    mu.removedNodes.forEach(n => { if (n.nodeType === 1 && n.__hist && !n.__popped && !openModals().length && history.state && history.state.modal) modalStale = true; });
+    mu.removedNodes.forEach(n => {
+      if (n.nodeType !== 1 || !n.classList || !n.classList.contains("modal")) return;
+      if (n.__hist && !n.__popped && !openModals().length && history.state && history.state.modal) modalStale = true;
+      modalLayers();
+      const ret = n.__ret;
+      setTimeout(() => { // après le redessin éventuel déclenché par le choix fait dans la fenêtre
+        const ms = openModals();
+        if (ms.length) { modalFocus(ms[ms.length - 1]); return; }
+        if (focusLost() && ret && !focusBack(ret, document.body)) lastFocusEl = null;
+      }, 0);
+    });
   }
 }).observe(document.body, { childList: true });
 let lastHash = location.hash;
@@ -895,13 +953,18 @@ async function askConsentIfNeeded() {
   const st = settings(); st.consentAt = new Date().toISOString(); st.consentVersion = LEGAL.version; put("settings", st);
 }
 // menu : 4 onglets ; l'historique est dans Stats, les programmes Fiitday (bientôt) en carte sur l'accueil
+// titre de l'onglet du navigateur (et annoncé par les lecteurs d'écran) : « Stats · Fiitday »
+const PAGE_TITLES = { home: "Accueil", exercices: "Exercices", progress: "Stats", evolution: "Évolution", calendar: "Calendrier", history: "Historique", programs: "Programmes", program: "Programme",
+  session: "Séance", settings: "Réglages", premium: "Premium", guide: "Guide", faq: "Questions fréquentes", admin: "Administration", resilier: "Résilier un abonnement", retractation: "Renoncer au contrat" };
 const NAV = [["home", "Accueil", "home"], ["exercices", "Exercices", "dumbbell"], ["progress", "Stats", "chart"], ["programs", "Programmes", "grid"], ["settings", "Réglages", "gear"]];
 // Remplacer l'écran retire le champ actif : son « blur »/« change » peut redemander un rendu pendant celui-ci.
 let rendering = false;
 function render() {
   if (rendering) { setTimeout(render, 0); return; }
   rendering = true;
-  try { renderNow(); }
+  // l'écran est entièrement redessiné : le bouton qui avait le focus (clavier, lecteur d'écran) le retrouve ensuite
+  const fm = openModals().length ? null : focusMark(document.activeElement, $app);
+  try { renderNow(); if (fm && !fm.text && focusLost()) focusBack(fm, $app); }
   catch (e) {
     console.error(e);
     $app.innerHTML = '<div class="login"><h1>Oups</h1><p class="muted">Un problème d\'affichage est survenu. Tes données ne sont pas perdues.</p><button type="button" class="btn primary big" data-act="reload">Revenir à l\'accueil</button></div>';
@@ -913,7 +976,6 @@ function renderNow() {
   if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
   if (db.auth && db.auth.dead && !activeWorkout()) { db.auth = null; db.mode = null; saveNow(); restart(); return; } // séance finie après une session expirée : reconnexion
   if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
-  document.title = "Fiitday";
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
   if (!db.auth && !localFixed) { localFixed = true; freezeNotes(); renameVariants(); purgeBody(); }
@@ -958,6 +1020,8 @@ function renderNow() {
   $app.innerHTML = '<div class="shell' + (immersive ? " hide-nav" : "") + '"><nav class="nav" aria-label="Navigation"><div class="brand"><img src="icon-192.png" alt="" width="32" height="32"><span>Fiitday</span></div>' +
     NAV.map(n => '<a href="#/' + n[0] + '" class="' + (n[0] === tab ? "on" : "") + '"' + (n[0] === tab ? ' aria-current="page"' : "") + ">" + ICON[n[2]] + "<span>" + n[1] + "</span></a>").join("") +
     '</nav><main class="main r-' + esc(r.name) + (wide ? " wide" : "") + '">' + body + "</main></div>";
+  const pageT = PAGE_TITLES[doneW ? "history" : r.name] || PAGE_TITLES[tab] || "";
+  document.title = (pageT ? pageT + " · " : "") + "Fiitday";
   keepScreen(immersive);
   if (r.name === "exercices") mountExercises(r.args[0], r.args[1]);
   tick();
@@ -1436,7 +1500,7 @@ function variantStats(t) {
 function viewHome() {
   const act = activeWorkout();
   let h = '<div class="home-top"><div class="page-head"><div><div class="muted small">' + esc(fmtDateLong(Date.now())) + '</div><h1>Bonjour' + (firstName() ? " " + esc(firstName()) : "") + '</h1></div></div>' +
-    homeStretch(act) + planBanner() +
+    homeRecap(act) + homeStretch(act) + planBanner() +
     '<div class="home-actions"><button class="btn primary" data-act="newtpl">+ Nouveau programme</button><button class="btn" data-act="importvar">Importer</button>' +
       '<button class="btn free-go" data-act="freestart">' + ICON.play + "Séance libre, sans programme</button></div></div>";
   if (act) {
@@ -2088,7 +2152,7 @@ function viewProgram(tid, vid) {
   const v = t.variants.find(x => x.id === vid) || t.variants[0];
   if (v ? varLocked(t.id, v.id) : progLocked(t.id)) return viewLockedProgram(t, v);
   const launch = v ? '<button class="btn sm primary" data-act="launchvar" data-t="' + t.id + '" data-v="' + v.id + '">Lancer ' + esc(launchLabel(v)) + "</button>" : "";
-  let h = '<div class="spread"><a class="back" href="#/home">‹ Accueil</a>' + launch + "</div>" +
+  let h = '<h1 class="sr">Programme « ' + esc(t.name) + " »</h1>" + '<div class="spread"><a class="back" href="#/home">‹ Accueil</a>' + launch + "</div>" +
     '<label class="fl" style="margin-top:8px">Nom du programme<input class="f" data-p="tname" maxlength="60" value="' + esc(t.name) + '" style="font-size:20px;font-weight:700"></label>' +
     '<div class="section-title">Séances</div>';
   const delTpl = '<div style="margin-top:32px"><button class="btn danger" data-act="deltpl">Supprimer le programme « ' + esc(t.name) + " »</button></div>";
@@ -2326,6 +2390,32 @@ function zonesOf(e) {
     if (/develop|pompe|curl|tirage|rowing|traction|dips|epaule|biceps|triceps|pec|oiseau|elevation|face pull/.test(n)) out.add("haut"); }
   return out;
 }
+/* Fin de séance : récapitulatif en haut de l'accueil (15 min, ou jusqu'à « Masquer »), au-dessus des étirements conseillés */
+function recapDismissed(id) { try { return localStorage.getItem("fiitday-recap-ok") === id; } catch (e) { return false; } }
+// records de la séance : meilleur 1RM estimé de l'exercice, au-dessus de tout ce qui a été fait avant (même règle que pendant la séance)
+function sessionRecords(w) {
+  const out = [];
+  w.exercises.forEach(e => {
+    if (e.type && e.type !== "reps") return;
+    let cur = null, top = null;
+    e.sets.forEach(st => { if (!st.done) return; const o = e1rm(num(st.kg), num(st.reps)); if (o != null && (cur == null || o > cur)) { cur = o; top = st; } });
+    if (cur == null) return;
+    const n = exKey(e); let best = null;
+    for (const x of finished()) if (x.id !== w.id && x.startedAt < w.startedAt) for (const ex of x.exercises) if (exKey(ex) === n && (ex.type || "reps") === (e.type || "reps")) ex.sets.forEach(st => { const o = e1rm(num(st.kg), num(st.reps)); if (o != null && (best == null || o > best)) best = o; });
+    if (best != null && cur > best + 0.05) out.push({ name: e.name, kg: num(top.kg), reps: num(top.reps) });
+  });
+  return out;
+}
+function homeRecap(act) {
+  const w = finished()[0]; if (act || !w || recapDismissed(w.id) || Date.now() - w.endedAt > STRETCH_MIN * 60000) return "";
+  const sets = w.exercises.reduce((a, e) => a + e.sets.filter(st => st.done).length, 0), ton = workoutTon(w), recs = sessionRecords(w);
+  const name = w.free ? "Séance libre" : vLabel(w.variantName) || w.templateName || "Séance";
+  return '<div class="card recap-card"><div class="spread"><h2 class="card-h">Séance terminée · ' + esc(name) + '</h2><button type="button" class="linkbtn" data-act="recapok" data-id="' + esc(w.id) + '">Masquer</button></div>' +
+    '<div class="recap-row"><span><b class="num">' + esc(fmtDurH(shownDur(w))) + "</b></span><span><b class=\"num\">" + sets + "</b> série" + (sets > 1 ? "s" : "") + "</span>" +
+    (ton > 0 ? '<span><b class="num">' + esc(fmtTon(ton)) + "</b> soulevés</span>" : "") + "</div>" +
+    (recs.length ? '<ul class="recap-rec">' + recs.slice(0, 3).map(r => "<li>" + TROPHY + "<span>Record\u00a0: " + esc(r.name) + " · " + fmtNum(r.kg) + "\u00a0kg\u00a0×\u00a0" + fmtNum(r.reps) + "</span></li>").join("") + (recs.length > 3 ? '<li class="muted small">et ' + (recs.length - 3) + " autre" + (recs.length > 4 ? "s" : "") + "</li>" : "") + "</ul>" : "") +
+    '<a class="link small recap-go" href="#/session/' + esc(w.id) + '">Voir le détail ›</a></div>';
+}
 function stretchDismissed(id) { try { return localStorage.getItem("fiitday-stretch-ok") === id; } catch (e) { return false; } }
 const STRETCH_MIN = 15; // la carte reste 15 min en haut de l'accueil après la fin d'une séance
 let stretchTimer = null;
@@ -2495,7 +2585,13 @@ const workoutDur = w => { const d = (w.endedAt || 0) - (w.startedAt || 0); retur
 const shownDur = w => w.endedAt ? Math.min(Math.max(0, w.endedAt - w.startedAt), 5 * 3600e3) : Date.now() - w.startedAt;
 const fmtDurH = ms => { const m = Math.round(ms / 60000), hh = Math.floor(m / 60); return hh ? hh + " h " + pad(m % 60) : m + " min"; };
 const fmtTon = v => v >= 10000 ? (v / 1000).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + " t" : Math.round(v).toLocaleString("fr-FR") + " kg";
+// courbes de l'onglet Évolution : recalculées seulement quand les données changent (appelé plusieurs fois par affichage)
+let pdCache = { rev: -1, list: [] };
 function progressData() {
+  if (pdCache.rev !== dataRev) pdCache = { rev: dataRev, list: progressDataNow() };
+  return pdCache.list;
+}
+function progressDataNow() {
   const map = {};
   for (const w of finished().slice().reverse()) {
     for (const e of w.exercises) {
@@ -2688,8 +2784,10 @@ function viewEvolution() {
 }
 document.addEventListener("input", e => {
   if (!e.target.matches || !e.target.matches("input[data-evo-q]")) return;
-  evo.q = e.target.value; const box = document.getElementById("evo-list"); if (box) box.innerHTML = evoListHtml();
+  evo.q = e.target.value; clearTimeout(evoQTimer); // une courte pause dans la frappe avant de refaire la liste (long historique)
+  evoQTimer = setTimeout(() => { const box = document.getElementById("evo-list"); if (box) box.innerHTML = evoListHtml(); }, 150);
 });
+let evoQTimer = 0;
 // courbe : axe du temps à l'échelle, une seule série, info-bulle qui suit le doigt
 let evoCur = null;
 function niceStep(raw, clock) {
@@ -2836,8 +2934,9 @@ function celebrate(rec) {
 }
 
 /* ================= Stats : onglets ================= */
+// de simples liens (celui de la page affichée porte aria-current), pas une « liste d'onglets »
 function statsTabs(on) {
-  return '<div class="tabs stabs" role="tablist">' + [["progress", "Séances"], ["evolution", "Évolution"], ["calendar", "Calendrier"], ["history", "Historique"]].map(t =>
+  return '<div class="tabs stabs">' + [["progress", "Séances"], ["evolution", "Évolution"], ["calendar", "Calendrier"], ["history", "Historique"]].map(t =>
     '<a href="#/' + t[0] + '" class="tab' + (t[0] === on ? " on" : "") + '"' + (t[0] === on ? ' aria-current="page"' : "") + ">" + (isFree() && (t[0] === "evolution" || t[0] === "calendar") ? LOCK : "") + t[1] + "</a>").join("") + "</div>";
 }
 
@@ -3112,15 +3211,15 @@ function pickSeconds(title, value, min, max) {
 function pickDuration(title, sec) {
   sec = Math.max(0, Math.round(num(sec) || 0));
   const mins = Array.from({ length: 301 }, (_, k) => k), secs = Array.from({ length: 60 }, (_, k) => k);
-  return pickWheels(title, [{ vals: mins, fmt: x => x + " min", value: Math.min(300, Math.floor(sec / 60)) }, { vals: secs, fmt: x => pad(x) + " s", value: sec % 60 }]).then(r => (r ? r[0] * 60 + r[1] : null));
+  return pickWheels(title, [{ name: "Minutes", vals: mins, fmt: x => x + " min", value: Math.min(300, Math.floor(sec / 60)) }, { name: "Secondes", vals: secs, fmt: x => pad(x) + " s", value: sec % 60 }]).then(r => (r ? r[0] * 60 + r[1] : null));
 }
 // distance avec des roues : en km (km entiers + centièmes) ou en mètres (km + mètres, par 10 m)
 const rng = (n, step) => Array.from({ length: n }, (_, k) => k * (step || 1));
 function pickDistance(title, value, unit) {
   const v = Math.max(0, num(value) || 0);
-  if (unit === "km") { const c = Math.round(v * 100); return pickWheels(title, [{ vals: rng(201), fmt: x => String(x), value: Math.min(200, Math.floor(c / 100)) }, { vals: rng(100), fmt: x => "," + pad(x) + " km", value: c % 100 }]).then(r => (r ? Math.round(r[0] * 100 + r[1]) / 100 : null)); }
+  if (unit === "km") { const c = Math.round(v * 100); return pickWheels(title, [{ name: "Kilomètres", vals: rng(201), fmt: x => String(x), value: Math.min(200, Math.floor(c / 100)) }, { name: "Centièmes de kilomètre", vals: rng(100), fmt: x => "," + pad(x) + " km", value: c % 100 }]).then(r => (r ? Math.round(r[0] * 100 + r[1]) / 100 : null)); }
   const m = Math.round(v / 10) * 10;
-  return pickWheels(title, [{ vals: rng(43), fmt: x => x + " km", value: Math.min(42, Math.floor(m / 1000)) }, { vals: rng(100, 10), fmt: x => String(x).padStart(3, "0") + " m", value: m % 1000 }]).then(r => (r ? r[0] * 1000 + r[1] : null));
+  return pickWheels(title, [{ name: "Kilomètres", vals: rng(43), fmt: x => x + " km", value: Math.min(42, Math.floor(m / 1000)) }, { name: "Mètres", vals: rng(100, 10), fmt: x => String(x).padStart(3, "0") + " m", value: m % 1000 }]).then(r => (r ? r[0] * 1000 + r[1] : null));
 }
 // roues d'un indicateur de cardio : [maximum, décimales (10 : dixièmes), valeur de départ]
 const CV_W = { vit: [30, 10, 10], incl: [40, 10, 1], res: [40, 0, 8], cad: [200, 0, 80], watts: [1000, 0, 150], spm: [250, 0, 120], etages: [500, 0, 50], marches: [3000, 0, 500],
@@ -3129,7 +3228,7 @@ function pickNumber(title, value, spec, unit) {
   const [max, dec, def] = spec, v = num(value) != null ? num(value) : def, u = unit ? " " + unit : "";
   if (!dec) return pickWheels(title, [{ vals: rng(max + 1), fmt: x => (unit === "niveau" ? "Niveau " + x : x + u), value: Math.min(max, Math.round(v)) }]).then(r => (r ? r[0] : null));
   const t = Math.round(v * dec);
-  return pickWheels(title, [{ vals: rng(max + 1), fmt: x => String(x), value: Math.min(max, Math.floor(t / dec)) }, { vals: rng(dec), fmt: x => "," + x + u, value: t % dec }]).then(r => (r ? Math.round((r[0] + r[1] / dec) * 10) / 10 : null));
+  return pickWheels(title, [{ name: "Unités", vals: rng(max + 1), fmt: x => String(x), value: Math.min(max, Math.floor(t / dec)) }, { name: "Dixièmes", vals: rng(dec), fmt: x => "," + x + u, value: t % dec }]).then(r => (r ? Math.round((r[0] + r[1] / dec) * 10) / 10 : null));
 }
 // une case de série : les kilos (entiers + quarts) ou les répétitions
 const KG_DEC = [0, 0.25, 0.5, 0.75];
@@ -3138,21 +3237,23 @@ function pickSet(title, kg, reps) {
   if (kg != null) { // poids négatif = assistance (machine à contrepoids, élastique) : −20 kg ; « −0 » permet −0,25 / −0,50 / −0,75 kg
     const q = Math.max(-100, Math.min(400, Math.round(kg * 4) / 4)), a = Math.abs(q), i = Math.floor(a), fr = a - i;
     const ints = rng(100).map(x => x - 100).concat(["m0"], rng(401));
-    cols.push({ vals: ints, fmt: x => (x === "m0" ? "−0" : x < 0 ? "−" + -x : String(x)), value: q < 0 ? (i ? -i : "m0") : i }, { vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: fr });
+    cols.push({ name: "Kilos", vals: ints, fmt: x => (x === "m0" ? "−0" : x < 0 ? "−" + -x : String(x)), value: q < 0 ? (i ? -i : "m0") : i }, { name: "Quarts de kilo", vals: KG_DEC, fmt: x => "," + String(Math.round(x * 100)).padStart(2, "0") + " kg", value: fr });
   }
-  if (reps != null) cols.push({ vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
+  if (reps != null) cols.push({ name: "Répétitions", vals: rng(101), fmt: x => (x ? x + " reps" : "—"), value: Math.min(100, Math.round(reps)) });
   return pickWheels(title, cols).then(r => r && { kg: kg != null ? (r[0] === "m0" ? -r[1] : r[0] < 0 ? r[0] - r[1] : r[0] + r[1]) : null, reps: reps != null ? r[r.length - 1] : null });
 }
 const fmtDist = (v, unit) => (unit === "km" ? fmtNum(v) + " km" : v >= 1000 ? fmtNum(v / 1000) + " km" : fmtNum(v) + " m");
 // fenêtre à une ou plusieurs roues à faire défiler ; renvoie les valeurs choisies (ou null)
+let wheelSeq = 0;
 function pickWheels(title, cols) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal sheet";
-    const tl = String(title).split(" · ");
+    const tl = String(title).split(" · "), uid = "wv" + (++wheelSeq); // chaque colonne a son nom (« Kilos », « Quarts de kilo »…) et annonce sa valeur
+    const ctxT = tl.length > 1 && cols.some(c => (c.name || c.label) === tl[0]) ? tl.slice(1).join(" · ") : title; // « Kilos · Développé couché » : pas « Kilos · Kilos · … »
     d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3 class="wheel-title">' + tl.map((x, k) => k ? '<span class="wt-' + (k === 1 ? "ex" : "sub") + '">' + esc(x) + "</span>" : "<span>" + esc(x) + "</span>").join("") + '</h3><div class="wheels' + (cols.length > 1 ? " multi" : "") + '" style="--n:' + cols.length + '">' +
       (cols.some(c => c.label) ? cols.map(c => '<div class="wheel-lab">' + esc(c.label || "") + "</div>").join("") : "") +
-      cols.map((c, n) => '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" data-col="' + n + '" tabindex="0" role="listbox" aria-label="' + esc(title) + '">' +
-        c.vals.map((x, k) => '<div class="wv" role="option" data-k="' + k + '">' + esc(c.fmt(x)) + "</div>").join("") + "</div></div>").join("") + "</div>" +
+      cols.map((c, n) => '<div class="wheel-wrap"><div class="wheel-band" aria-hidden="true"></div><div class="wheel" data-col="' + n + '" tabindex="0" role="listbox" aria-label="' + esc(cols.length > 1 ? (c.name || c.label || "Colonne " + (n + 1)) + " · " + ctxT : title) + '">' +
+        c.vals.map((x, k) => '<div class="wv" role="option" id="' + uid + "-" + n + "-" + k + '" aria-selected="false" data-k="' + k + '">' + esc(c.fmt(x)) + "</div>").join("") + "</div></div>").join("") + "</div>" +
       '<div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">OK</button></div></div>';
     document.body.appendChild(d);
     const H = 44, wheels = [...d.querySelectorAll(".wheel")];
@@ -3163,7 +3264,7 @@ function pickWheels(title, cols) {
       if (shown[n] === idx[n]) return;
       const old = items[n][shown[n]], cur = items[n][idx[n]];
       if (old) { old.classList.remove("on"); old.setAttribute("aria-selected", "false"); }
-      if (cur) { cur.classList.add("on"); cur.setAttribute("aria-selected", "true"); }
+      if (cur) { cur.classList.add("on"); cur.setAttribute("aria-selected", "true"); w.setAttribute("aria-activedescendant", cur.id); }
       shown[n] = idx[n];
     };
     const settle = n => { const w = wheels[n], t = idx[n] * H; if (Math.abs(w.scrollTop - t) > 1) w.scrollTo({ top: t, behavior: "smooth" }); };
@@ -3245,7 +3346,13 @@ function renameEx(e, name) {
 const ownReg = () => { const l = settings().ownEx; return Array.isArray(l) ? l.filter(x => x && typeof x.n === "string" && x.n.trim()) : []; };
 const ownGone = () => { const l = settings().ownGone; return Array.isArray(l) ? l.filter(x => typeof x === "string") : []; };
 const ownEntry = name => ownReg().find(x => norm(x.n) === norm(name)) || null;
+// exercices perso : relus seulement quand les données changent (la recherche d'exercices l'appelle à chaque lettre)
+let onCache = { rev: -1, list: [] };
 function ownNames() {
+  if (onCache.rev !== dataRev) onCache = { rev: dataRev, list: ownNamesNow() };
+  return onCache.list.slice();
+}
+function ownNamesNow() {
   const seen = new Map(), live = new Set();
   const add = (e, inUse) => { if (!e.name || exLib(e)) return; const k = norm(e.name); if (!seen.has(k)) seen.set(k, e.name.trim()); if (inUse) live.add(k); };
   all("template").forEach(t => t.variants.forEach(v => v.exercises.forEach(e => add(e, true))));
@@ -3519,7 +3626,7 @@ function viewFaq(open) {
     FAQ_.map(([cat, qs]) => '<section class="faq-cat"><div class="section-title">' + esc(cat) + '</div><div class="faq-box">' +
       qs.map(([id, q, a]) => '<details class="faq-q" id="faq-' + id + '"' + (id === open ? " open" : "") + "><summary>" + esc(nbsp(q)) + '</summary><div class="faq-a">' + nbsp(a) + "</div></details>").join("") + "</div></section>").join("") +
     '<p class="muted faq-none" hidden>Aucune question ne correspond. Essaie un autre mot.</p>' +
-    '<div class="card faq-more"><b>Tu n\'as pas trouvé ta réponse ?</b><div class="small muted" style="margin-top:4px">Écris-nous à <a class="link" href="mailto:contact@fiitday.com">contact@fiitday.com</a> : nous te répondons rapidement.</div></div>';
+    '<div class="card faq-more"><h2 class="card-h">Tu n\'as pas trouvé ta réponse ?</h2><div class="small muted" style="margin-top:4px">Écris-nous à <a class="link" href="mailto:contact@fiitday.com">contact@fiitday.com</a> : nous te répondons rapidement.</div></div>';
 }
 // recherche sans tenir compte des accents, des majuscules, des apostrophes (« jai » = « j'ai ») ni des petites fautes ; une seule réponse : elle s'ouvre
 const FAQ_STOP = new Set("je tu il on le la les de des du un une mon ma mes ton ta tes et ou a au aux en est que qui quoi comment pour par sur dans avec ce ca se sa son ses ne pas plus faire fait".split(" "));
@@ -3788,8 +3895,8 @@ function viewPremium() {
   return '<a class="back" href="' + esc(prev) + '">‹ Retour</a><div class="page-head"><h1>Fiitday Premium</h1></div>' +
     '<div class="card"><div class="small">' + esc(planStatus()) + "</div>" +
     (s !== "premium" && !Native && billingMode() === "test" && ((!planTesting() && db.plan) || {}).source === "subscription" ? '<button class="btn sm" style="margin-top:8px" data-act="planmanage">Gérer mon abonnement (test)</button>' : "") + "</div>" + contractsCard() +
-    (billingMode() === "test" ? (Native ? '<div class="card plan-testapp"><b>Appli de test</b><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>'
-      : '<div class="card plan-testapp"><b>Paiement de test</b><div class="small muted">Visible seulement par toi. Carte de test Stripe : 4242 4242 4242 4242, une date future, n\'importe quel code : aucun paiement réel. Seul le compte administrateur reçoit Premium.</div></div>') : "") +
+    (billingMode() === "test" ? (Native ? '<div class="card plan-testapp"><h2 class="card-h">Appli de test</h2><div class="small muted">Achats factices du magasin de test RevenueCat : aucun paiement. Seul le compte administrateur reçoit Premium.</div></div>'
+      : '<div class="card plan-testapp"><h2 class="card-h">Paiement de test</h2><div class="small muted">Visible seulement par toi. Carte de test Stripe : 4242 4242 4242 4242, une date future, n\'importe quel code : aucun paiement réel. Seul le compte administrateur reçoit Premium.</div></div>') : "") +
     '<div class="seg plan-for" role="group" aria-label="Formule">' + [["solo", "Solo"], ["family", "Famille"]].map(([k, l]) => '<button class="' + (premiumFor === k ? "on" : "") + '" aria-pressed="' + (premiumFor === k) + '" data-act="planfor" data-val="' + k + '">' + l + "</button>").join("") + "</div>" +
     '<p class="small muted plan-for-txt">' + (premiumFor === "family" ? "Pour " + FAMILY_SIZE + " personnes : toi + 4 proches. Chacun a son propre compte, ses programmes et son historique ; personne ne voit les données des autres." : "Pour toi seul, sur tous tes appareils.") + "</p>" +
     '<div class="plans" role="radiogroup" aria-label="Durée">' +
@@ -3923,9 +4030,9 @@ function contractsCard() {
   if (!contracts) return "";
   const items = ctrItems(), reqs = ((contracts && contracts.requests) || []).slice(0, 3);
   // rien en cours : la carte reste visible dès que la vente est possible (accès permanent à la résiliation)
-  if (!items.length && !reqs.length) return MONETIZATION || billingMode() ? '<div class="card ctr-card"><b>Tes achats Premium</b><div class="small muted" style="margin-top:4px">Aucun abonnement ni achat en cours. Les boutons « Résilier mon abonnement » et « Renoncer au contrat ici » apparaissent ici dès que tu as un abonnement, ou un achat de moins de 14 jours.</div>' +
+  if (!items.length && !reqs.length) return MONETIZATION || billingMode() ? '<div class="card ctr-card"><h2 class="card-h">Tes achats Premium</h2><div class="small muted" style="margin-top:4px">Aucun abonnement ni achat en cours. Les boutons « Résilier mon abonnement » et « Renoncer au contrat ici » apparaissent ici dès que tu as un abonnement, ou un achat de moins de 14 jours.</div>' +
     '<a class="btn sm" style="margin-top:10px" href="#/resilier">Résilier un abonnement</a></div>' : "";
-  return '<div class="card ctr-card"><b>Tes achats Premium</b>' +
+  return '<div class="card ctr-card"><h2 class="card-h">Tes achats Premium</h2>' +
     items.map(i => '<div class="ctr-item"><div class="ctr-txt"><b>' + esc(i.label) + '</b><div class="small muted">' + esc(STORE_TXT[i.store] || "") +
       (i.type === "sub" ? " · " + (i.renews ? "se renouvelle le " : "résilié, Premium jusqu'au ") + esc(ctrDate(Date.parse(i.until))) : i.at ? " · acheté le " + esc(ctrDate(Date.parse(i.at))) : "") + "</div>" +
       (canRetract(i) ? '<div class="small muted">Rétractation possible jusqu\'au ' + esc(ctrLastDay(i.retract)) + " inclus</div>" : "") + '</div><div class="ctr-btns">' +
@@ -3946,7 +4053,7 @@ function viewContract(kind) {
   if (!ctr || ctr.kind !== kind) ctr = { kind, step: "form", name: firstName(), email: (db.auth && db.auth.user.email) || "", key: "", wish: "fin", err: "", busy: false, res: null };
   if (ctr.step === "done" && ctr.res) {
     const d = ctr.res;
-    return head + '<div class="card ctr-done"><b>' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</b><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
+    return head + '<div class="card ctr-done"><h2 class="card-h">' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</h2><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
       (res ? "<p>Ton abonnement " + esc(d.label) + " prend fin le <b>" + esc(ctrWhen(d.end_at)) + "</b>. Plus rien ne sera prélevé ; ensuite, ton compte passe en version gratuite, plus limitée, et tu gardes toutes tes données.</p>" +
           (+d.refund > 0 ? "<p>La part non utilisée, <b>" + esc(ctrEur(d.refund)) + "</b>, te sera remboursée avec ton moyen de paiement au plus tard 14 jours après aujourd'hui.</p>" : "")
         : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, plus limitée ; tes données sont gardées. Tu es remboursé intégralement, avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
@@ -3967,7 +4074,7 @@ function viewContract(kind) {
     const rows = [["Nom", ctr.name], ["E-mail", ctr.email], ["Contrat", it.label + " · " + (STORE_TXT[it.store] || it.store)]];
     if (res) rows.push(["Date de fin", ctr.wish === "fin" ? "le " + ctrDate(Date.parse(it.until)) + ", à la fin de la période déjà payée" : "dès maintenant, avec le remboursement de la part non utilisée"]);
     else rows.push(["Déclaration", "Je me rétracte de mon contrat " + it.label + "."], ["Remboursement", "intégral"]);
-    return head + '<div class="card ctr-recap"><b>Vérifie ta demande</b><dl class="ctr-dl">' + rows.map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>").join("") + "</dl>" +
+    return head + '<div class="card ctr-recap"><h2 class="card-h">Vérifie ta demande</h2><dl class="ctr-dl">' + rows.map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>").join("") + "</dl>" +
       '<div class="row duo"><button class="btn" data-act="ctredit"' + (ctr.busy ? " disabled" : "") + '>Modifier</button><button class="btn primary" data-act="ctrsend"' + (ctr.busy ? " disabled" : "") + ">" +
       (ctr.busy ? "Envoi…" : res ? "Notifier la résiliation" : "Confirmer la rétractation") + "</button></div>" + msg + "</div>";
   }
@@ -4069,14 +4176,14 @@ function planSettings() {
   let h = "";
   const s = planState();
   const fsh = famShow(); if (fsh && !famSrv) setTimeout(loadFam, 0);
-  if (fsh && famSrv && !famSrv.err) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (famSrv.role === "member" ? srvMemberBox() : srvFamilyBox()) +
+  if (fsh && famSrv && !famSrv.err) h += '<div class="card"><h2 class="card-h">Abonnement</h2><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (famSrv.role === "member" ? srvMemberBox() : srvFamilyBox()) +
     (famSrv.role === "member" ? "" : '<a class="btn sm" style="margin-top:8px" href="#/premium">Voir Premium</a>') + "</div>";
-  else if (fsh) h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(famSrv && famSrv.err ? "Ta famille n'a pas pu être chargée : " + famSrv.err : "Chargement de ta famille…") + "</div></div>";
-  else if (s !== "off") h += '<div class="card"><b>Abonnement</b><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
+  else if (fsh) h += '<div class="card"><h2 class="card-h">Abonnement</h2><div class="small muted" style="margin-top:4px">' + esc(famSrv && famSrv.err ? "Ta famille n'a pas pu être chargée : " + famSrv.err : "Chargement de ta famille…") + "</div></div>";
+  else if (s !== "off") h += '<div class="card"><h2 class="card-h">Abonnement</h2><div class="small muted" style="margin-top:4px">' + esc(planStatus()) + "</div>" + (isFamily() || isMember() ? (isFamily() ? familyBox() : memberBox()) + '<a class="btn sm' + (s === "premium" ? "" : " primary") + '" style="margin-top:8px" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + "</a>"
     : '<div class="row duo"><a class="btn sm' + (s === "premium" ? "" : " primary") + '" href="#/premium">' + (s === "premium" ? "Voir Premium" : "Passer à Premium") + '</a><button class="btn sm" data-act="famjoin">J\'ai une invitation Famille</button></div>') + "</div>";
   if (s === "free") { const fa = freeActive(), t = getItem(fa.t);
     if (t) { const more = templates().length > 1 || t.variants.length > FREE_VARIANTS;
-      h += '<div class="card"><b>Séances actives</b><div class="small muted" style="margin-top:4px">Programme « ' + esc(t.name) + " »" + (fa.v.length ? " : " + fa.v.map(id => { const v = t.variants.find(x => x.id === id); return v ? esc(vLabel(v.name)) : ""; }).filter(Boolean).join(", ") : "") + "." +
+      h += '<div class="card"><h2 class="card-h">Séances actives</h2><div class="small muted" style="margin-top:4px">Programme « ' + esc(t.name) + " »" + (fa.v.length ? " : " + fa.v.map(id => { const v = t.variants.find(x => x.id === id); return v ? esc(vLabel(v.name)) : ""; }).filter(Boolean).join(", ") : "") + "." +
         (more ? "<br>" + esc(freeSwitchTxt()) : "") + "</div>" + (more && freeCanSwitch() ? '<button class="btn sm" style="margin-top:8px" data-act="freepick">Changer mes séances actives</button>' : "") + "</div>"; } }
   h += contractsCard();
   if (isAdmin()) h += '<div class="card"><div class="spread"><b>Administration</b><span class="tag adm-tag">Visible seulement par toi</span></div><div class="small muted" style="margin-top:4px">Inscrits, utilisateurs actifs, séances, résumé de la semaine.</div><a class="btn sm primary" style="margin-top:8px" href="#/admin">Ouvrir le tableau de bord</a></div>';
@@ -4464,7 +4571,7 @@ function viewAdminSubs() {
       ((x.flags || []).length ? '<ul class="small adm-flags">' + x.flags.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul>" : "") + (x.note ? '<div class="small muted">Note : ' + esc(x.note) + "</div>" : "") +
       '<button class="btn sm' + (x.blocked ? "" : " danger") + '" style="margin-top:8px" data-act="famblock" data-id="' + esc(x.id) + '" data-v="' + (x.blocked ? "0" : "1") + '">' + (x.blocked ? "Débloquer les invitations" : "Bloquer les invitations") + "</button></div>").join("")
       : '<div class="card empty">Aucune famille à surveiller.</div>') +
-    '<div class="card adm-legal"><b>Règles de surveillance</b><ul class="small muted"><li>Plus de 3 départs (retraits ou départs volontaires) en 60 jours</li><li>Plus de 8 personnes différentes en 6 mois</li><li>3 invitations ou plus jamais acceptées en 6 mois</li><li>Un membre qui a rejoint 3 familles ou plus en 6 mois</li></ul>' +
+    '<div class="card adm-legal"><h2 class="card-h">Règles de surveillance</h2><ul class="small muted"><li>Plus de 3 départs (retraits ou départs volontaires) en 60 jours</li><li>Plus de 8 personnes différentes en 6 mois</li><li>3 invitations ou plus jamais acceptées en 6 mois</li><li>Un membre qui a rejoint 3 familles ou plus en 6 mois</li></ul>' +
     '<div class="small muted" style="margin-top:6px">Calculées à chaque ouverture de cette page. Bloquer les invitations n\'enlève personne : les membres gardent Premium, mais plus personne ne peut rejoindre. Journal effacé après 12 mois.</div></div></div></div>';
 }
 
@@ -4564,7 +4671,7 @@ function viewLedger() {
   const act = r => '<span class="adm-racts"><button class="link" data-act="ledgeredit" data-id="' + r.id + '">Modifier</button><button class="link del" data-act="ledgerdel" data-id="' + r.id + '">Supprimer</button></span>';
   const edited = r => +r.edits ? ' <span class="tag" title="Modifiée ' + r.edits + ' fois, l\'historique est gardé dans le journal">modifiée</span>' : "";
   let reg;
-  if (!rows.length) reg = '<div class="card adm-empty"><b>Aucune recette en ' + y + '</b><p class="muted small">Note ici chaque somme encaissée : un versement de Google Play ou de l\'App Store (ils te paient chaque mois, commission déduite), ou toute autre vente. Garde la pièce justificative (relevé de paiement, facture) et sa référence.</p><button class="btn primary sm" data-act="ledgernew">+ Ajouter la première recette</button></div>';
+  if (!rows.length) reg = '<div class="card adm-empty"><h2 class="card-h">Aucune recette en ' + y + '</h2><p class="muted small">Note ici chaque somme encaissée : un versement de Google Play ou de l\'App Store (ils te paient chaque mois, commission déduite), ou toute autre vente. Garde la pièce justificative (relevé de paiement, facture) et sa référence.</p><button class="btn primary sm" data-act="ledgernew">+ Ajouter la première recette</button></div>';
   else {
     reg = '<div class="card adm-reg"><table class="adm-table"><thead><tr><th>N°</th><th>Date</th><th>Client / payeur</th><th>Nature</th><th>Mode</th><th>Pièce</th><th class="r">Brut</th><th class="r">Commission</th><th class="r">Encaissé</th><th><span class="sr">Actions</span></th></tr></thead><tbody>' +
       rows.map(r => '<tr><td class="num nowrap">' + r.num + '</td><td class="num nowrap">' + dayFr(r.paid_on) + "</td><td>" + esc(r.payer) + "</td><td>" + esc(r.nature) + edited(r) + (r.note ? '<div class="muted small">' + esc(r.note) + "</div>" : "") + "</td><td>" + esc(r.method) + '</td><td class="small nowrap">' + esc(r.ref || "—") +
@@ -4586,7 +4693,7 @@ function viewLedger() {
   for (let qq = 0; qq < 4; qq++) { for (let k = qq * 3; k < qq * 3 + 3; k++) mt += mrow(MOIS[k].charAt(0).toUpperCase() + MOIS[k].slice(1), months[k]); mt += mrow("T" + (qq + 1) + " · " + MOIS_C[qq * 3] + " – " + MOIS_C[qq * 3 + 2], sumRows(months.slice(qq * 3, qq * 3 + 3)), "q"); }
   mt += "</tbody><tfoot>" + mrow("Année " + y, tot) + "</tfoot></table>";
   const side = '<div class="adm-syn-a"><div class="card"><div class="muted small" style="font-weight:600;margin-bottom:8px">Encaissé par mois</div>' + svg + "</div>" +
-    '<div class="card adm-legal"><b>À savoir</b><ul class="small muted"><li>Chaque recette est notée à la date où l\'argent arrive sur ton compte, dans l\'ordre des dates.</li>' +
+    '<div class="card adm-legal"><h2 class="card-h">À savoir</h2><ul class="small muted"><li>Chaque recette est notée à la date où l\'argent arrive sur ton compte, dans l\'ordre des dates.</li>' +
     "<li>Garde les pièces justificatives (relevés de paiement Google / Apple, factures) : registre et pièces se conservent 10 ans.</li>" +
     "<li>Pour Google Play et l'App Store, le registre garde le brut, la commission et le net encaissé : vérifie avec ton comptable ou l'URSSAF lequel déclarer.</li>" +
     "<li>TVA : " + (info.vat === "franchise" ? "franchise en base, la mention « TVA non applicable, art. 293 B du CGI » figure sur le PDF." : "régime pas encore choisi (Infos du registre).") + "</li>" +
@@ -4800,26 +4907,26 @@ function viewSettings() {
   const fr = dataLocked(), lk = fr ? " locked-btn" : "", li = fr ? LOCK : "";
   const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Restaurer et le code de transfert sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
   return '<div class="page-head"><h1>Réglages</h1></div><div class="stack set-stack">' + planSettings() +
-    '<div class="card"><b>Apparence</b><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
+    '<div class="card"><h2 class="card-h">Apparence</h2><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
     '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
       return '<button class="swatch' + (on ? " on" : "") + '" aria-pressed="' + on + '" data-act="set" data-k="accent" data-val="' + k + '"><i style="background:linear-gradient(135deg,' + c + ')"></i>' + l + "</button>"; }).join("") + "</div></div>" +
-    '<div class="card"><b>Alerte de fin de repos</b><div class="alert-row">' + alertSeg(sv("alert")) + '<button class="btn sm" data-act="testalert">Tester</button></div>' + notifCard() + "</div>" +
-    '<div class="card"><b>Étirements après la séance</b><div class="small muted" style="margin-top:4px">À la fin d\'une séance, l\'accueil propose pendant 15 minutes des étirements adaptés aux muscles travaillés.</div><div style="margin-top:10px">' + seg("stretchTips", [["oui", "Activés"], ["non", "Désactivés"]]) + "</div></div>" +
-    '<div class="card"><b>Objectif de séances par semaine</b><div style="margin-top:10px">' + seg("goal", [["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"]]) + "</div></div>" +
-    '<div class="card"><b>Données</b><div class="small muted" style="margin-top:4px">Tes programmes, séances et réglages.</div>' +
+    '<div class="card"><h2 class="card-h">Alerte de fin de repos</h2><div class="alert-row">' + alertSeg(sv("alert")) + '<button class="btn sm" data-act="testalert">Tester</button></div>' + notifCard() + "</div>" +
+    '<div class="card"><h2 class="card-h">Étirements après la séance</h2><div class="small muted" style="margin-top:4px">À la fin d\'une séance, l\'accueil propose pendant 15 minutes des étirements adaptés aux muscles travaillés.</div><div style="margin-top:10px">' + seg("stretchTips", [["oui", "Activés"], ["non", "Désactivés"]]) + "</div></div>" +
+    '<div class="card"><h2 class="card-h">Objectif de séances par semaine</h2><div style="margin-top:10px">' + seg("goal", [["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"], ["6", "6"], ["7", "7"]]) + "</div></div>" +
+    '<div class="card"><h2 class="card-h">Données</h2><div class="small muted" style="margin-top:4px">Tes programmes, séances et réglages.</div>' +
     '<div class="data-sec"><div class="data-t">Sauvegarde</div><div class="small muted">Un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…).</div>' +
     '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-act="filesave">Sauvegarde</button><button class="btn sm' + lk + '" data-act="fileopen">' + li + 'Restaurer</button></div></div>' +
     '<div class="data-sec"><div class="data-t">Transfert vers un autre compte</div><div class="small muted">Un code de 8 caractères, valable 1 heure, à taper dans l\'autre compte.</div>' +
     '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm' + lk + '" data-act="xfercreate">' + li + 'Créer un code</button><button class="btn sm' + lk + '" data-act="xferuse">' + li + 'J\'ai un code</button></div></div>' + frNote +
     '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px 14px"><a class="link small" style="padding:0;display:inline-flex;align-items:center" href="#/faq/sauvegarde">Comment ça marche ?</a></div></div>' +
-    '<div class="card"><b>Compte</b><div style="margin-top:8px">' +
+    '<div class="card"><h2 class="card-h">Compte</h2><div style="margin-top:8px">' +
     (db.auth ? '<label class="fl" style="margin-bottom:8px">Prénom<input class="f" data-setname maxlength="40" autocomplete="given-name" value="' + esc(firstName()) + '" placeholder="Ton prénom"></label>' +
       '<div class="small">Connecté : ' + esc(db.auth.user.email) + "</div><div class=\"sync-row\">" + syncBadge() + '<button class="link small" data-act="syncnow">Synchroniser maintenant</button></div><div class="small msg err" data-sync-error>' + esc(syncMsg()) + "</div>" +
       '<button class="btn sm pw-btn" data-act="pwchange">Changer mon mot de passe</button><div class="row duo"><button class="btn sm" data-act="logout">Se déconnecter</button><button class="btn sm danger" data-act="delaccount">Supprimer mon compte</button></div>'
       : '<div class="small muted">Sans compte : tes données restent sur cet appareil.</div><button class="btn sm primary" style="margin-top:8px" data-act="tologin">Se connecter / créer un compte</button>') +
     "</div></div>" +
-    '<div class="card"><b>Aide</b><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
-    '<div class="card"><b>Informations légales</b><div class="row duo">' +
+    '<div class="card"><h2 class="card-h">Aide</h2><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
+    '<div class="card"><h2 class="card-h">Informations légales</h2><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
     '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div>' +
     (LEGAL.cgv ? '<div class="row duo"><a class="btn sm" href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a></div>' : "") +
@@ -4891,7 +4998,9 @@ function tick() {
     if (cpill) cpill.hidden = true;
   }
 }
-setInterval(tick, 250);
+// 4 fois par seconde seulement pendant une séance, un repos ou un chrono (batterie) ; chaque affichage appelle aussi tick()
+const tickNeeded = () => { const L = db.live || {}; return !!(L.restEnd || L.chrono || activeWorkout() || document.querySelector("[data-tick]")); };
+setInterval(() => { if (tickNeeded()) tick(); }, 250);
 // en plus : un rafraîchissement pile au changement de seconde (repos qui descend, chrono qui monte), sans attendre le prochain quart de seconde
 let edgeTimer = null;
 function armEdge() {
@@ -4902,7 +5011,7 @@ function armEdge() {
   if (L.chrono) { const ms = now - L.chrono.start, w2 = ms < 0 ? (-ms) % 1000 || 1000 : 1000 - (ms % 1000); wait = wait == null ? w2 : Math.min(wait, w2); }
   if (wait != null) edgeTimer = setTimeout(() => { tick(); armEdge(); }, wait + 2);
 }
-setInterval(() => { if (!edgeTimer) armEdge(); }, 1000);
+setInterval(() => { const L = db.live || {}; if (!edgeTimer && (L.restEnd || L.chrono)) armEdge(); }, 1000);
 // fin du repos : l'appli clignote (sombre / clair, 1 fois par seconde) pendant 5 s avec un message au centre
 function restDone() {
   document.querySelectorAll(".restpop.done").forEach(x => x.remove());
@@ -4949,6 +5058,7 @@ $app.addEventListener("click", async e => {
     case "stretchgo": { const ids = String(b.dataset.seq || "").split(",").filter(x => /^[a-z0-9-]{1,60}$/.test(x)); if (ids.length) { exoReturn = location.hash || "#/home"; stretchSeq = ids; go("exercices/" + ids[0]); } break; }
     case "stretchtips": exoReturn = location.hash || "#/home"; stretchSeq = null; break;
     case "stretchok": try { localStorage.setItem("fiitday-stretch-ok", b.dataset.id); } catch (err) { } render(); break;
+    case "recapok": try { localStorage.setItem("fiitday-recap-ok", b.dataset.id); } catch (err) { } render(); break;
     case "evometric": evo.m[b.dataset.k] = b.dataset.v; render(); break;
     case "evoper": evo.per = b.dataset.v; render(); break;
     case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
@@ -4965,7 +5075,7 @@ $app.addEventListener("click", async e => {
     case "cvclock": if (w && w.exercises[i] && w.exercises[i].sets[s]) { // indicateur en temps (temps aux 500 m) : mêmes roues que la durée
       const e = w.exercises[i], set = e.sets[s], k = b.dataset.k, d = cvDef(k); if (!d) return;
       const lp = lastPerf(w, e), pv = lp && lp.e.sets[s] && lp.e.sets[s].cv ? num(lp.e.sets[s].cv[k]) : null, cur = set.cv ? num(set.cv[k]) : null, v0 = Math.round(cur != null ? cur : pv != null ? pv : 120);
-      const r = await pickWheels(d.n + " · " + e.name, [{ vals: Array.from({ length: 21 }, (_, x) => x), fmt: x => x + " min", value: Math.min(20, Math.floor(v0 / 60)) }, { vals: Array.from({ length: 60 }, (_, x) => x), fmt: x => pad(x) + " s", value: v0 % 60 }]);
+      const r = await pickWheels(d.n + " · " + e.name, [{ name: "Minutes", vals: Array.from({ length: 21 }, (_, x) => x), fmt: x => x + " min", value: Math.min(20, Math.floor(v0 / 60)) }, { name: "Secondes", vals: Array.from({ length: 60 }, (_, x) => x), fmt: x => pad(x) + " s", value: v0 % 60 }]);
       if (!r) return; const val = r[0] * 60 + r[1];
       set.cv = Object.assign({}, set.cv); if (val > 0) set.cv[k] = String(val); else delete set.cv[k];
       put("workout", w); render();
@@ -5244,7 +5354,10 @@ $app.addEventListener("click", async e => {
     case "restmax": db.live.restMin = false; save(); tick(); break;
     case "finish": if (w) {
       flushPending();
-      if (!await ask({ title: "Terminer la séance ?", text: "Elle sera enregistrée dans ton historique.", ok: "Terminer" })) return;
+      // exercices sans aucune série validée : on le signale (terminer trop tôt par erreur)
+      const empty = w.exercises.filter(e => !e.sets.some(st => st.done)).map(e => e.name);
+      const warn = empty.length ? (empty.length === 1 ? "« " + empty[0] + " » n'a aucune série validée. " : empty.length + " exercices n'ont aucune série validée : " + empty.slice(0, 3).join(", ") + (empty.length > 3 ? " et " + (empty.length - 3) + " autre" + (empty.length > 4 ? "s" : "") : "") + ". ") : "";
+      if (!await ask({ title: "Terminer la séance ?", text: warn + "Elle sera enregistrée dans ton historique.", ok: "Terminer" })) return;
       finishWorkout(getItem(w.id));
     } break;
     case "cancel": if (w) {

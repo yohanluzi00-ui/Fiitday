@@ -442,6 +442,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         visible = true;
+        if (web != null) { web.resumeTimers(); web.onResume(); }
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(RestTimerService.ALERT_ID); // de retour dans l'appli : l'alerte de fin n'est plus utile
     }
@@ -449,6 +450,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         visible = false;
+        // en arrière-plan, la page s'arrête (minuteurs, animations) : les alertes de repos et de chrono sont faites par Android
+        if (web != null) { web.onPause(); web.pauseTimers(); }
         super.onPause();
     }
 

@@ -112,7 +112,7 @@ label.fl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; col
 .sets .h { font-size: 12px; color: var(--muted); }
 .sets .n { font-weight: 700; text-align: center; }
 .set input, .grid input { width: 100%; min-height: 44px; border: 1px solid var(--in-line); border-radius: 10px; background: var(--in-bg); text-align: center; font-size: 17px; font-variant-numeric: tabular-nums; padding: 0 4px; }
-.set input::placeholder, .grid input::placeholder { color: var(--muted); opacity: .75; }
+.set input::placeholder, .grid input::placeholder { color: var(--muted); opacity: 1; }
 .done-row input { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); font-weight: 700; }
 .ok { width: 48px; height: 44px; border-radius: 10px; border: 1px solid var(--in-line); background: var(--card); font-size: 20px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .ok.on { background: var(--ok-ink); color: var(--card); border-color: transparent; }
@@ -352,6 +352,7 @@ div.fl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color
 .wheel .wv.on { color: var(--ink); font-size: 24px; font-weight: 700; }
 .wheel-band { position: absolute; z-index: 0; left: 0; right: 0; top: 88px; height: 44px; border-radius: 12px; background: var(--soft); border: 1px solid var(--line); pointer-events: none; }
 .wheel:focus-visible + .wheel-band, .wheel-wrap:focus-within .wheel-band { border-color: var(--accent); }
+.wheel-wrap:has(.wheel:focus-visible) .wheel-band { box-shadow: 0 0 0 2px var(--accent); } /* clavier : repère de 2 px au lieu de 1 */
 .rp-end2 { display: block; font-size: 22px; font-weight: 600; margin-top: 6px; }
 .next-rest { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
 .next-rest .small { color: var(--muted); }
@@ -633,7 +634,7 @@ html.is-dragging, html.is-dragging * { user-select: none; -webkit-user-select: n
 .pk-row.pk-lock .lock-i { width: 18px; height: 18px; color: var(--accent); }
 .stats.k1 { grid-template-columns: minmax(0, 1fr); }
 .tabs .lock-i { width: 12px; height: 12px; margin-right: 4px; }
-.btn[disabled] { opacity: .55; cursor: default; box-shadow: none; }
+.btn[disabled] { opacity: 1; cursor: default; box-shadow: none; background: var(--soft); color: var(--muted); border-color: var(--line); }
 /* Réglages : pastille de synchro + lien sur une ligne ; deux boutons côte à côte, même sur un petit téléphone */
 .sync-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
 .sync-row .link { padding: 0; }
@@ -697,12 +698,13 @@ html.is-dragging, html.is-dragging * { user-select: none; -webkit-user-select: n
 .alert-row .btn { flex: none; min-height: 40px; padding: 0 11px; white-space: nowrap; }
 
 /* ---------- Thèmes de couleur (Réglages › Couleur) : même direction, 3 teintes voisines en dégradé */
-[data-accent="bleu"] { --a1: #1E9BE8; --a2: #2A62E6; --a3: #4A2FD8; --a1-rgb: 30, 155, 232; --a2-rgb: 42, 98, 230; --deep-rgb: 40, 60, 170; --hero1: #0F1A33; --hero2: #0A1022; --accent: #1F5FD6; --chart: #2F6BEB; --on-grad: #FFFFFF; }
+/* début du dégradé assez foncé pour le texte blanc (crème pour Marron) : contraste 4,5:1 au moins sur tout le bouton */
+[data-accent="bleu"] { --a1: #1677C9; --a2: #2A62E6; --a3: #4A2FD8; --a1-rgb: 22, 119, 201; --a2-rgb: 42, 98, 230; --deep-rgb: 40, 60, 170; --hero1: #0F1A33; --hero2: #0A1022; --accent: #1F5FD6; --chart: #2F6BEB; --on-grad: #FFFFFF; }
 [data-accent="vert"] { --a1: #B8F03A; --a2: #2FD27A; --a3: #0FA89A; --a1-rgb: 184, 240, 58; --a2-rgb: 47, 210, 122; --deep-rgb: 20, 120, 90; --hero1: #0D2419; --hero2: #081710; --accent: #0E7F55; --chart: #1DA866; --on-grad: #04241A; }
 [data-accent="jaune"] { --a1: #FFE14D; --a2: #FFC21A; --a3: #FF9F0A; --a1-rgb: 255, 225, 77; --a2-rgb: 255, 194, 26; --deep-rgb: 150, 100, 10; --hero1: #2A2108; --hero2: #1A1405; --accent: #9A6500; --chart: #E0A100; --on-grad: #1F1600; }
-[data-accent="violet"] { --a1: #C93FE8; --a2: #8636E6; --a3: #5A2FD6; --a1-rgb: 201, 63, 232; --a2-rgb: 134, 54, 230; --deep-rgb: 110, 40, 190; --hero1: #1E1033; --hero2: #130A22; --accent: #7A2FD6; --chart: #8A3DF0; --on-grad: #FFFFFF; }
+[data-accent="violet"] { --a1: #A532C9; --a2: #8636E6; --a3: #5A2FD6; --a1-rgb: 165, 50, 201; --a2-rgb: 134, 54, 230; --deep-rgb: 110, 40, 190; --hero1: #1E1033; --hero2: #130A22; --accent: #7A2FD6; --chart: #8A3DF0; --on-grad: #FFFFFF; }
 [data-accent="orange"] { --a1: #FFB23D; --a2: #FF7A1A; --a3: #F2492C; --a1-rgb: 255, 178, 61; --a2-rgb: 255, 122, 26; --deep-rgb: 170, 60, 20; --hero1: #2B1508; --hero2: #1C0D05; --accent: #C2410C; --chart: #E8650F; --on-grad: #1A0A00; }
-[data-accent="marron"] { --a1: #B87A4B; --a2: #8E5530; --a3: #5E341C; --a1-rgb: 184, 122, 75; --a2-rgb: 142, 85, 48; --deep-rgb: 110, 63, 36; --hero1: #24170E; --hero2: #170E08; --accent: #8A4B22; --chart: #A0643A; --on-grad: #FFF8F1; }
+[data-accent="marron"] { --a1: #9A6238; --a2: #8E5530; --a3: #5E341C; --a1-rgb: 154, 98, 56; --a2-rgb: 142, 85, 48; --deep-rgb: 110, 63, 36; --hero1: #24170E; --hero2: #170E08; --accent: #8A4B22; --chart: #A0643A; --on-grad: #FFF8F1; }
 [data-theme="dark"][data-accent="bleu"] { --accent: #5C9BFF; --chart: #4D8DFF; }
 [data-theme="dark"][data-accent="vert"] { --accent: #3FE0A6; --chart: #2FD27A; }
 [data-theme="dark"][data-accent="jaune"] { --accent: #FFD34D; --chart: #FFC21A; }
@@ -740,7 +742,8 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .cv-in em { font-style: normal; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .done-row .cv-in { background: var(--ok-bg); border-color: transparent; }
 .done-row .cv-in input { color: var(--ok-ink); font-weight: 700; }
-.cv-del { border: 0; background: var(--soft); color: var(--muted); width: 20px; height: 20px; border-radius: 50%; font-size: 14px; line-height: 1; cursor: pointer; flex: none; }
+.cv-del { position: relative; border: 0; background: var(--soft); color: var(--muted); width: 28px; height: 28px; border-radius: 50%; font-size: 16px; line-height: 1; cursor: pointer; flex: none; }
+.cv-del::after { content: ""; position: absolute; inset: -8px; } /* zone à toucher de 44 px */
 .cv-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .cv-ok { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; color: var(--muted); }
 .cv-info span:last-child { line-height: 1.4; }
@@ -764,7 +767,7 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .set .npick, .grid .cell .npick { flex: 1 1 0; min-width: 0; min-height: 44px; justify-content: center; text-align: center; font-size: 17px; font-variant-numeric: tabular-nums; padding: 0 4px; }
 .grid .cell .npick { min-height: 38px; font-size: 15px; min-width: 52px; }
 .set .npick::after, .grid .cell .npick::after, .cv-grid .cv-pick::after { content: none; }
-.npick.empty { color: var(--muted); opacity: .8; }
+.npick.empty { color: var(--muted); }
 .done-row .npick { background: var(--ok-bg); border-color: transparent; color: var(--ok-ink); font-weight: 700; }
 .cv-grid .cv-pick { justify-content: center; text-align: center; }
 .wheel-title { display: flex; flex-direction: column; gap: 2px; }
@@ -782,7 +785,7 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .link-row { gap: 16px; flex-wrap: wrap; margin-top: 6px; }
 .link-row .link-next { margin: 0; }
 /* + Série / − Série plus petits */
-.ex-actions .btn.sm { min-height: 32px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+.ex-actions .btn.sm { min-height: 40px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
 /* pastilles « Voir · Repos · Suivant » sur une seule ligne */
 .ex-chips { flex-wrap: wrap; }
 .ex-chips .chip-mini { white-space: nowrap; flex: 0 1 auto; min-width: 0; }
@@ -1161,3 +1164,28 @@ button.plan-opt { font: inherit; color: inherit; text-align: left; cursor: point
 .adm-ctr-list li { padding: 10px 0; border-top: 1px solid var(--line2); display: flex; flex-direction: column; gap: 2px; }
 .adm-ctr-list li.todo { border-left: 3px solid var(--accent); padding-left: 10px; }
 .ok-txt { color: var(--ok-ink); }
+
+/* accessibilité (lot 6) */
+.card-h { font: inherit; font-weight: 700; margin: 0; } /* titres des cartes : vrais titres pour les lecteurs d'écran, même aspect qu'avant */
+.modal-box:focus { outline: none; } /* le focus est mis sur la fenêtre à son ouverture (son titre est lu) : pas de cadre autour */
+
+/* champs de saisie : contour assez visible pour repérer où taper (3:1) */
+:root { --field-line: #8E879C; }
+[data-theme="dark"] { --field-line: #6B6880; }
+input.f, select.f, textarea.f, .f.pick, .cv-in { border-color: var(--field-line); }
+input.f::placeholder, textarea.f::placeholder { color: var(--muted); opacity: 1; }
+/* séance : commandes touchées en plein effort (mains moites) à 40 px de haut au moins */
+.r-session .ex-chips .chip-mini, .card.ex .ex-chips .chip-mini { min-height: 40px; }
+.r-session .ex-links .link { min-height: 40px; }
+.r-session .btn.sm { min-height: 40px; }
+/* fiche exercice : flèches ‹ › de 44 px aussi sur téléphone */
+.exo-step { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+
+/* fin de séance : récapitulatif en haut de l'accueil */
+.recap-card { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.recap-row { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); }
+.recap-row b { font-family: var(--display); font-size: 20px; color: var(--ink); }
+.recap-rec { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.recap-rec li { display: flex; align-items: center; gap: 8px; }
+.recap-rec svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+.recap-go { align-self: flex-start; padding: 0; }

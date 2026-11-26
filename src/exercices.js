@@ -1777,19 +1777,20 @@ function initScene() {
 const ZMIN = 0.9, ZMAX = 9;
 function setupOrbit(el) {
   const pts = new Map(); let pinch = null, lastTap = 0;
-  const zoomTo = d => { G.orbit.dist = Math.min(ZMAX, Math.max(ZMIN, d)); G.orbit.goal = null; };
+  const zoomTo = d => { G.orbit.dist = Math.min(ZMAX, Math.max(ZMIN, d)); G.orbit.goal = null; G.dirty = true; };
   const spread = () => { const [a, b] = Array.from(pts.values()); return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
   el.addEventListener("pointerdown", e => {
     if (e.isPrimary) { pts.clear(); pinch = null; } // nouveau geste : on oublie les doigts d'un geste précédent
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); try { el.setPointerCapture(e.pointerId); } catch (_) { }
     if (pts.size === 2) pinch = { d: spread(), dist: G.orbit.dist };
     if (pts.size === 1) { const now = Date.now(); if (now - lastTap < 400 && view.home) { G.orbit.goal = Object.assign({}, view.home, { target: view.home.target.clone() }); } lastTap = now; }
+    G.dirty = true;
   });
   el.addEventListener("pointermove", e => {
     const p = pts.get(e.pointerId); if (!p) return;
     if (pts.size >= 2 && pinch) { p.x = e.clientX; p.y = e.clientY; zoomTo(pinch.dist * pinch.d / spread()); return; }
     const dx = e.clientX - p.x, dy = e.clientY - p.y; if (!dx && !dy) return;
-    const o = G.orbit; o.az -= dx * 0.008; o.pol = Math.min(1.45, Math.max(0.08, o.pol - dy * 0.006)); o.goal = null;
+    const o = G.orbit; o.az -= dx * 0.008; o.pol = Math.min(1.45, Math.max(0.08, o.pol - dy * 0.006)); o.goal = null; G.dirty = true;
     p.x = e.clientX; p.y = e.clientY;
   });
   const end = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
@@ -1798,7 +1799,11 @@ function setupOrbit(el) {
 }
 function placeCamera(dt) {
   const o = G.orbit;
-  if (o.goal) { const k = Math.min(1, dt * 4); o.az += (o.goal.az - o.az) * k; o.pol += (o.goal.pol - o.pol) * k; o.dist += (o.goal.dist - o.dist) * k; o.target.lerp(o.goal.target, k); }
+  if (o.goal) {
+    const k = Math.min(1, dt * 4); o.az += (o.goal.az - o.az) * k; o.pol += (o.goal.pol - o.pol) * k; o.dist += (o.goal.dist - o.dist) * k; o.target.lerp(o.goal.target, k);
+    // cadrage atteint : la caméra ne bouge plus (sinon la scène serait redessinée sans fin)
+    if (Math.abs(o.goal.az - o.az) < 1e-4 && Math.abs(o.goal.pol - o.pol) < 1e-4 && Math.abs(o.goal.dist - o.dist) < 1e-4 && o.target.distanceTo(o.goal.target) < 1e-4) { o.az = o.goal.az; o.pol = o.goal.pol; o.dist = o.goal.dist; o.target.copy(o.goal.target); o.goal = null; }
+  }
   const c = G.camera;
   c.position.set(o.target.x + o.dist * Math.cos(o.pol) * Math.cos(o.az), o.target.y + o.dist * Math.sin(o.pol), o.target.z + o.dist * Math.cos(o.pol) * Math.sin(o.az));
   c.lookAt(o.target);
@@ -1864,10 +1869,14 @@ function showExercise(ex) {
 function frame(force) {
   const now = performance.now(), dt = Math.min(0.05, (now - (view.last || now)) / 1000); view.last = now;
   if (!view.ex || !G || G.failed) return;
+  // en pause, mannequin et caméra immobiles : l'image ne change pas, on ne la redessine pas (batterie)
+  if (!force && !view.playing && !G.orbit.goal && !G.dirty && view.still) return;
+  G.dirty = false;
   if (view.playing) view.time += dt * view.speed;
   const { s, k } = sample(view.ex, view.time);
   const o = solve(view.ex, s); applyPose(G.H, o); view.update(o, s);
   const glow = k === "con" || k === "iso" ? 0.45 : k === "loop" ? 0.35 : 0.22; MAT.primary.emissiveIntensity += (glow - MAT.primary.emissiveIntensity) * (force ? 1 : 0.12);
+  view.still = Math.abs(glow - MAT.primary.emissiveIntensity) < 0.002; // le reflet des muscles a fini de changer
   const lab = k === "loop" ? (o.key._lab || (view.ex.ph || {}).loop || "") : k;
   if (lab !== view.phase && view.pill) {
     view.phase = lab; const ph = view.ex.ph || {};
@@ -1887,7 +1896,7 @@ function loop() {
 function resize() {
   if (!view.stage || !G || G.failed) return;
   const w = view.stage.clientWidth, h = view.stage.clientHeight; if (!w || !h) return;
-  G.renderer.setSize(w, h, false); G.camera.aspect = w / h; G.camera.updateProjectionMatrix();
+  G.renderer.setSize(w, h, false); G.camera.aspect = w / h; G.camera.updateProjectionMatrix(); G.dirty = true;
 }
 let ro = null;
 
@@ -1993,7 +2002,7 @@ function renderList(root) {
   }));
 }
 function stageHtml(stretch) {
-  return '<div class="exo-stage-col"><div class="exo-stage" id="exo-stage"><div class="exo-ctrl"><button class="btn sm" id="exo-slow" aria-pressed="' + (view.speed !== 1) + '">Ralenti</button><button class="btn sm" id="exo-play" aria-pressed="' + (!view.playing) + '">' + (view.playing ? "Pause" : "Lecture") + '</button></div>' +
+  return '<div class="exo-stage-col"><div class="exo-stage" id="exo-stage"><div class="exo-ctrl"><button class="btn sm" id="exo-slow" aria-pressed="' + (view.speed !== 1) + '">Ralenti</button><button class="btn sm" id="exo-play">' + (view.playing ? "Pause" : "Lecture") + '</button></div>' +
     '<div class="exo-phase"><span class="exo-pill" id="exo-pill"></span></div></div>' +
     '<div class="exo-legend"><span class="p">' + (stretch ? "Muscles étirés" : "Muscles principaux") + '</span><span class="s">' + (stretch ? "Aussi étirés" : "Muscles secondaires") + "</span><em>Glisse pour tourner, pince pour zoomer, double appui pour recentrer</em></div></div>";
 }
@@ -2006,7 +2015,7 @@ function detailHtml(ex) {
   const seq = seqForEx(ex), k = seq.indexOf(ex);
   return back +
     '<div class="exo-main">' + stageHtml(false) +
-    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, seq.length, "exercice") + '<div><h1 class="exo-title">' + esc(ex.n) + '</h1><div class="exo-tags"><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span><span>" + (ex.time ? "Temps" : ex.dist ? esc(ex.dist >= 1000 ? (ex.dist / 1000).toString().replace(".", ",") + " km" : ex.dist + " m") + (ex.load ? " · charge" : "") : esc(ex.reps) + " reps") + "</span></div></div>" +
+    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, seq.length, "exercice") + '<div><h2 class="exo-title">' + esc(ex.n) + '</h2><div class="exo-tags"><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span><span>" + (ex.time ? "Temps" : ex.dist ? esc(ex.dist >= 1000 ? (ex.dist / 1000).toString().replace(".", ",") + " km" : ex.dist + " m") + (ex.load ? " · charge" : "") : esc(ex.reps) + " reps") + "</span></div></div>" +
     '<div><h3>Muscles travaillés</h3><div class="exo-mus">' + ex.p.map(mm => chipM(mm, "p")).join("") + ex.s.map(mm => chipM(mm, "s")).join("") + "</div></div>" +
     '<div><h3>Bien l\'exécuter</h3><ul class="exo-tips">' + ex.tips.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
     '<div><h3>Erreurs fréquentes</h3><ul class="exo-tips bad">' + ex.err.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
@@ -2018,7 +2027,7 @@ function cardioDetailHtml(ex) {
   const k = CARDIO.indexOf(ex), info = api && api.cardioInfo ? api.cardioInfo(ex.id) : [];
   return back +
     '<div class="exo-main">' + stageHtml(false) +
-    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, CARDIO.length, "machine") + '<div><h1 class="exo-title">' + esc(ex.n) + '</h1><div class="exo-tags"><span>Cardio</span><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span></div></div>" +
+    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + swipeHint(k, CARDIO.length, "machine") + '<div><h2 class="exo-title">' + esc(ex.n) + '</h2><div class="exo-tags"><span>Cardio</span><span>' + esc(ex.gear) + "</span><span>" + esc(ex.lvl) + "</span></div></div>" +
     '<div><h3>Muscles travaillés</h3><div class="exo-mus">' + ex.p.map(mm => chipM(mm, "p")).join("") + ex.s.map(mm => chipM(mm, "s")).join("") + "</div></div>" +
     '<div><h3>Bien l\'utiliser</h3><ul class="exo-tips">' + ex.tips.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
     (info.length ? '<div><h3>Ce que tu peux noter</h3><div class="exo-vars">' + info.map(t => '<span class="exo-var">' + esc(t) + "</span>").join("") + '</div><p class="exo-p muted small">Avec la durée de ta séance. Il manque un indicateur ? Ajoute le tien pendant la séance : il sera gardé pour cette machine.</p></div>' : "") +
@@ -2049,7 +2058,7 @@ function stretchDetailHtml(ex) {
   const nav = swipeHint(k, seq.length, "étirement");
   return back +
     '<div class="exo-main">' + stageHtml(true) +
-    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + nav + '<div><h1 class="exo-title">' + esc(ex.n) + '</h1><div class="exo-tags"><span>' + esc(zoneName(ex.zone)) + "</span><span>" + esc(ex.gear) + "</span><span>" + esc(holdTxt(ex)) + "</span></div></div>" +
+    '<article class="card exo-fiche' + slideCls() + '" id="exo-fiche">' + nav + '<div><h2 class="exo-title">' + esc(ex.n) + '</h2><div class="exo-tags"><span>' + esc(zoneName(ex.zone)) + "</span><span>" + esc(ex.gear) + "</span><span>" + esc(holdTxt(ex)) + "</span></div></div>" +
     '<div><h3>Muscles étirés</h3><div class="exo-mus">' + ex.p.map(mm => chipM(mm, "p")).join("") + ex.s.map(mm => chipM(mm, "s")).join("") + "</div></div>" +
     '<div><h3>Bien le faire</h3><ul class="exo-tips">' + ex.tips.map(t => "<li>" + esc(t) + "</li>").join("") + "</ul></div>" +
     '<div><h3>Respiration</h3><p class="exo-p">' + esc(ex.br || BREATH) + "</p></div>" +
@@ -2140,7 +2149,7 @@ export function mount(root, id, appApi, arg) {
     else frame(true);
     if (!view.raf) view.raf = requestAnimationFrame(loop);
   }
-  root.querySelector("#exo-play").addEventListener("click", e => { view.playing = !view.playing; e.currentTarget.textContent = view.playing ? "Pause" : "Lecture"; e.currentTarget.setAttribute("aria-pressed", String(!view.playing)); });
+  root.querySelector("#exo-play").addEventListener("click", e => { view.playing = !view.playing; e.currentTarget.textContent = view.playing ? "Pause" : "Lecture"; }); // libellé seul « Pause » / « Lecture », sans état « enfoncé » en plus
   root.querySelector("#exo-slow").addEventListener("click", e => { view.speed = view.speed === 1 ? 0.4 : 1; e.currentTarget.setAttribute("aria-pressed", String(view.speed !== 1)); });
   root.querySelector("#exo-add").addEventListener("click", () => api && api.add(cd ? { name: ex.n, cardio: ex.id } : st ? { name: ex.n, time: true, hold: ex.hold, sets: 2, rest: ex.rest } : { name: ex.n, time: !!ex.time, dist: ex.dist || 0, load: !!ex.load, reps: ex.reps, rest: ex.rest, bw: atHome(ex) }));
   // fiche suivante ou précédente sans repasser par la liste : glisser le doigt (hors de l'image 3D), flèches du clavier

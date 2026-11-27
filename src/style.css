@@ -1200,8 +1200,13 @@ input.f::placeholder, textarea.f::placeholder { color: var(--muted); opacity: 1;
 .adm-rep-res { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .adm-rep-ex { margin: 8px 0 10px; padding-left: 18px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
 
-/* ===== Stats › Évolution : poids (facultatif) ===== */
+/* ===== Stats › Évolution : indicateurs perso (facultatifs) ===== */
 .evo-weight { margin: 0 0 12px; }
+.evo-ind-t { margin-top: 14px; }
+.list > .evo-add { width: 100%; background: none; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.list > .evo-add b { color: var(--accent); }
+.list > .evo-add:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.m-foot { margin-top: 16px; }
 .w-ask h3 { margin: 0 0 6px; }
 .w-ask p { margin: 0 0 12px; }
 .w-btns { display: flex; flex-wrap: wrap; gap: 8px; }

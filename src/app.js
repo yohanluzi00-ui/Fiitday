@@ -73,6 +73,9 @@ let db = load();
 if (db.auth && !db.owner) db.owner = db.auth.user.id;
 let saveTimer = null, frozen = false, storageFull = false;
 function save() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 300); }
+// ancien mode « sans compte » (retiré en V1.147) : l'écran de connexion s'affiche ; les données de l'appareil sont gardées
+// et partent dans le compte à la connexion
+if (db.mode === "local") { db.mode = null; save(); }
 function saveNow() {
   clearTimeout(saveTimer); saveTimer = null;
   if (frozen) return; // page en train de se recharger : rien n'est réécrit
@@ -160,7 +163,7 @@ document.addEventListener("visibilitychange", () => {
 // identifiants : lettres, chiffres, « _ » et « - » seulement (ils sont insérés dans les attributs HTML)
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const okId = x => typeof x === "string" && ID_RE.test(x);
-const KINDS = { template: 1, workout: 1, settings: 1, weight: 1 }, NOTE_MAX = 1000; // genres d'éléments connus (une sauvegarde n'en apporte pas d'autres)
+const KINDS = { template: 1, workout: 1, settings: 1, weight: 1, measure: 1 }, NOTE_MAX = 1000; // genres d'éléments connus (une sauvegarde n'en apporte pas d'autres ; « weight » : anciennes pesées, converties)
 function validItem(it) {
   if (!it || !okId(it.id) || typeof it.kind !== "string" || !it.data || typeof it.data !== "object") return false;
   if (it.deleted) return true;
@@ -169,6 +172,7 @@ function validItem(it) {
   if (it.kind === "template") return Array.isArray(d.variants) && d.variants.every(v => v && okId(v.id) && Array.isArray(v.exercises) && v.exercises.every(e => e && okId(e.id) && (!e.groupId || okId(e.groupId))));
   if (it.kind === "workout") return okId(d.templateId) && okId(d.variantId) && typeof d.startedAt === "number" && Array.isArray(d.exercises) && d.exercises.every(e => e && okId(e.exId) && (!e.groupId || okId(e.groupId)) && Array.isArray(e.sets));
   if (it.kind === "weight") return /^\d{4}-\d{2}-\d{2}$/.test(d.date || "") && it.id === "poids-" + d.date && typeof d.kg === "number" && d.kg >= 20 && d.kg <= 400;
+  if (it.kind === "measure") return /^m[a-z0-9]{2,16}$/.test(d.k || "") && /^\d{4}-\d{2}-\d{2}$/.test(d.date || "") && it.id === "v-" + d.k + "-" + d.date && typeof d.v === "number" && isFinite(d.v) && Math.abs(d.v) < 1e6;
   return true;
 }
 // anciens noms « Variante N » → « Séance N » (affichage, et renommage enregistré quand les données sont à jour)
@@ -219,17 +223,17 @@ const CARDIO_M = {
   res: { n: "Résistance", s: "Résistance", u: "niveau" }, cad: { n: "Cadence", s: "Cadence", u: "tr/min", int: true }, watts: { n: "Puissance moyenne", s: "Watts", u: "W", int: true },
   spm: { n: "Foulées", s: "Foulées", u: "/min", int: true }, etages: { n: "Étages montés", s: "Étages", u: "étages", add: true, int: true }, marches: { n: "Marches", s: "Marches", u: "marches", add: true, int: true },
   niv: { n: "Vitesse", s: "Niveau", u: "niveau" }, t500: { n: "Temps aux 500 m", s: "Temps / 500 m", u: "/500 m", clock: true, low: true }, cpm: { n: "Coups de rame", s: "Coups", u: "/min", int: true },
-  cal: { n: "Calories", s: "Calories", u: "kcal", add: true, int: true }, fc: { n: "Fréquence cardiaque moyenne", s: "FC moy.", u: "bpm", int: true }
+  cal: { n: "Calories", s: "Calories", u: "kcal", add: true, int: true }
 };
-// indicateurs de départ de chaque machine ; une activité perso : distance, calories, fréquence cardiaque.
-// La fréquence cardiaque peut renseigner sur la santé : elle n'apparaît qu'après un accord exprès (Ajouter un indicateur), retirable à tout moment
+// indicateurs de départ de chaque machine ; une activité perso : distance, calories. Pas de fréquence cardiaque de Fiitday
+// (donnée de santé) : chacun peut créer ses propres indicateurs (« + Ajouter un indicateur »), avec un accord exprès unique
 const CARDIO_MACH = {
-  "tapis-course": ["dist", "vit", "incl", "cal", "fc"], "tapis-incurve": ["dist", "vit", "cal", "fc"],
-  "velo-droit": ["dist", "res", "cad", "watts", "cal", "fc"], "velo-semi-allonge": ["dist", "res", "watts", "cal", "fc"], "velo-biking": ["dist", "res", "cad", "cal", "fc"],
-  "velo-elliptique": ["dist", "res", "spm", "cal", "fc"], "escalier": ["etages", "marches", "niv", "cal", "fc"], "arc-trainer": ["dist", "res", "incl", "cal", "fc"],
-  "rameur": ["distm", "t500", "cpm", "watts", "cal", "fc"], "skierg": ["distm", "t500", "watts", "cal", "fc"], "air-bike": ["dist", "watts", "cal", "fc"]
+  "tapis-course": ["dist", "vit", "incl", "cal"], "tapis-incurve": ["dist", "vit", "cal"],
+  "velo-droit": ["dist", "res", "cad", "watts", "cal"], "velo-semi-allonge": ["dist", "res", "watts", "cal"], "velo-biking": ["dist", "res", "cad", "cal"],
+  "velo-elliptique": ["dist", "res", "spm", "cal"], "escalier": ["etages", "marches", "niv", "cal"], "arc-trainer": ["dist", "res", "incl", "cal"],
+  "rameur": ["distm", "t500", "cpm", "watts", "cal"], "skierg": ["distm", "t500", "watts", "cal"], "air-bike": ["dist", "watts", "cal"]
 };
-const CARDIO_BASE = ["dist", "cal", "fc"];
+const CARDIO_BASE = ["dist", "cal"];
 const CARDIO_MAX_OWN = 10; // indicateurs perso par machine
 const ownCvOf = e => { if (e.machine && CARDIO_MACH[e.machine]) return null; const r = typeof ownEntry === "function" && e.name ? ownEntry(e.name) : null; return r && Array.isArray(r.cv) ? r.cv.filter(k => CARDIO_M[k]) : null; };
 const cardioKey = e => (e.machine && CARDIO_MACH[e.machine] ? e.machine : "n:" + norm(e.name || "").slice(0, 40));
@@ -240,12 +244,9 @@ function cardioDefs(e) {
 }
 // indicateurs retirés par l'utilisateur pour une machine (ils restent proposés dans « + Ajouter un indicateur »)
 function cardioHidden(key) { const h = settings().cardioHidden, l = h && typeof h === "object" ? h[key] : null; return Array.isArray(l) ? l.filter(k => typeof k === "string") : []; }
-const hrOk = () => !!settings().hrOk; // accord donné pour noter la fréquence cardiaque
-// (dans un programme, sets est un nombre de séries ; en séance, la liste des séries)
-const hasHr = e => Array.isArray(e.sets) && e.sets.some(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "");
-const cardioShown = e => { const h = cardioHidden(cardioKey(e)), hr = hrOk() || hasHr(e); return cardioDefs(e).filter(d => !h.includes(d.k) && (d.k !== "fc" || hr)); };
+const cardioShown = e => { const h = cardioHidden(cardioKey(e)); return cardioDefs(e).filter(d => !h.includes(d.k)); };
 function setCardioHidden(key, list) { const st = settings(), hh = Object.assign({}, st.cardioHidden); hh[key] = list; st.cardioHidden = hh; put("settings", st); }
-// fréquence cardiaque notée dans des séances (sets[].cv.fc) : comptée, puis effacée quand l'accord est retiré (RGPD, art. 7.3 et 17)
+// ancienne fréquence cardiaque de Fiitday (sets[].cv.fc, avant la V1.147) : comptée dans une sauvegarde, convertie ou effacée
 const hrCount = ws => ws.reduce((a, w) => a + (Array.isArray(w.exercises) ? w.exercises : []).reduce((b, e) => b + (Array.isArray(e.sets) ? e.sets.filter(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "").length : 0), 0), 0);
 function stripHr(w) {
   let ch = false;
@@ -254,9 +255,6 @@ function stripHr(w) {
   }));
   return ch;
 }
-function eraseHr() { flushPending(); let n = 0; all("workout").forEach(w => { if (stripHr(w)) { put("workout", w); n++; } }); return n; }
-// accord retiré : une valeur revenue d'un appareil qui ne le savait pas encore (hors ligne) est effacée à son tour
-function hrGoneSweep() { if (!hrOk() && settings().hrGoneAt && hrCount(all("workout"))) eraseHr(); }
 // définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
 function cvDef(k) {
   if (CARDIO_M[k]) return Object.assign({ k }, CARDIO_M[k]);
@@ -534,8 +532,8 @@ async function accountGoneCheck(uid) {
     if (!res.ok) return false; r = await res.json();
   } catch (e) { return false; }
   if (r === "inactive") {
-    // compte supprimé après 2 ans sans utilisation (prévenu par e-mail) : les données de cet appareil restent, sans compte ;
-    // elles iront dans le prochain compte connecté ici (comme des données saisies sans compte)
+    // compte supprimé après 2 ans sans utilisation (prévenu par e-mail) : les données de cet appareil restent (sans propriétaire) ;
+    // elles iront dans le prochain compte connecté ici
     if (db.auth && db.auth.user.id === uid && activeWorkout()) return false;
     billingLogout(); db.auth = null; db.mode = null; db.plan = null; delete db.owner; delete db.checkGone; delete db.expired; dataRev++; saveNow();
     try { sessionStorage.setItem("fiitday-msg", "Ton compte a été supprimé après 2 ans sans utilisation. Tes séances sont toujours sur cet appareil : connecte-toi ou crée un compte pour les garder"); } catch (e) { }
@@ -711,7 +709,7 @@ async function sync() {
     // juste après la connexion : on relit une fois ce que le serveur a gardé (séances de l'essai ou de Premium), sans rien envoyer
     if (!db.lastServerAt && !syncing && navigator.onLine !== false) {
       syncing = true;
-      try { if (await pullServer(gone)) { saveNow(); softRender(); } else saveNow(); }
+      try { if (await pullServer(gone)) { dataSweeps(); saveNow(); softRender(); } else saveNow(); }
       catch (e) { console.warn("relecture du serveur impossible", e); }
       finally { syncing = false; }
     }
@@ -728,7 +726,7 @@ async function sync() {
     if (gone()) return;
     purgeBody(); // plus de page Corps : les anciennes mesures sont effacées, contenu compris
     freezeNotes(); renameVariants(); // après la récupération : les données sont à jour, aucun risque d'écraser une modif récente
-    hrGoneSweep(); weightGoneSweep();
+    { const r0 = dataRev; dataSweeps(); if (dataRev !== r0) changed = true; } // indicateurs perso : anciennes pesées et fréquences cardiaques converties, accord retiré respecté
     // 2) envoyer ce qui a changé ici, par paquets de 200 ; le serveur renvoie ce qu'il a enregistré (il garde sa version
     //    si elle est plus récente) ; un élément qu'il refuse (texte invalide, trop gros…) est mis de côté sans bloquer les autres
     const dirty = Object.values(db.items).filter(i => i.dirty && !i.refused);
@@ -792,7 +790,7 @@ setInterval(() => { if (!document.hidden) sync(); }, 60000);
 window.addEventListener("online", sync);
 
 function syncBadge() {
-  if (!db.auth) return '<span class="sync"><span class="dot"></span>Hors ligne (sans compte)</span>';
+  if (!db.auth) return '<span class="sync"><span class="dot"></span>Pas connecté</span>';
   const s = syncState.status;
   const cls = s === "ok" ? "ok" : s === "err" ? "err" : s === "busy" ? "busy" : "";
   const txt = s === "free" ? "Synchro réservée à Premium" : s === "ok" ? "Synchronisé " + fmtTime(syncState.at) : s === "err" ? "Synchro en échec" : s === "busy" ? "Synchronisation…" : s === "offline" ? "Pas de réseau" : "En attente";
@@ -1051,15 +1049,15 @@ function render() {
     $app.innerHTML = '<div class="login"><h1>Oups</h1><p class="muted">Un problème d\'affichage est survenu. Tes données ne sont pas perdues.</p><button type="button" class="btn primary big" data-act="reload">Revenir à l\'accueil</button></div>';
   } finally { rendering = false; }
 }
-let localFixed = false; // sans compte : anciens noms et anciennes mesures corrigés une fois par lancement
+let localFixed = false; // version gratuite (pas de synchro) : indicateurs perso convertis une fois par lancement
 function renderNow() {
   applyTheme();
   if (resetStep === "password") { keepScreen(false); $app.innerHTML = viewReset(); return; } // code validé : choisir le nouveau mot de passe
   if (db.auth && db.auth.dead && !activeWorkout()) { db.checkGone = db.auth.user.id; db.auth = null; db.mode = null; saveNow(); restart(); return; } // séance finie après une session expirée : reconnexion
-  if (!db.auth && db.mode !== "local") { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
+  if (!db.auth) { keepScreen(false); $app.innerHTML = showLanding() ? viewLanding() : viewLogin(); document.title = showLanding() ? LP_TITLE : "Fiitday"; return; }
   // un nouvel utilisateur arrive sur une page vierge : plus de programmes créés d'office
   // (les programmes déjà enregistrés dans un compte ne sont pas touchés)
-  if (!db.auth && !localFixed) { localFixed = true; freezeNotes(); renameVariants(); purgeBody(); }
+  if (!localFixed && isFree()) { localFixed = true; dataSweeps(); } // avec la synchro, c'est fait après chaque récupération
   const r = route();
   if (ctr && r.name !== "resilier" && r.name !== "retractation") ctr = null; // formulaire de résiliation ou de rétractation quitté
   let body, wide = false, immersive = false;
@@ -1074,7 +1072,8 @@ function renderNow() {
     case "program": body = viewProgram(r.args[0], r.args[1]); break;
     case "history": body = viewHistory(r.args[0]); break;
     case "progress": if (r.args[0]) { history.replaceState(history.state, "", "#/evolution/" + encodeURIComponent(r.args[0])); body = viewEvolutionDetail(r.args[0]); } else body = viewProgress(); break; // ancien lien d'un exercice
-    case "evolution": body = isPC() && !isFree() && progressData().length ? viewEvolutionPc(r.args[0]) : r.args[0] === "poids" ? viewWeight() : r.args[0] ? viewEvolutionDetail(r.args[0]) : viewEvolution(); break;
+    case "evolution": { const a0 = r.args[0] === "poids" ? (metricDef("mpoids") ? "ind:mpoids" : "") : r.args[0]; // ancien lien du poids
+      body = isPC() && !isFree() && progressData().length ? viewEvolutionPc(a0) : /^ind:/.test(a0 || "") ? viewMetric(a0.slice(4)) : a0 ? viewEvolutionDetail(a0) : viewEvolution(); } break;
     case "calendar": body = viewCalendar(r.args[0], r.args[1]); break;
     case "body": history.replaceState(history.state, "", "#/progress"); body = viewProgress(); break; // ancienne page Corps
     case "s":
@@ -1138,7 +1137,7 @@ function ownUses(name) {
   return { vars, done };
 }
 const TYPE_LABEL = { reps: "Poids × reps", rep: "Reps uniquement", time: "Temps", dist: "Distance", cardio: "Indicateurs au choix" };
-const OWN_CV = ["dist", "vit", "incl", "res", "cad", "watts", "spm", "etages", "marches", "niv", "t500", "cpm", "cal", "fc"];
+const OWN_CV = ["dist", "vit", "incl", "res", "cad", "watts", "spm", "etages", "marches", "niv", "t500", "cpm", "cal"];
 // création / modification d'un exercice perso : nom, ce que tu notes (comme en séance), indicateurs au choix comme pour le cardio
 function askOwnEx(cur) {
   return new Promise(res => {
@@ -1173,7 +1172,7 @@ function askOwnEx(cur) {
     d.addEventListener("click", async e => {
       if (e.target === d) { d.remove(); res(null); return; }
       const ty = e.target.closest("[data-ty]"); if (ty && !ty.disabled) { type = ty.dataset.ty; draw(); return; }
-      if (e.target.closest("[data-newcv]")) { const r = await askIndicator(nameV.trim() || "ton exercice"); if (r) { custom.push({ k: "c" + uid(), n: r.n, u: r.u, on: true }); draw(); } return; }
+      if (e.target.closest("[data-newcv]")) { if (!await askIndConsent()) return; const r = await askIndicator(nameV.trim() || "ton exercice"); if (r) { custom.push({ k: "c" + uid(), n: r.n, u: r.u, on: true }); draw(); } return; } // indicateur perso : accord unique
       const b = e.target.closest("[data-r]"); if (!b) return;
       if (b.dataset.r !== "1") { d.remove(); res(null); return; }
       const n = nameV.replace(/\s+/g, " ").trim(), m = d.querySelector("[data-m]");
@@ -1265,7 +1264,6 @@ function viewLogin() {
     '<button class="link" data-act="changemail">Changer d\'adresse e-mail</button></div>';
   if (resetStep) return viewReset();
   const up = loginMode === "up", em = esc(loginEmail || (!up && db.expired && db.expired.email) || "");
-  // (le mode « sans compte » existe toujours dans le code, mais n'est plus proposé sur cet écran)
   return '<div class="login"><img class="logo" src="icon-192.png" alt="" width="72" height="72"><h1>Fiitday</h1>' +
     '<p class="muted">' + (loginForContract() || (up ? "Crée ton compte pour enregistrer tes séances (et les retrouver sur ton téléphone et ton ordinateur avec Premium)." : "Connecte-toi pour retrouver tes séances.")) + "</p>" +
     (db.expired && !up ? '<p class="msg warn" role="status">Ta connexion a expiré (mot de passe changé ou déconnexion sur un autre appareil ?). Reconnecte-toi : tes données sont gardées sur cet appareil.</p>' : "") +
@@ -1291,7 +1289,7 @@ function viewLogin() {
 // ou « Créer mon compte » (#/connexion). Jamais dans l'appli Android (connexion directe). Les liens internes de la page sont des
 // boutons : un lien « #… » ouvrirait une page de l'appli. Les captures (données d'exemple) sont dans src/landing, clair et sombre.
 const LP_TITLE = "Fiitday · Ton carnet de musculation";
-const showLanding = () => !Native && !db.auth && db.mode !== "local" && !db.verify && !db.expired && !resetStep && route().name === "home";
+const showLanding = () => !Native && !db.auth && !db.verify && !db.expired && !resetStep && route().name === "home";
 const LP_ICON = {
   cube: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
   body: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><path d="M4 9l8-1 8 1M12 8v6l-4 7M12 14l4 7"/></svg>',
@@ -1346,7 +1344,7 @@ function viewLanding() {
         ' tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
       (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
       '<div class="lp-prices">' +
-        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et ' + FREE_VARIANTS + ' séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des ' + FREE_HIST_DAYS + ' derniers jours</li><li>Stats de la semaine</li><li>Suivi du poids sur 30 jours</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
+        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et ' + FREE_VARIANTS + ' séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des ' + FREE_HIST_DAYS + ' derniers jours</li><li>Stats de la semaine</li><li>Indicateurs perso (poids, tour de taille…) sur 30 jours</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
         [["solo", "Premium Solo", "Pour toi, sur tous tes appareils"], ["family", "Premium Famille", "Toi et 4 proches, chacun avec son compte et ses données"]].map(([k, t, d]) => { const pr = PRICES[k];
           return '<div class="lp-price' + (k === "solo" ? " best" : "") + '"><h3>' + t + '</h3><div class="amt num">' + pr.month + " <small>/ mois</small></div>" +
             '<div class="lp-small">ou ' + pr.year + " par an (soit " + pr.yearMonth + " par mois)<br>" + esc(lifeTxt(pr)) + "</div><ul><li>" + esc(d) + "</li><li>Tout illimité, toutes les stats</li><li>Synchro téléphone et ordinateur</li><li>Les programmes Fiitday</li></ul></div>"; }).join("") +
@@ -1509,7 +1507,7 @@ async function afterLogin() {
     db.items = {}; db.live = {}; db.base = {}; dataRev++;
     if (kept > 0) toast("Les modifications pas encore envoyées de l'autre compte restent gardées sur cet appareil : elles repartiront à sa prochaine connexion ici");
   } else if (!db.owner) {
-    // données saisies sans compte : elles sont envoyées au compte
+    // données de l'appareil sans propriétaire (ancien mode sans compte, compte supprimé pour inactivité) : envoyées au compte
     Object.values(db.items).forEach(i => { if (i.updated_at > 0) i.dirty = true; });
   }
   db.owner = uidNow; db.plan = null; famSrv = null;
@@ -2059,7 +2057,7 @@ async function congrats(wid) {
 }
 // au lancement : une séance restée ouverte depuis plus de 5 h (oubliée) peut être terminée à l'heure de sa dernière modification
 async function staleWorkout() {
-  const w = activeWorkout(); if (!w || (!db.auth && db.mode !== "local") || document.querySelector("body > .modal")) return;
+  const w = activeWorkout(); if (!w || !db.auth || document.querySelector("body > .modal")) return;
   if (Date.now() - w.startedAt < 5 * 3600e3) return;
   const it = db.items[w.id], last = Math.max(w.startedAt + 60000, Math.min(Date.now(), w.lastAt || (it && it.updated_at) || w.startedAt));
   const when = new Date(last), day = new Date().toDateString() === when.toDateString() ? "" : " le " + fmtDate(last);
@@ -2792,12 +2790,12 @@ const EVO_M = {
   orm: { label: "1RM estimé", short: "1RM estimé", unit: " kg" },
   reps: { label: "Répétitions max", short: "Répétitions", unit: " reps" },
   sec: { label: "Temps max", short: "Temps", unit: " s" },
-  run: { label: "Meilleur temps", short: "Temps", unit: "", low: true, clock: true },
-  poids: { label: "Poids", short: "Poids", unit: " kg", neutral: true } // ni « record » ni « mieux » : une courbe, sans objectif
+  run: { label: "Meilleur temps", short: "Temps", unit: "", low: true, clock: true }
 };
 // courbe d'un indicateur de cardio (« cv:dist ») ou de la durée (« dur »)
 function evoDef(m) {
   if (EVO_M[m]) return EVO_M[m];
+  if (/^ind:/.test(m)) { const d = metricDef(m.slice(4)) || { n: "Indicateur", u: "" }; return { label: d.n, short: d.n, unit: d.u ? " " + d.u : "", neutral: true, ind: d }; } // indicateur perso : ni « record » ni « mieux »
   if (m === "dur") return { label: "Durée", short: "Durée", unit: "", clock: true };
   const d = /^cv:/.test(m) && cvDef(m.slice(3));
   return d ? { label: d.n, short: d.s || d.n, unit: d.u && !d.clock ? " " + d.u : "", clock: !!d.clock, low: !!d.low, cv: d } : { label: m, short: m, unit: "" };
@@ -2819,7 +2817,7 @@ function evoMetrics(p) {
   const out = []; if (has("kg")) out.push("kg"); if (has("orm")) out.push("orm"); if (has("reps")) out.push("reps"); if (has("ton")) out.push("ton");
   return out.length ? out : ["reps"];
 }
-const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : m === "poids" ? wFmt(v) : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
+const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : M.ind ? mFmt(M.ind, v) : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
 function evoDiff(m, d) {
   if (d == null) return "—";
   const r = Math.round(Math.abs(d) * (m === "orm" ? 2 : 100)) / (m === "orm" ? 2 : 100);
@@ -2867,22 +2865,23 @@ function evoListHtml() {
 }
 let evoSel = null; // exercice affiché à droite de la liste (PC)
 function viewEvolutionPc(key) {
-  const all_ = progressData(), hits = evoSearch(evo.q), wsel = key === "poids", p = wsel ? null : all_.find(x => x.key === key) || (hits[0] && hits[0].p) || all_[0];
-  evoSel = wsel ? "poids" : p ? p.key : null;
-  const detail = wsel ? viewWeight(true) : p ? viewEvolutionDetail(p.key, true) : "";
-  evoSel = wsel ? "poids" : p ? p.key : null;
-  return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + '<div class="pc-cols evo"><div class="pc-main">' + weightRowHtml() +
+  if (key === "poids") key = metricDef("mpoids") ? "ind:mpoids" : ""; // ancien lien du poids
+  const all_ = progressData(), hits = evoSearch(evo.q), wsel = /^ind:/.test(key || "") && !!metricDef(key.slice(4)), p = wsel ? null : all_.find(x => x.key === key) || (hits[0] && hits[0].p) || all_[0];
+  evoSel = wsel ? key : p ? p.key : null;
+  const detail = wsel ? viewMetric(key.slice(4), true) : p ? viewEvolutionDetail(p.key, true) : "";
+  evoSel = wsel ? key : p ? p.key : null;
+  return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + '<div class="pc-cols evo"><div class="pc-main">' + metricRowsHtml() + '<div class="section-title">Exercices</div>' +
     '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
-    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe à droite. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + weightShowLink() + "</div>" +
+    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe à droite. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + indFootHtml() + "</div>" +
     '<div class="pc-side pc-pane">' + detail + "</div></div>";
 }
 function viewEvolution() {
   evoSel = null;
-  let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + weightRowHtml();
-  if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.") + weightShowLink();
-  if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>' + weightShowLink();
+  let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + metricRowsHtml() + '<div class="section-title">Exercices</div>';
+  if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.") + indFootHtml();
+  if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>' + indFootHtml();
   return h + '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
-    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe dans le temps. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + weightShowLink();
+    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe dans le temps. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + indFootHtml();
 }
 document.addEventListener("input", e => {
   if (!e.target.matches || !e.target.matches("input[data-evo-q]")) return;
@@ -2909,7 +2908,7 @@ function evoChart(p, m, pts, W) {
   const X = t => L + (span ? ((t - t0) / span) * pw : pw / 2), Y = v => T + (1 - (v - y0) / (y1 - y0)) * ph;
   const recV = M.low ? mn : mx, recK = M.neutral ? -1 : pts.map(x => x.v).lastIndexOf(recV), lastK = pts.length - 1;
   pts.forEach(x => { x.x = X(x.t); x.y = Y(x.v); });
-  let svg = '<svg class="chart evo-svg" viewBox="0 0 ' + W + " " + H + '" tabindex="0" role="img" aria-label="' + esc(M.neutral ? M.label + " : " + pts.length + " pesée" + (pts.length > 1 ? "s" : "") + ", dernière " + evoFmt(m, pts[lastK].v) : M.label + " de " + p.name + " : " + pts.length + " séances, record " + evoFmt(m, recV) + ", dernière " + evoFmt(m, pts[lastK].v)) + '">' +
+  let svg = '<svg class="chart evo-svg" viewBox="0 0 ' + W + " " + H + '" tabindex="0" role="img" aria-label="' + esc(M.neutral ? M.label + " : " + mWord(pts.length, "valeur") + ", dernière " + evoFmt(m, pts[lastK].v) : M.label + " de " + p.name + " : " + pts.length + " séances, record " + evoFmt(m, recV) + ", dernière " + evoFmt(m, pts[lastK].v)) + '">' +
     '<defs><linearGradient id="evoG" x1="0" x2="0" y1="0" y2="1"><stop offset="0"></stop><stop offset="1"></stop></linearGradient></defs>';
   for (let v = y0; v <= y1 + step / 1000; v += step) {
     const y = Y(v).toFixed(1);
@@ -3008,106 +3007,241 @@ function viewEvolutionDetail(key, pane) {
   return h;
 }
 
-/* ================= Stats › Évolution : poids (facultatif, avec accord exprès) ================= */
-// Une pesée par jour : élément « weight », id « poids-AAAA-MM-JJ » (deux appareils le même jour : la dernière pesée gagne).
-// Le poids peut renseigner sur la santé : il n'est noté qu'après un accord exprès, séparé et retirable ; « Retirer mon accord »
-// efface toutes les pesées. Pas d'objectif, pas d'IMC, pas d'interprétation : une courbe neutre.
-// Version gratuite : les 30 derniers jours ; Premium : tout l'historique (les pesées plus anciennes sont gardées, juste masquées).
-const W_FREE_DAYS = 30, W_MIN = 20, W_MAX = 400;
-const W_CONSENT = "C'est facultatif. Ton poids peut renseigner sur ta santé : si tu le notes, il est enregistré (et synchronisé entre tes appareils avec Premium), visible de toi seul, jamais partagé ni utilisé pour autre chose, et supprimé avec ton compte. Tu peux retirer ton accord quand tu veux (« Ne plus suivre mon poids », puis « Retirer mon accord ») : tes pesées sont alors effacées.";
-const weightOk = () => !!settings().weightOk;
-const weights = () => all("weight").filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") && typeof x.kg === "number").sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
-const wTime = d => new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), 12).getTime();
-const wFmt = kg => (Math.round(kg * 10) / 10).toFixed(1).replace(".", ",") + " kg"; // toujours une décimale : 79,0 kg
-const wFreeFrom = () => ymd(Date.now() - (W_FREE_DAYS - 1) * 86400000);
-const weightsShown = () => isFree() ? weights().filter(x => x.date >= wFreeFrom()) : weights();
-function eraseWeights() { flushPending(); let n = 0; for (const it of Object.values(db.items)) if (it.kind === "weight" && !it.deleted) { remove(it.id); n++; } return n; }
-// accord retiré : une pesée revenue d'un appareil qui ne le savait pas encore (hors ligne) est effacée à son tour
-function weightGoneSweep() { if (!weightOk() && settings().weightGoneAt && weights().length) eraseWeights(); }
-// ligne « Poids » en haut de Stats › Évolution (aussi en version gratuite)
-function weightRowHtml() {
-  if (settings().weightHidden) return "";
-  const ws = weightsShown(), last = ws[ws.length - 1], ok = weightOk();
-  const sub = !ok ? "Facultatif : suis l'évolution de ton poids" : last ? ws.length + " pesée" + (ws.length > 1 ? "s" : "") + " · " + dfDay.format(wTime(last.date)) : "Note ton poids pour voir sa courbe";
-  const right = ok && last ? '<span class="evo-r">' + sparkline(ws.slice(-12).map(x => x.kg)) + '<span class="small"><b>' + wFmt(last.kg) + '</b> <span class="muted">dernière</span></span></span>' : "";
-  return '<div class="list evo-weight"><a href="#/evolution/poids"' + (evoSel ? " data-pane" : "") + (evoSel === "poids" ? ' class="pc-on" aria-current="true"' : "") + '><div><b>Poids</b><div class="muted small">' + esc(sub) + "</div></div>" + right + "</a></div>";
+/* ================= Stats › Évolution : indicateurs perso (facultatifs, un accord exprès unique) ================= */
+// L'utilisateur crée ses indicateurs (nom et unité de son choix) et y note une valeur par jour : élément « measure »,
+// id « v-<clé>-AAAA-MM-JJ » (deux appareils le même jour : la dernière valeur gagne). Un indicateur perso peut contenir une
+// donnée de santé (son poids…) : le tout premier, ici ou en séance de cardio, demande un accord exprès, unique et retirable ;
+// le retirer efface tous les indicateurs perso et leurs valeurs. Pas d'objectif, pas de « record » : une courbe neutre.
+// Version gratuite : les 30 derniers jours ; Premium : tout l'historique (les valeurs plus anciennes sont gardées, juste masquées).
+// Les pesées (V1.144) et les fréquences cardiaques (V1.139) déjà notées deviennent les indicateurs perso « Poids » et
+// « Fréquence cardiaque » (accords déjà donnés pour elles : hrOk, weightOk).
+const M_FREE_DAYS = 30, M_MAX = 20, M_ABS = 1e6, M_KEY = /^m[a-z0-9]{2,16}$/;
+const IND_CONSENT = "C'est facultatif. Tes indicateurs perso (ici et en séance de cardio) servent à suivre ce que tu veux : ton poids, ton tour de taille, une mesure de ton choix… Ils peuvent donc contenir des informations sur ta santé. Ce que tu y notes est enregistré (et synchronisé entre tes appareils avec Premium), visible de toi seul, jamais partagé ni utilisé pour autre chose, et supprimé avec ton compte. Tu peux retirer ton accord quand tu veux (« Indicateurs perso : retirer mon accord », en bas de Stats › Évolution) : tes indicateurs perso et leurs valeurs sont alors effacés.";
+const indOk = () => !!settings().indOk;
+// accord exprès unique, demandé avant de créer le tout premier indicateur perso
+async function askIndConsent() {
+  if (indOk()) return true;
+  if (!await ask({ title: "Créer tes indicateurs perso ?", text: IND_CONSENT, ok: "J'accepte", cancel: "Non merci" })) return false;
+  const st = settings(); st.indOk = new Date().toISOString(); put("settings", st); return true;
 }
-const weightShowLink = () => settings().weightHidden ? '<button type="button" class="linkbtn" data-act="wshow">+ Suivre mon poids</button>' : "";
+const M_POIDS = { id: "mpoids", k: "mpoids", n: "Poids", u: "kg" }, CV_HR = { k: "cfc", n: "Fréquence cardiaque", u: "bpm" };
+const measures = k => all("measure").filter(x => (!k || x.k === k) && /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") && typeof x.v === "number").sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+// indicateurs : ceux des réglages, puis (par sécurité) ceux dont il reste des valeurs sans définition
+function metrics() {
+  const l = settings().metrics, out = (Array.isArray(l) ? l : []).filter(x => x && M_KEY.test(x.k) && x.n).map(x => ({ k: x.k, n: cutStr(x.n, 30), u: cutStr(x.u || "", 12) }));
+  for (const x of all("measure")) if (x && M_KEY.test(x.k || "") && !out.some(y => y.k === x.k)) out.push(x.k === "mpoids" ? { k: "mpoids", n: "Poids", u: "kg" } : { k: x.k, n: "Indicateur", u: "" });
+  return out;
+}
+const metricDef = k => metrics().find(x => x.k === k) || null;
+function setMetrics(list) { const st = settings(); st.metrics = list.map(x => ({ id: x.k, k: x.k, n: x.n, u: x.u || "" })); put("settings", st); }
+const wTime = d => new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), 12).getTime();
+const mFreeFrom = () => ymd(Date.now() - (M_FREE_DAYS - 1) * 86400000);
+const measuresShown = k => isFree() ? measures(k).filter(x => x.date >= mFreeFrom()) : measures(k);
+const mFmt = (d, v) => fmtNum(v) + (d && d.u ? " " + d.u : "");
+const mWord = (n, a, b) => n + " " + (n > 1 ? b || a + "s" : a);
+// valeurs des indicateurs perso de cardio (sets[].cv.<clé perso>) ; « cal », « cad »… sont des indicateurs de Fiitday
+const isOwnCv = k => !CARDIO_M[k] && /^c[a-z0-9]{2,16}$/.test(k);
+const ownCvCount = ws => ws.reduce((a, w) => a + (Array.isArray(w.exercises) ? w.exercises : []).reduce((b, e) => b + (Array.isArray(e.sets) ? e.sets : []).reduce((c, st) =>
+  c + (st && st.cv && typeof st.cv === "object" ? Object.keys(st.cv).filter(k => (isOwnCv(k) || k === "fc") && st.cv[k] != null && st.cv[k] !== "").length : 0), 0), 0), 0);
+// retire ces valeurs d'une séance : [séance modifiée ?, nombre de valeurs effacées]
+function stripOwnCv(w) {
+  let n = 0, ch = false;
+  (Array.isArray(w.exercises) ? w.exercises : []).forEach(e => (Array.isArray(e.sets) ? e.sets : []).forEach(st => {
+    if (!st || !st.cv || typeof st.cv !== "object") return;
+    const ks = Object.keys(st.cv).filter(k => isOwnCv(k) || k === "fc"); if (!ks.length) return;
+    const cv = Object.assign({}, st.cv); ks.forEach(k => { if (cv[k] != null && cv[k] !== "") n++; delete cv[k]; }); st.cv = cv; ch = true;
+  }));
+  return [ch, n];
+}
+const ownCvDefs = () => { const c = settings().cardioCustom; return isObj(c) ? Object.values(c).reduce((a, l) => a + (Array.isArray(l) ? l.length : 0), 0) : 0; };
+// efface tous les indicateurs perso (Évolution et cardio) et leurs valeurs ; renvoie le nombre de valeurs effacées
+function eraseInd() {
+  flushPending(); let n = 0;
+  for (const it of Object.values(db.items)) if ((it.kind === "measure" || it.kind === "weight") && !it.deleted) { remove(it.id); n++; }
+  all("workout").forEach(w => { const [ch, k] = stripOwnCv(w); if (ch) { put("workout", w); n += k; } });
+  const st = settings();
+  if ((Array.isArray(st.metrics) && st.metrics.length) || ownCvDefs()) { st.metrics = []; st.cardioCustom = {}; put("settings", st); }
+  return n;
+}
+// accord retiré : une valeur revenue d'un appareil qui ne le savait pas encore (hors ligne) est effacée à son tour
+function indGoneSweep() {
+  if (indOk() || !settings().indGoneAt) return;
+  if (all("measure").length || all("weight").length || ownCvCount(all("workout")) || metrics().length || ownCvDefs()) eraseInd();
+}
+// pesées et fréquences cardiaques notées avant la V1.147 : converties en indicateurs perso (mêmes identifiants sur tous les
+// appareils : deux appareils qui convertissent donnent le même résultat) ; l'ancienne pesée est supprimée une fois convertie
+function indMigrate() {
+  if (!indOk() && settings().indGoneAt) return;
+  const st0 = settings(), ml = metrics().map(x => ({ k: x.k, n: x.n, u: x.u })), cc = Object.assign({}, isObj(st0.cardioCustom) ? st0.cardioCustom : {});
+  const hrGone = !st0.hrOk && !!st0.hrGoneAt, wGone = !st0.weightOk && !!st0.weightGoneAt; // accord retiré avant la V1.147 : valeurs effacées, pas converties
+  let chS = false;
+  const ws = Object.values(db.items).filter(i => i.kind === "weight" && !i.deleted);
+  if (ws.length) {
+    flushPending();
+    if (!wGone && !ml.some(x => x.k === "mpoids")) { ml.unshift({ k: "mpoids", n: "Poids", u: "kg" }); chS = true; }
+    for (const it of ws) {
+      const d = it.data || {};
+      if (!wGone && typeof d.kg === "number" && /^\d{4}-\d{2}-\d{2}$/.test(d.date || "")) {
+        const id = "v-mpoids-" + d.date, cur = getItem(id);
+        if (!cur || (cur.at || 0) < (d.at || 0)) put("measure", { id, k: "mpoids", date: d.date, v: Math.round(d.kg * 10) / 10, at: d.at || Date.now() });
+      }
+      remove(it.id);
+    }
+  } else if (!wGone && st0.weightOk && !st0.weightHidden && !st0.indMig && !ml.some(x => x.k === "mpoids")) { ml.unshift({ k: "mpoids", n: "Poids", u: "kg" }); chS = true; } // suivi du poids activé, sans pesée
+  all("workout").forEach(w => {
+    let ch = false;
+    (Array.isArray(w.exercises) ? w.exercises : []).forEach(e => (Array.isArray(e.sets) ? e.sets : []).forEach(s => {
+      if (!s || !s.cv || typeof s.cv !== "object" || !("fc" in s.cv)) return;
+      const cv = Object.assign({}, s.cv), v = cv.fc; delete cv.fc; ch = true;
+      if (!hrGone && v != null && v !== "") {
+        if (cv.cfc == null || cv.cfc === "") cv.cfc = v;
+        const key = cardioKey(e), l = Array.isArray(cc[key]) ? cc[key] : [];
+        if (!l.some(x => x && x.k === "cfc")) { cc[key] = l.concat([Object.assign({}, CV_HR)]); chS = true; }
+      }
+      s.cv = cv;
+    }));
+    if (ch) put("workout", w);
+  });
+  // exercices perso de cardio : la fréquence cardiaque n'est plus un indicateur de Fiitday
+  const own = Array.isArray(st0.ownEx) ? st0.ownEx : null;
+  const ownFix = own && own.some(x => x && Array.isArray(x.cv) && x.cv.includes("fc"));
+  const needFlag = !st0.indMig && !!st0.weightOk; // suivi du poids activé : « Poids » n'est ajouté qu'une fois
+  if (chS || ownFix || needFlag) {
+    const st = settings();
+    st.metrics = ml.map(x => ({ id: x.k, k: x.k, n: x.n, u: x.u || "" })); st.cardioCustom = cc; st.indMig = 1;
+    if (ownFix) st.ownEx = st.ownEx.map(x => x && Array.isArray(x.cv) && x.cv.includes("fc") ? Object.assign({}, x, { cv: x.cv.filter(k => k !== "fc") }) : x);
+    put("settings", st);
+  }
+}
+function dataSweeps() { indGoneSweep(); indMigrate(); }
+// lignes des indicateurs en haut de Stats › Évolution (aussi en version gratuite)
+function metricRowsHtml() {
+  const ms = metrics();
+  const rows = ms.map(d => {
+    const vs = measuresShown(d.k), last = vs[vs.length - 1], on = evoSel === "ind:" + d.k;
+    const sub = last ? mWord(vs.length, "valeur") + " · " + dfDay.format(wTime(last.date)) : "Note une valeur pour voir sa courbe";
+    const right = last ? '<span class="evo-r">' + sparkline(vs.slice(-12).map(x => x.v)) + '<span class="small"><b>' + esc(mFmt(d, last.v)) + '</b> <span class="muted">dernière</span></span></span>' : "";
+    return '<a href="#/evolution/ind:' + d.k + '"' + (evoSel ? " data-pane" : "") + (on ? ' class="pc-on" aria-current="true"' : "") + "><div><b>" + esc(d.n) + "</b>" + (d.u ? ' <span class="muted small">(' + esc(d.u) + ")</span>" : "") + '<div class="muted small">' + esc(sub) + "</div></div>" + right + "</a>";
+  });
+  const add = ms.length >= M_MAX ? "" : '<button type="button" class="evo-add" data-act="madd"><div><b>+ Ajouter un indicateur' + (ms.length ? "" : " de ton choix") + '</b><div class="muted small">' +
+    (ms.length ? "Une autre mesure à suivre" : "Ton poids, ton tour de taille… : ce que tu veux suivre, avec le nom et l'unité de ton choix") + "</div></div></button>";
+  return '<div class="section-title evo-ind-t">Mes indicateurs</div><div class="list evo-weight">' + rows.join("") + add + "</div>";
+}
+// en bas de l'onglet : retirer l'accord (dès qu'il y a un accord ou des indicateurs perso)
+function indFootHtml() {
+  const st = settings();
+  if (!(st.indOk || st.hrOk || st.weightOk || metrics().length || ownCvDefs())) return "";
+  return '<button type="button" class="linkbtn" data-act="mconsent">Indicateurs perso : retirer mon accord</button>';
+}
 let wPer = "all";
-function viewWeight(pane) {
+function viewMetric(k, pane) {
   evoCur = null; if (!pane) evoSel = null;
-  let h = (pane ? "" : '<a class="back" href="#/evolution">‹ Évolution</a>') + '<div class="page-head"><h1>Poids</h1></div>';
-  if (!weightOk()) return h + '<div class="card w-ask"><h3>Suivre ton poids ?</h3><p class="small">' + esc(W_CONSENT) + '</p>' +
-    '<div class="w-btns"><button type="button" class="btn primary" data-act="wok">J\'accepte de noter mon poids</button><button type="button" class="btn" data-act="wno">Non merci</button></div></div>';
-  const all_ = weights(), ws = weightsShown(), today = ymd(Date.now()), cur = all_.find(x => x.date === today);
-  h += '<div class="card w-form"><div class="muted small" style="font-weight:600">Noter mon poids</div><div class="w-row">' +
-    '<label class="fl">Jour<input type="date" class="f" data-w-date max="' + today + '"' + (isFree() ? ' min="' + wFreeFrom() + '"' : "") + ' value="' + today + '"></label>' +
-    '<label class="fl">Poids (kg)<input class="f" data-w-kg inputmode="decimal" autocomplete="off" maxlength="6" placeholder="ex. 72,4" value="' + (cur ? esc(fmtNum(cur.kg)) : "") + '"></label></div>' +
-    '<button type="button" class="btn primary" data-act="wsave">Enregistrer</button><p class="muted small">Une valeur par jour, en kg avec une décimale : en noter une autre pour le même jour la remplace.</p></div>';
-  if (isFree()) h += '<p class="muted small w-free">Version gratuite : les ' + W_FREE_DAYS + ' derniers jours. Avec <a href="#/premium">Premium</a>, tout l\'historique de ton poids.</p>';
+  const d = metricDef(k);
+  let h = (pane ? "" : '<a class="back" href="#/evolution">‹ Évolution</a>');
+  if (!d) return h + '<div class="page-head"><h1>Indicateur</h1></div><div class="card empty">Cet indicateur n\'existe plus.</div>';
+  h += '<div class="page-head"><h1>' + esc(d.n) + (d.u ? ' <span class="muted" style="font-size:.6em;font-weight:600">' + esc(d.u) + "</span>" : "") + "</h1></div>";
+  const all_ = measures(k), ws = measuresShown(k), today = ymd(Date.now()), cur = all_.find(x => x.date === today);
+  h += '<div class="card w-form"><div class="muted small" style="font-weight:600">Noter une valeur</div><div class="w-row">' +
+    '<label class="fl">Jour<input type="date" class="f" data-m-date data-k="' + k + '" max="' + today + '"' + (isFree() ? ' min="' + mFreeFrom() + '"' : "") + ' value="' + today + '"></label>' +
+    '<label class="fl">' + esc(d.n) + (d.u ? " (" + esc(d.u) + ")" : "") + '<input class="f" data-m-v inputmode="decimal" autocomplete="off" maxlength="12" placeholder="ex. 72,4" value="' + (cur ? esc(fmtNum(cur.v)) : "") + '"></label></div>' +
+    '<button type="button" class="btn primary" data-act="msave" data-k="' + k + '">Enregistrer</button><p class="muted small">Une valeur par jour : en noter une autre pour le même jour la remplace.</p></div>';
+  if (isFree()) h += '<p class="muted small w-free">Version gratuite : les ' + M_FREE_DAYS + ' derniers jours. Avec <a href="#/premium">Premium</a>, tout l\'historique de tes indicateurs.</p>';
   const span = ws.length > 1 ? wTime(ws[ws.length - 1].date) - wTime(ws[0].date) : 0;
   const pers = isFree() ? [] : EVO_P.filter(x => !x[2] || span > x[2] * 86400000 * 0.9);
   const per = pers.some(x => x[0] === wPer) ? wPer : "all", days = (EVO_P.find(x => x[0] === per) || [0, 0, 0])[2];
-  const from = days ? ymd(Date.now() - (days - 1) * 86400000) : "", ent = ws.filter(x => !from || x.date >= from);
+  const from = days ? ymd(Date.now() - (days - 1) * 86400000) : "", ent = ws.filter(x => !from || x.date >= from), m = "ind:" + k;
   if (pers.length > 1) h += '<div class="evo-filters"><div class="seg evo-seg" role="group" aria-label="Période">' + pers.map(x => '<button type="button" data-act="wper" data-v="' + x[0] + '"' + (x[0] === per ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div></div>";
-  if (!ent.length) h += '<div class="card empty">' + (ws.length ? "Aucune pesée sur cette période." : "Note ton poids ci-dessus pour commencer ta courbe.") + "</div>";
+  if (!ent.length) h += '<div class="card empty">' + (ws.length ? "Aucune valeur sur cette période." : "Note une valeur ci-dessus pour commencer ta courbe.") + "</div>";
   else {
-    const first = ent[0], last = ent[ent.length - 1], dlt = ent.length > 1 ? Math.round((last.kg - first.kg) * 10) / 10 : null;
+    const first = ent[0], last = ent[ent.length - 1], dlt = ent.length > 1 ? Math.round((last.v - first.v) * 100) / 100 : null;
     h += '<div class="stats">' +
-      '<div class="card stat"><div class="muted small">Dernière pesée</div><div class="v">' + wFmt(last.kg) + '</div><div class="muted small">' + esc(fmtDate(wTime(last.date))) + "</div></div>" +
-      '<div class="card stat"><div class="muted small">Évolution</div><div class="v">' + (dlt == null ? "—" : !dlt ? "Stable" : (dlt > 0 ? "+" : "−") + wFmt(Math.abs(dlt))) + '</div><div class="muted small">' + (ent.length > 1 ? ent.length + " pesées depuis le " + esc(fmtDate(wTime(first.date))) : "une seule pesée") + "</div></div></div>";
-    const pts = ent.map(x => ({ t: wTime(x.date), v: x.kg, ses: "", sum: "" })), p = { name: "Poids" };
-    evoCur = { pts, m: "poids", k: pts.length - 1, W: 360, p };
-    h += '<div class="card evo-card"><div class="muted small" style="font-weight:600">Poids</div>' +
-      '<div class="evo-read" aria-live="polite"><b>' + wFmt(last.kg) + '</b><span class="d">' + esc(fmtDateLong(wTime(last.date))) + '</span><span class="s"></span></div>' + evoChart(p, "poids", pts) +
-      '<p class="muted small" style="margin:8px 0 0">' + (pts.length === 1 ? "Une seule pesée pour l'instant : la courbe se dessinera dès la prochaine." : "Fais glisser le doigt sur la courbe pour voir chaque pesée.") + "</p></div>";
-    h += '<div class="section-title">Pesées</div><div class="list w-list">' + ent.slice().reverse().map(x => '<div><b>' + esc(fmtDate(wTime(x.date))) + '</b><span class="w-r"><b class="num">' + wFmt(x.kg) + '</b>' +
-      '<button type="button" class="cv-del" data-act="wdel" data-id="' + x.id + '" aria-label="Supprimer la pesée du ' + esc(fmtDate(wTime(x.date))) + '">×</button></span></div>').join("") + "</div>";
+      '<div class="card stat"><div class="muted small">Dernière valeur</div><div class="v">' + esc(mFmt(d, last.v)) + '</div><div class="muted small">' + esc(fmtDate(wTime(last.date))) + "</div></div>" +
+      '<div class="card stat"><div class="muted small">Évolution</div><div class="v">' + (dlt == null ? "—" : !dlt ? "Stable" : (dlt > 0 ? "+" : "−") + esc(mFmt(d, Math.abs(dlt)))) + '</div><div class="muted small">' + (ent.length > 1 ? ent.length + " valeurs depuis le " + esc(fmtDate(wTime(first.date))) : "une seule valeur") + "</div></div></div>";
+    const pts = ent.map(x => ({ t: wTime(x.date), v: x.v, ses: "", sum: "" })), p = { name: d.n };
+    evoCur = { pts, m, k: pts.length - 1, W: 360, p };
+    h += '<div class="card evo-card"><div class="muted small" style="font-weight:600">' + esc(d.n) + '</div>' +
+      '<div class="evo-read" aria-live="polite"><b>' + esc(mFmt(d, last.v)) + '</b><span class="d">' + esc(fmtDateLong(wTime(last.date))) + '</span><span class="s"></span></div>' + evoChart(p, m, pts) +
+      '<p class="muted small" style="margin:8px 0 0">' + (pts.length === 1 ? "Une seule valeur pour l'instant : la courbe se dessinera dès la prochaine." : "Fais glisser le doigt sur la courbe pour voir chaque valeur.") + "</p></div>";
+    h += '<div class="section-title">Valeurs</div><div class="list w-list">' + ent.slice().reverse().map(x => '<div><b>' + esc(fmtDate(wTime(x.date))) + '</b><span class="w-r"><b class="num">' + esc(mFmt(d, x.v)) + '</b>' +
+      '<button type="button" class="cv-del" data-act="mdel" data-id="' + x.id + '" aria-label="Supprimer la valeur du ' + esc(fmtDate(wTime(x.date))) + '">×</button></span></div>').join("") + "</div>";
     setTimeout(evoFit, 0);
   }
-  return h + '<button type="button" class="linkbtn" data-act="woff">Ne plus suivre mon poids</button>';
+  return h + '<div class="row duo m-foot"><button type="button" class="btn sm" data-act="mrename" data-k="' + k + '">Renommer</button><button type="button" class="btn sm danger" data-act="mremove" data-k="' + k + '">Supprimer cet indicateur</button></div>';
 }
-async function weightAction(act, b) {
-  const st = settings();
-  if (act === "wok") { st.weightOk = new Date().toISOString(); st.weightHidden = false; put("settings", st); render(); return; }
-  if (act === "wno") { st.weightHidden = true; put("settings", st); toast("Le poids n'est plus proposé. « + Suivre mon poids », en bas de l'onglet Évolution, le réaffiche"); go("evolution"); return; }
-  if (act === "wshow") { st.weightHidden = false; put("settings", st); go("evolution/poids"); return; }
+// nom et unité d'un indicateur (création ou renommage)
+function askMetric(cur) {
+  return new Promise(res => {
+    const d = document.createElement("div"); d.className = "modal";
+    d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + (cur ? "Renommer l'indicateur" : "Nouvel indicateur") + '"><h3>' + (cur ? "Renommer l'indicateur" : "Nouvel indicateur") + "</h3>" +
+      (cur ? "" : "<p>Choisis ce que tu veux suivre dans le temps : tu y noteras une valeur par jour.</p>") +
+      '<label class="fl">Nom<input class="f" data-in maxlength="30" placeholder="Ex. Poids, Tour de taille, Tour de bras" autocomplete="off" value="' + esc(cur ? cur.n : "") + '"></label>' +
+      '<label class="fl">Unité (facultatif)<input class="f" data-iu maxlength="12" placeholder="Ex. kg, cm, %" autocomplete="off" value="' + esc(cur ? cur.u : "") + '"></label>' +
+      '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">' + (cur ? "Enregistrer" : "Créer") + "</button></div></div>";
+    document.body.appendChild(d);
+    const n = d.querySelector("[data-in]"), u = d.querySelector("[data-iu]"); n.focus();
+    const ok = () => { const v = cutStr(n.value.replace(/\s+/g, " ").trim(), 30); if (!v) { d.querySelector("[data-m]").textContent = "Donne un nom à l'indicateur."; return; } d.remove(); res({ n: v, u: cutStr(u.value.replace(/\s+/g, " ").trim(), 12) }); };
+    n.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); u.focus(); } });
+    u.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); ok(); } });
+    d.addEventListener("click", e => {
+      if (e.target === d) { d.remove(); res(null); return; }
+      const r = e.target.closest("[data-r]"); if (!r) return;
+      if (r.dataset.r === "1") ok(); else { d.remove(); res(null); }
+    });
+  });
+}
+async function metricAction(act, b) {
   if (act === "wper") { wPer = b.dataset.v; render(); return; }
-  if (act === "wsave") {
-    if (!weightOk()) return;
-    const di = document.querySelector("[data-w-date]"), ki = document.querySelector("[data-w-kg]"); if (!di || !ki) return;
-    const date = di.value, today = ymd(Date.now()), kg = Math.round(Number(String(ki.value).replace(",", ".").replace(/\s/g, "")) * 10) / 10;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) { toast("Choisis un jour passé ou aujourd'hui"); return; }
-    if (isFree() && date < wFreeFrom()) { toast("En version gratuite, tu peux noter les " + W_FREE_DAYS + " derniers jours"); return; }
-    if (!ki.value.trim() || !(kg >= W_MIN && kg <= W_MAX)) { toast("Note un poids entre " + W_MIN + " et " + W_MAX + " kg"); ki.focus(); return; }
-    const id = "poids-" + date, had = getItem(id);
-    put("weight", { id, date, kg, at: Date.now() });
-    toast(had ? "Pesée du " + fmtDate(wTime(date)) + " remplacée : " + wFmt(kg) : "Poids enregistré : " + wFmt(kg)); render(); return;
+  if (act === "madd") {
+    const ms = metrics(); if (ms.length >= M_MAX) { toast(M_MAX + " indicateurs perso au plus"); return; }
+    if (!await askIndConsent()) return;
+    const r = await askMetric(null); if (!r) return;
+    if (metrics().some(x => norm(x.n) === norm(r.n) && norm(x.u) === norm(r.u))) { toast("Tu as déjà l'indicateur « " + r.n + " »"); return; }
+    const k = "m" + uid();
+    setMetrics(metrics().concat([{ k, n: r.n, u: r.u }])); toast("Indicateur « " + r.n + " » créé"); go("evolution/ind:" + k); return;
   }
-  if (act === "wdel") {
-    const x = getItem(b.dataset.id); if (!x) return;
-    if (!await ask({ title: "Supprimer cette pesée ?", text: fmtDate(wTime(x.date)) + " : " + wFmt(x.kg), ok: "Supprimer", danger: true })) return;
+  if (act === "msave") {
+    const k = b.dataset.k, d = metricDef(k); if (!d) return;
+    const di = document.querySelector("[data-m-date]"), vi = document.querySelector("[data-m-v]"); if (!di || !vi) return;
+    const date = di.value, today = ymd(Date.now()), raw = String(vi.value).replace(/\s/g, "").replace(",", ".").replace("−", "-"), v = Math.round(Number(raw) * 100) / 100;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) { toast("Choisis un jour passé ou aujourd'hui"); return; }
+    if (isFree() && date < mFreeFrom()) { toast("En version gratuite, tu peux noter les " + M_FREE_DAYS + " derniers jours"); return; }
+    if (!raw || !/^-?\d+(\.\d+)?$/.test(raw) || !isFinite(v) || Math.abs(v) >= M_ABS) { toast("Note un nombre (ex. 72,4)"); vi.focus(); return; }
+    const id = "v-" + k + "-" + date, had = getItem(id);
+    put("measure", { id, k, date, v, at: Date.now() });
+    toast(had ? "Valeur du " + fmtDate(wTime(date)) + " remplacée : " + mFmt(d, v) : "Enregistré : " + mFmt(d, v)); render(); return;
+  }
+  if (act === "mdel") {
+    const x = getItem(b.dataset.id); if (!x) return; const d = metricDef(x.k);
+    if (!await ask({ title: "Supprimer cette valeur ?", text: fmtDate(wTime(x.date)) + " : " + mFmt(d, x.v), ok: "Supprimer", danger: true })) return;
     remove(x.id); render(); return;
   }
-  if (act === "woff") {
-    const n = weights().length;
-    const c = await choose("Suivi du poids", [
-      ["hide", "Masquer seulement", "Le poids disparaît de l'onglet Évolution ; ton accord et " + (n > 1 ? "tes " + n + " pesées sont gardés" : n ? "ta pesée sont gardés" : "ton suivi sont gardés") + ". « + Suivre mon poids », en bas de l'onglet, le réaffiche."],
-      ["erase", n > 1 ? "Retirer mon accord et effacer mes " + n + " pesées" : n ? "Retirer mon accord et effacer ma pesée" : "Retirer mon accord",
-        "Ton poids n'est plus noté" + (n ? ", et " + (n > 1 ? "tes pesées sont effacées" : "ta pesée est effacée") + " (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard."]
-    ], "Que veux-tu faire ?");
-    if (!c) return;
-    if (c === "hide") { st.weightHidden = true; put("settings", st); toast("Poids masqué : ton accord et tes pesées sont gardés"); go("evolution"); return; }
-    eraseWeights();
-    const s2 = settings(); s2.weightOk = null; s2.weightGoneAt = new Date().toISOString(); s2.weightHidden = true; put("settings", s2);
-    toast(n ? "Accord retiré : " + (n > 1 ? n + " pesées effacées" : "1 pesée effacée") : "Accord retiré : ton poids n'est plus noté"); go("evolution");
+  if (act === "mrename") {
+    const d = metricDef(b.dataset.k); if (!d) return;
+    const r = await askMetric(d); if (!r) return;
+    setMetrics(metrics().map(x => x.k === d.k ? { k: x.k, n: r.n, u: r.u } : x)); toast("Indicateur renommé : « " + r.n + " »"); render(); return;
+  }
+  if (act === "mremove") {
+    const d = metricDef(b.dataset.k); if (!d) return; const n = measures(d.k).length;
+    if (!await ask({ title: "Supprimer « " + d.n + " » ?", text: n ? "L'indicateur et ses " + mWord(n, "valeur") + " sont effacés (aussi sur tes autres appareils, à la prochaine synchronisation)." : "L'indicateur est supprimé.", ok: "Supprimer", danger: true })) return;
+    flushPending(); for (const it of Object.values(db.items)) if (it.kind === "measure" && !it.deleted && it.data && it.data.k === d.k) remove(it.id);
+    setMetrics(metrics().filter(x => x.k !== d.k)); toast("« " + d.n + " » supprimé"); go("evolution"); return;
+  }
+  if (act === "mconsent") {
+    const nm = metrics().length, nc = ownCvDefs(), nv = measures().length + ownCvCount(all("workout")) + all("weight").length, ni = nm + nc;
+    const what = ni || nv ? "Tes " + mWord(ni, "indicateur perso", "indicateurs perso") + (nv ? " et leurs " + mWord(nv, "valeur") : "") + " sont effacés : Stats › Évolution et séances de cardio (aussi sur tes autres appareils, à la prochaine synchronisation)." : "Aucun indicateur perso n'est enregistré.";
+    if (!await ask({ title: "Retirer ton accord ?", text: what + " Tu pourras redonner ton accord plus tard, en créant un nouvel indicateur.", ok: ni || nv ? "Retirer mon accord et tout effacer" : "Retirer mon accord", danger: true })) return;
+    const erased = eraseInd(), now = new Date().toISOString(), st = settings();
+    st.indOk = null; st.indGoneAt = now; st.metrics = []; st.cardioCustom = {};
+    if (st.hrOk || st.hrGoneAt) { st.hrOk = null; st.hrGoneAt = now; } if (st.weightOk || st.weightGoneAt) { st.weightOk = null; st.weightGoneAt = now; }
+    put("settings", st);
+    toast(erased ? "Accord retiré : " + mWord(erased, "valeur effacée", "valeurs effacées") : "Accord retiré"); if (route().name === "evolution" && !route().args[0]) render(); else go("evolution");
   }
 }
-// jour choisi : le poids déjà noté ce jour-là s'affiche (pour le corriger)
+// jour choisi : la valeur déjà notée ce jour-là s'affiche (pour la corriger)
 document.addEventListener("change", e => {
-  if (!e.target.matches || !e.target.matches("input[data-w-date]")) return;
-  const x = getItem("poids-" + e.target.value), ki = document.querySelector("[data-w-kg]");
-  if (ki) ki.value = x && typeof x.kg === "number" ? fmtNum(x.kg) : "";
+  if (!e.target.matches || !e.target.matches("input[data-m-date]")) return;
+  const x = getItem("v-" + e.target.dataset.k + "-" + e.target.value), vi = document.querySelector("[data-m-v]");
+  if (vi) vi.value = x && typeof x.v === "number" ? fmtNum(x.v) : "";
 });
 
 /* ================= Records et 1RM estimé ================= */
@@ -3453,7 +3587,7 @@ function pickDistance(title, value, unit) {
 }
 // roues d'un indicateur de cardio : [maximum, décimales (10 : dixièmes), valeur de départ]
 const CV_W = { vit: [30, 10, 10], incl: [40, 10, 1], res: [40, 0, 8], cad: [200, 0, 80], watts: [1000, 0, 150], spm: [250, 0, 120], etages: [500, 0, 50], marches: [3000, 0, 500],
-  niv: [30, 0, 8], cpm: [60, 0, 25], cal: [2000, 0, 200], fc: [220, 0, 130] };
+  niv: [30, 0, 8], cpm: [60, 0, 25], cal: [2000, 0, 200] };
 function pickNumber(title, value, spec, unit) {
   const [max, dec, def] = spec, v = num(value) != null ? num(value) : def, u = unit ? " " + unit : "";
   if (!dec) return pickWheels(title, [{ vals: rng(max + 1), fmt: x => (unit === "niveau" ? "Niveau " + x : x + u), value: Math.min(max, Math.round(v)) }]).then(r => (r ? r[0] : null));
@@ -3750,7 +3884,7 @@ const FAQ = [
     ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer »."],
     ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Un appui prolongé sur une séance affiche la liste de ses exercices."],
     ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice. Exercice avec assistance (tractions ou dips à la machine à contrepoids, élastique) : note un poids négatif, par exemple −20 kg ; moins d'assistance = progrès dans Stats › Évolution."],
-    ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur ? « + Ajouter un indicateur » sous la machine : il sera proposé à chaque fois."],
+    ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur (fréquence cardiaque, watts max…) ? « + Ajouter un indicateur » sous la machine, puis « Créer un indicateur » avec le nom et l'unité de ton choix : il sera proposé à chaque fois (la première fois, Fiitday te demande ton accord, voir « Comment suivre mon poids ou une autre mesure ? »)."],
     ["superset", "Comment faire un superset ou un dégressif ?", "Ajoute d'abord tes exercices, puis dans la configuration de la séance : « Enchaîner avec l'exercice suivant » relie deux exercices en superset ou biset (un 3e exercice ajouté au groupe en fait un triset), et le réglage « Dégressif » d'un exercice ajoute les baisses de charge. Dans un superset, le repos démarre seulement quand tout le tour est fini."]]],
   ["Pendant la séance", [
     ["repos", "Comment fonctionne le repos ?", "Quand tu valides une série (✓), le repos démarre tout seul avec la durée réglée pour l'exercice. Tu peux ajouter ou enlever 15 s, le passer ou le réduire. Après la dernière série d'un exercice, c'est le « Repos avant l'exercice suivant » qui démarre : il se règle dans la configuration de la séance."],
@@ -3759,7 +3893,7 @@ const FAQ = [
     ["gris", "À quoi servent les chiffres en gris ?", "Ce sont tes valeurs de la dernière fois pour cet exercice. Le bouton ✓ les reprend si tu as fait pareil ; sinon, tape simplement tes nouveaux chiffres."]]],
   ["Progrès et exercices", [
     ["progression", "Comment voir ma progression sur un exercice ?", "Dans <a href=\"#/evolution\">Stats › Évolution</a>, cherche un exercice déjà fait : tu vois sa courbe (charge, 1RM estimé, répétitions ou temps), ton record et ton historique, sur 1 mois, 3 mois, 6 mois, 1 an ou depuis le début."],
-    ["poids", "Comment suivre mon poids ?", "Dans <a href=\"#/evolution/poids\">Stats › Évolution › Poids</a>. C'est facultatif : Fiitday te demande d'abord ton accord, car le poids peut renseigner sur ta santé. Note un poids par jour (en kg, avec une décimale) pour voir sa courbe ; en version gratuite, tu vois les 30 derniers jours. Ton poids est visible de toi seul et jamais partagé. « Ne plus suivre mon poids » permet de le masquer, ou de retirer ton accord : tes pesées sont alors effacées."],
+    ["poids", "Comment suivre mon poids ou une autre mesure ?", "Avec tes indicateurs perso, en haut de <a href=\"#/evolution\">Stats › Évolution</a> : « + Ajouter un indicateur », puis donne-lui le nom et l'unité de ton choix (par exemple « Poids » en kg, « Tour de taille » en cm). Note ensuite une valeur par jour (le jour et la valeur) pour voir sa courbe ; en version gratuite, tu vois les 30 derniers jours. C'est facultatif : comme un indicateur peut renseigner sur ta santé, Fiitday te demande ton accord une seule fois, au premier indicateur perso (ici ou en séance de cardio). Tes indicateurs sont visibles de toi seul et jamais partagés. Sur la page d'un indicateur : « Renommer » ou « Supprimer cet indicateur » (ses valeurs sont effacées). En bas de Stats › Évolution, « Indicateurs perso : retirer mon accord » efface tous tes indicateurs perso et leurs valeurs. Tes pesées et fréquences cardiaques notées avant la V1.147 sont devenues les indicateurs « Poids » et « Fréquence cardiaque »."],
     ["record", "Comment est calculé un record ?", "Pour un exercice avec poids, Fiitday estime ton 1RM (la charge que tu pourrais soulever une seule fois) avec la formule d'Epley : charge × (1 + répétitions ÷ 30). Un record est fêté quand ce 1RM dépasse ton meilleur, à partir de ta 2e séance avec cet exercice. Pour la course, le record est ton meilleur temps."],
     ["corriger", "Comment corriger ou supprimer une séance terminée ?", "Ouvre-la depuis l'accueil (Dernières séances) ou <a href=\"#/history\">Stats › Historique</a> pour corriger une valeur. Pour la supprimer, fais glisser sa ligne de droite à gauche, puis appuie sur « Supprimer »."],
     ["etirements", "Quand et comment m'étirer ?", "L'onglet <a href=\"#/exercices/etirements\">Exercices › Étirements</a> propose 23 étirements avec le mannequin 3D, et le guide « Bien s'étirer » explique quand et comment le faire. Après une séance, l'accueil te propose pendant 15 minutes des étirements adaptés aux muscles travaillés (tu peux couper ces propositions dans Réglages › Étirements après la séance)."],
@@ -3801,7 +3935,7 @@ const GUIDE = [
     "Filtre « Mes exercices » : crée, modifie ou supprime tes propres exercices, avec ce que tu veux noter (poids, reps, temps, distance ou tes indicateurs)."]],
   ["Stats", "#/progress", "Tes progrès, en quatre onglets.", [
     "Séances : ta semaine par rapport à ton objectif, le temps de sport et les séances par semaine.",
-    "Évolution : la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records, et ton poids si tu choisis de le suivre.",
+    "Évolution : tes indicateurs perso (poids, tour de taille… si tu choisis d'en créer), puis la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records.",
     "Calendrier : les jours où tu t'es entraîné.",
     "Historique : toutes tes séances terminées, à revoir ou à corriger."]],
   ["Programmes", "#/programs", "Les programmes Fiitday prêts à l'emploi.", [
@@ -3833,7 +3967,7 @@ const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 202
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
   ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Pendant l'essai, tout Premium est ouvert, sauf la restauration d'une sauvegarde faite avec un autre compte, réservée aux abonnés payants. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
-  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine, le suivi du poids sur 30 jours et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
+  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine, tes indicateurs perso (poids, tour de taille…) sur 30 jours et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : " + PRICES.solo.month + " par mois ou " + PRICES.solo.year + " par an. <b>Famille</b> (toi + " + (FAMILY_SIZE - 1) + " proches, chacun son compte) : " + PRICES.family.month + " par mois ou " + PRICES.family.year + " par an. <b>À vie</b>, en un seul paiement : " + PRICES.solo.life + " en Solo ou " + PRICES.family.life + " en Famille jusqu'au " + LIFE_LAST_TXT + ", puis " + PRICES.solo.lifeAfter + " et " + PRICES.family.lifeAfter + ". Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur fiitday.com, connecté à ton compte (ordinateur, iPhone ou téléphone Android) : page <a href=\"#/premium\">Premium</a>, paiement par carte bancaire. Premium est lié à ton compte : il marche ensuite sur tous tes appareils, dans l'appli Android aussi. Le paiement par Google Play arrivera avec l'appli sur le Play Store."],
   ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (tout de suite, avec le remboursement de la part non utilisée, ou à la fin de la période déjà payée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
@@ -3884,7 +4018,7 @@ const MONETIZATION = false;
 const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
 // Premium ou gratuit : écran Premium et page de présentation du site
 const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives (changement tous les " + FREE_SWITCH_DAYS + " jours)"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
-  ["Stats", "Temps, tonnage, Évolution, calendrier, poids (tout l'historique)", "La semaine en cours, ton poids sur 30 jours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
+  ["Stats", "Temps, tonnage, Évolution, calendrier, indicateurs perso (tout l'historique)", "La semaine en cours, tes indicateurs perso sur 30 jours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
   ["Sauvegarde", "Enregistrer et restaurer, aussi d'un compte à l'autre", "Enregistrer et restaurer dans ce compte"]];
 let premiumFor = "solo", premiumPick = "year", premiumConsent = false; // case à cocher avant le paiement : demande expresse que Premium commence avant la fin du délai de rétractation (Code de la consommation, L221-25)
 // achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
@@ -3952,8 +4086,7 @@ const trialLeft = () => Math.max(0, Math.ceil(((planTesting() ? db.planTestEnd :
 // « off » : pas d'abonnement (appli complète) · « trial » : essai, tout comme Premium · « free » : version gratuite · « premium » : abonné
 function planState() {
   if (planTesting()) return db.planTest === "trial" && trialLeft() <= 0 ? "free" : db.planTest === "family" || db.planTest === "member" ? "premium" : db.planTest;
-  // ancien mode « sans compte » (plus proposé) : une fois les ventes ouvertes, il vaut la version gratuite
-  if (!db.auth) return db.mode === "local" && MONETIZATION ? "free" : "off";
+  if (!db.auth) return "off"; // pas connecté : seul l'écran de connexion s'affiche
   // statut donné par le serveur (my_plan) : « off » tant que la date de lancement n'est pas atteinte
   const p = db.plan;
   if (!p || !p.launched) return "off";
@@ -4341,7 +4474,7 @@ function viewContract(kind) {
       "<p>" + (d.mail_sent ? "Une confirmation t'a été envoyée par e-mail à <b>" + esc(ctr.email) + "</b>." : "L'e-mail de confirmation n'a pas pu partir pour l'instant : garde cet écran (par exemple en capture d'écran), il fait foi. Nous t'écrirons à " + esc(ctr.email) + ".") + "</p>" +
       '<a class="btn" href="#/settings">Retour aux réglages</a></div>';
   }
-  if (!db.auth) return head + '<div class="card empty">Tu utilises Fiitday sans compte : il n\'y a aucun achat à ' + (res ? "résilier" : "annuler") + '. <a class="link" href="#/settings">Retour aux réglages</a></div>';
+  if (!db.auth) return head + '<div class="card empty">Connecte-toi pour voir tes achats et ' + (res ? "résilier" : "annuler") + '. <a class="link" href="#/settings">Retour aux réglages</a></div>';
   if (!contracts || (!contracts.ok && !contracts.err && contractsBusy)) { loadContracts(); return head + '<div class="card empty">Chargement de tes achats…</div>'; }
   if (!contracts.ok) return head + '<div class="card"><p class="msg err" style="margin:0">' + esc(contracts.err || "Tes achats n'ont pas pu être chargés") + '</p><button class="btn sm" style="margin-top:10px" data-act="ctrreload">Réessayer</button></div>';
   const items = ctrItems().filter(i => res ? i.type === "sub" : canRetract(i));
@@ -5250,7 +5383,7 @@ function viewSettings() {
     (db.auth ? '<label class="fl" style="margin-bottom:8px">Prénom<input class="f" data-setname maxlength="40" autocomplete="given-name" value="' + esc(firstName()) + '" placeholder="Ton prénom"></label>' +
       '<div class="small">Connecté : ' + esc(db.auth.user.email) + "</div><div class=\"sync-row\">" + syncBadge() + '<button class="link small" data-act="syncnow">Synchroniser maintenant</button></div><div class="small msg err" data-sync-error>' + esc(syncMsg()) + "</div>" +
       '<button class="btn sm pw-btn" data-act="pwchange">Changer mon mot de passe</button><div class="row duo"><button class="btn sm" data-act="logout">Se déconnecter</button><button class="btn sm danger" data-act="delaccount">Supprimer mon compte</button></div>'
-      : '<div class="small muted">Sans compte : tes données restent sur cet appareil.</div><button class="btn sm primary" style="margin-top:8px" data-act="tologin">Se connecter / créer un compte</button>') +
+      : "") +
     "</div></div>" +
     '<div class="card"><h2 class="card-h">Aide</h2><div class="small muted" style="margin-top:4px">Le tour de l\'appli page par page, et les réponses aux questions les plus fréquentes.</div><div class="row duo"><a class="btn sm" href="#/guide">Guide</a><a class="btn sm" href="#/faq">Questions fréquentes</a></div></div>' +
     '<div class="card"><h2 class="card-h">Informations légales</h2><div class="row duo">' +
@@ -5390,7 +5523,7 @@ $app.addEventListener("click", async e => {
     case "recapok": try { localStorage.setItem("fiitday-recap-ok", b.dataset.id); } catch (err) { } render(); break;
     case "evometric": evo.m[b.dataset.k] = b.dataset.v; render(); break;
     case "evoper": evo.per = b.dataset.v; render(); break;
-    case "wok": case "wno": case "wshow": case "wper": case "wsave": case "wdel": case "woff": await weightAction(a, b); break;
+    case "madd": case "msave": case "mdel": case "mrename": case "mremove": case "mconsent": case "wper": await metricAction(a, b); break;
     case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
     case "cardiohome": cardioStart(); break;
     case "freestart": freeStart(); break;
@@ -5478,20 +5611,14 @@ $app.addEventListener("click", async e => {
     } break;
     case "cvadd": if (w && w.exercises[i]) {
       const e = w.exercises[i], key = cardioKey(e), list = cardioCustom(key), hid = cardioHidden(key);
-      const back = cardioDefs(e).filter(d => hid.includes(d.k) || (d.k === "fc" && !hrOk() && !hasHr(e))); // indicateurs retirés (ou pas encore activés) : on peut les ajouter
+      const back = cardioDefs(e).filter(d => hid.includes(d.k)); // indicateurs retirés de la carte : on peut les remettre
       if (back.length) {
-        const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.k === "fc" && !hrOk() ? "Facultatif : demande ton accord" : d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
-        if (c !== "new") {
-          const k = c.slice(2);
-          if (k === "fc" && !hrOk()) {
-            // accord exprès, séparé et retirable : la fréquence cardiaque peut être une donnée de santé (art. 9 du RGPD)
-            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux (« × » sur l'indicateur, puis « Retirer mon accord ») : tes valeurs déjà notées sont alors effacées.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
-            setSetting("hrOk", new Date().toISOString());
-          }
-          setCardioHidden(key, hid.filter(x => x !== k)); render(); return;
-        }
+        const c = await choose("Ajouter un indicateur", back.map(d => ["k:" + d.k, d.n, d.u && d.u !== "niveau" ? d.u : ""]).concat([["new", "+ Créer un indicateur", "Nom et unité de ton choix"]])); if (!c) return;
+        if (c !== "new") { const k = c.slice(2); setCardioHidden(key, hid.filter(x => x !== k)); render(); return; }
       }
       if (list.length >= CARDIO_MAX_OWN) { toast(CARDIO_MAX_OWN + " indicateurs perso au plus par machine"); return; }
+      // indicateur perso : il peut contenir une donnée de santé (fréquence cardiaque…) : accord exprès unique, demandé une fois
+      if (!await askIndConsent()) return;
       const r = await askIndicator(e.name); if (!r) return;
       if (cardioDefs(e).some(d => norm(d.n) === norm(r.n) && norm(d.u) === norm(r.u))) { toast("Cet indicateur existe déjà pour « " + e.name + " »"); return; }
       const st = settings(), cc = Object.assign({}, st.cardioCustom); cc[key] = list.concat([{ k: "c" + uid(), n: r.n, u: r.u }]); st.cardioCustom = cc; put("settings", st);
@@ -5499,27 +5626,6 @@ $app.addEventListener("click", async e => {
     } break;
     case "cvdel": if (w && w.exercises[i]) { // retiré de la carte (pour cette machine) ; il reste dans « + Ajouter un indicateur » et ses valeurs restent dans tes séances
       const e = w.exercises[i], key = cardioKey(e), d = cardioDefs(e).find(x => x.k === b.dataset.k); if (!d) return;
-      // fréquence cardiaque : « × » retire l'accord et efface les valeurs déjà notées, dans toutes les séances
-      const n = d.k === "fc" ? hrCount(all("workout")) : 0;
-      if (d.k === "fc" && (hrOk() || n)) {
-        // deux choix : masquer pour cette machine (accord et valeurs gardés), ou retirer l'accord et effacer les valeurs
-        const vals = n > 1 ? "les " + n + " valeurs déjà notées sont effacées" : "la valeur déjà notée est effacée";
-        const c = await choose("Fréquence cardiaque", [
-          ["hide", "Masquer seulement", "Pour « " + e.name + " » ; " + (hrOk() ? "ton accord et tes valeurs sont gardés" : "tes valeurs sont gardées") + ". Tu peux la réafficher avec « + Ajouter un indicateur »."],
-          ["erase", n > 1 ? "Retirer mon accord et effacer mes " + n + " valeurs" : n ? "Retirer mon accord et effacer ma valeur" : "Retirer mon accord",
-            "Elle n'est plus proposée" + (n ? ", et " + vals + " de toutes tes séances (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard."]
-        ], "Que veux-tu faire ?");
-        if (!c) return;
-        if (c === "hide") {
-          const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
-          toast("Fréquence cardiaque masquée pour « " + e.name + " »"); render(); return;
-        }
-        eraseHr();
-        const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
-        const st = settings(); st.hrOk = null; st.hrGoneAt = new Date().toISOString(); put("settings", st);
-        toast(n ? "Accord retiré : " + (n > 1 ? n + " valeurs effacées" : "1 valeur effacée") + " de tes séances" : "Accord retiré : la fréquence cardiaque ne sera plus proposée");
-        render(); return;
-      }
       const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
       render();
     } break;
@@ -5545,7 +5651,6 @@ $app.addEventListener("click", async e => {
     } break;
     /* connexion */
     case "loginmode": { const em = $app.querySelector('input[name="email"]'); if (em) loginEmail = em.value; const fn = $app.querySelector('input[name="firstname"]'); if (fn) loginName = fn.value; loginMode = b.dataset.m === "up" ? "up" : "in"; render(); const f = $app.querySelector(loginEmail ? 'input[name="password"]' : 'input[name="email"]'); if (f) f.focus(); } break;
-    case "tologin": db.mode = null; saveNow(); render(); break;
     case "changemail": db.verify = null; saveNow(); render(); break;
     case "forgot": { const em = $app.querySelector('input[name="email"]'); resetEmail = em ? em.value.trim() : ""; resetStep = "email"; render(); } break;
     case "resetback": resetStep = null; render(); break;
@@ -6102,7 +6207,7 @@ $app.addEventListener("click", async e => {
 // sauvegarde (fichier, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
 // Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
 // repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
-const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt", "weightOk", "weightGoneAt"]; // accords (fréquence cardiaque, poids) et leur retrait : jamais repris d'une sauvegarde
+const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt", "weightOk", "weightGoneAt", "indOk", "indGoneAt", "indMig"]; // accords (indicateurs perso, anciens accords fréquence cardiaque et poids) et leur retrait : jamais repris d'une sauvegarde
 async function restoreBackup(txt, badMsg) {
   let j;
   try { j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items) || (j.v != null && !(j.v >= 1 && j.v <= 2))) throw new Error(); }
@@ -6123,27 +6228,22 @@ async function restoreBackup(txt, badMsg) {
   if (j.at) lines.push("Sauvegarde du " + new Date(j.at).toLocaleDateString("fr-FR") + " à " + fmtTime(j.at) + ".");
   if (nb("template")) lines.push("• " + pl(nb("template"), "programme ajouté ou remplacé par sa version de la sauvegarde", "programmes ajoutés ou remplacés par leur version de la sauvegarde"));
   if (nb("workout")) lines.push("• " + pl(nb("workout"), "séance ajoutée à l'historique ou remplacée", "séances ajoutées à l'historique ou remplacées"));
-  if (nb("weight")) lines.push("• " + pl(nb("weight"), "pesée ajoutée ou remplacée", "pesées ajoutées ou remplacées"));
+  if (nb("weight") + nb("measure")) lines.push("• " + pl(nb("weight") + nb("measure"), "valeur d'indicateur perso ajoutée ou remplacée", "valeurs d'indicateurs perso ajoutées ou remplacées"));
   if (nb("settings")) lines.push("• Réglages de la sauvegarde (thème, alertes, objectif…) ; tes exercices perso sont gardés et complétés");
   if (back.length) lines.push("• Dont " + pl(back.length, "élément supprimé depuis qui reviendra", "éléments supprimés depuis qui reviendront"));
   if (same) lines.push("• " + pl(same, "élément déjà à jour dans l'appli : gardé tel quel", "éléments déjà à jour dans l'appli : gardés tels quels"));
   if (bad) lines.push("• " + pl(bad, "élément illisible ignoré", "éléments illisibles ignorés"));
   if (!await ask({ title: "Restaurer cette sauvegarde ?", text: lines.join("\n"), ok: "Restaurer" })) return;
-  // fréquence cardiaque dans la sauvegarde sans accord en cours : la garder demande ton accord, sinon elle est effacée
-  const hrN = hrOk() ? 0 : hrCount(take.filter(x => x.kind === "workout").map(x => x.data));
-  if (hrN) {
-    const keep = await ask({ title: "Fréquence cardiaque dans la sauvegarde", text: "Cette sauvegarde contient " + (hrN > 1 ? hrN + " valeurs" : "1 valeur") + " de fréquence cardiaque. Elle peut renseigner sur ta santé : elle n'est gardée qu'avec ton accord, visible de toi seul, jamais partagée, et effacée si tu retires ton accord (« × » sur l'indicateur).",
-      ok: hrN > 1 ? "J'accepte de les garder" : "J'accepte de la garder", cancel: hrN > 1 ? "Les effacer" : "L'effacer" });
-    if (keep) { const st = settings(); st.hrOk = new Date().toISOString(); put("settings", st); }
-    else take.forEach(x => { if (x.kind === "workout") stripHr(x.data); });
-  }
-  // poids dans la sauvegarde sans accord en cours : le garder demande ton accord, sinon les pesées ne sont pas reprises
-  const wN = weightOk() ? 0 : take.filter(x => x.kind === "weight").length;
-  if (wN) {
-    const keep = await ask({ title: "Poids dans la sauvegarde", text: "Cette sauvegarde contient " + (wN > 1 ? wN + " pesées" : "1 pesée") + ". Ton poids peut renseigner sur ta santé : il n'est gardé qu'avec ton accord, visible de toi seul, jamais partagé, et effacé si tu retires ton accord (« Ne plus suivre mon poids »).",
-      ok: wN > 1 ? "J'accepte de les garder" : "J'accepte de la garder", cancel: wN > 1 ? "Les effacer" : "L'effacer" });
-    if (keep) { const st = settings(); st.weightOk = new Date().toISOString(); st.weightHidden = false; put("settings", st); }
-    else for (let k = take.length - 1; k >= 0; k--) if (take[k].kind === "weight") take.splice(k, 1);
+  // indicateurs perso dans la sauvegarde (valeurs, pesées et fréquences cardiaques d'avant la V1.147) sans accord en cours :
+  // les garder demande ton accord, sinon ils ne sont pas repris
+  const stNow = settings(), okNow = !!(stNow.indOk || stNow.hrOk || stNow.weightOk);
+  const indN = okNow ? 0 : take.filter(x => x.kind === "measure" || x.kind === "weight").length + ownCvCount(take.filter(x => x.kind === "workout").map(x => x.data));
+  let dropInd = false;
+  if (indN) {
+    const keep = await ask({ title: "Indicateurs perso dans la sauvegarde", text: "Cette sauvegarde contient " + mWord(indN, "valeur") + " d'indicateurs perso (poids, fréquence cardiaque, mesures de ton choix…). Ils peuvent renseigner sur ta santé : ils ne sont gardés qu'avec ton accord. " + IND_CONSENT.replace(/^C'est facultatif\. /, ""),
+      ok: "J'accepte de les garder", cancel: "Ne pas les reprendre" });
+    if (keep) { const st = settings(); st.indOk = new Date().toISOString(); put("settings", st); }
+    else { dropInd = true; for (let k = take.length - 1; k >= 0; k--) if (take[k].kind === "measure" || take[k].kind === "weight") take.splice(k, 1); take.forEach(x => { if (x.kind === "workout") stripOwnCv(x.data); }); }
   }
   for (const it of take) {
     const cur = db.items[it.id];
@@ -6163,11 +6263,15 @@ async function restoreBackup(txt, badMsg) {
         cc[k] = l.concat(b.filter(x => x && !l.some(y => y && y.k === x.k)));
       }
       data.cardioCustom = cc;
+      // indicateurs perso de Stats › Évolution : ceux du compte sont gardés, ceux de la sauvegarde ajoutés
+      const mM = Array.isArray(mine.metrics) ? mine.metrics.filter(x => x && x.k) : [], mB = Array.isArray(data.metrics) ? data.metrics.filter(x => x && x.k) : [];
+      data.metrics = mM.concat(mB.filter(x => !mM.some(y => y.k === x.k)));
+      if (dropInd) { data.cardioCustom = isObj(mine.cardioCustom) ? mine.cardioCustom : {}; data.metrics = mM; }
       data.id = it.id;
     }
     db.items[it.id] = { id: it.id, kind: it.kind, data, updated_at: Math.max(it.updated_at, (cur && cur.updated_at + 1) || 0), deleted: false, dirty: true };
   }
-  dataRev++; localFixed = false; saveNow(); scheduleSync(); render();
+  dataRev++; indMigrate(); saveNow(); scheduleSync(); render(); // anciennes pesées et fréquences cardiaques de la sauvegarde : converties
   toast(pl(take.length, "élément restauré", "éléments restaurés"));
 }
 

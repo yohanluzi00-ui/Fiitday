@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 
 import com.revenuecat.purchases.CustomerInfo;
+import com.revenuecat.purchases.DangerousSettings;
 import com.revenuecat.purchases.LogLevel;
 import com.revenuecat.purchases.ProductType;
 import com.revenuecat.purchases.PurchaseParams;
@@ -39,9 +40,15 @@ final class Billing {
         try {
             Purchases.setLogLevel(LogLevel.DEBUG);
             if (!Purchases.isConfigured()) {
+                // « Fiitday Test » n'est pas débogable (lot 5) : sans ce réglage, RevenueCat affiche
+                // « Wrong API Key » et ferme l'appli dès qu'une clé du magasin de test est dans une appli non débogable.
+                // Ici c'est voulu (achats factices, appli de test hors Obtainium), donc on l'autorise pour une clé test_ seulement.
+                DangerousSettings rc = new DangerousSettings();
+                if (key.startsWith("test_")) rc.forceAllowTestStoreInReleaseBuilds();
                 Purchases.configure(new PurchasesConfiguration.Builder(c.getApplicationContext(), key)
                         .automaticDeviceIdentifierCollectionEnabled(false) // pas d'identifiant publicitaire
                         .showInAppMessagesAutomatically(false)
+                        .dangerousSettings(rc)
                         .build());
             }
             ready = true;

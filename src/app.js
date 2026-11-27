@@ -533,6 +533,14 @@ async function accountGoneCheck(uid) {
     const res = await fetch(SUPABASE_URL + "/rest/v1/rpc/account_exists", { method: "POST", headers: { apikey: SUPABASE_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ p_uid: uid }) });
     if (!res.ok) return false; r = await res.json();
   } catch (e) { return false; }
+  if (r === "inactive") {
+    // compte supprimé après 2 ans sans utilisation (prévenu par e-mail) : les données de cet appareil restent, sans compte ;
+    // elles iront dans le prochain compte connecté ici (comme des données saisies sans compte)
+    if (db.auth && db.auth.user.id === uid && activeWorkout()) return false;
+    billingLogout(); db.auth = null; db.mode = null; db.plan = null; delete db.owner; delete db.checkGone; delete db.expired; dataRev++; saveNow();
+    try { sessionStorage.setItem("fiitday-msg", "Ton compte a été supprimé après 2 ans sans utilisation. Tes séances sont toujours sur cet appareil : connecte-toi ou crée un compte pour les garder"); } catch (e) { }
+    restart("#/home"); return true;
+  }
   if (r !== false) { if (db.checkGone === uid) { delete db.checkGone; saveNow(); } return false; }
   if (db.auth && db.auth.user.id === uid && activeWorkout()) return false; // séance en cours : elle se finit, on revérifiera ensuite
   billingLogout(); db = emptyDb(); dataRev++; saveNow();
@@ -957,7 +965,7 @@ function softRender() {
   render();
 }
 
-const LEGAL = { version: "2026-11-27", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html",
+const LEGAL = { version: "2026-11-27b", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html",
   cgu: "https://fiitday.com/cgu.html", cgv: "" }; // cgv : « https://fiitday.com/cgv.html » le jour où les conditions générales de vente sont publiées (lien dans la page de présentation)
 let consentAsked = false, nameAsked = false, cguAsked = false;
 // conditions d'utilisation (CGU) publiées le 27 novembre 2026 : acceptées à l'inscription ; un compte plus ancien les voit une fois
@@ -1007,13 +1015,17 @@ async function askConsentIfNeeded() {
   if (!ok) return;
   const st = settings(); st.consentAt = new Date().toISOString(); st.consentVersion = LEGAL.version; put("settings", st);
 }
-// compte créé avant les conditions d'utilisation : on les présente une fois (continuer à utiliser Fiitday vaut acceptation, CGU art. 12)
+// compte créé avant la dernière version des conditions : on présente une fois ce qui change (continuer à utiliser Fiitday vaut
+// acceptation, CGU art. 12)
 async function cguNoticeIfNeeded() {
-  const st0 = settings();
-  if (cguAsked || !db.auth || !st0.consentAt || (st0.consentVersion || "") >= CGU_SINCE) return;
+  const st0 = settings(), v = st0.consentVersion || "";
+  if (cguAsked || !db.auth || !st0.consentAt || v >= LEGAL.version) return;
   if (document.querySelector("body > .modal")) return;
   cguAsked = true;
-  const read = await ask({ title: "Conditions d'utilisation", text: "Fiitday a maintenant des conditions d'utilisation : les règles des séances partagées, comment signaler un contenu, et ce que l'appli fait ou ne fait pas. Nouveau : un lien de partage est effacé 7\u00a0jours après sa création. Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" });
+  const idle = "un compte inutilisé pendant 2\u00a0ans est supprimé, après un e-mail de prévenance au moins 30\u00a0jours avant (il suffit d'ouvrir Fiitday pour le garder)";
+  const read = await ask(v < CGU_SINCE
+    ? { title: "Conditions d'utilisation", text: "Fiitday a maintenant des conditions d'utilisation : les règles des séances partagées, comment signaler un contenu, et ce que l'appli fait ou ne fait pas. Nouveau : un lien de partage est effacé 7\u00a0jours après sa création, et " + idle + ". Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" }
+    : { title: "Mise à jour des conditions", text: "Les conditions d'utilisation et la politique de confidentialité changent : " + idle + ". Le code de transfert disparaît : pour passer tes données sur un autre compte, utilise la sauvegarde (Réglages › Données). Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" });
   const st = settings(); st.consentVersion = LEGAL.version; st.cguAt = new Date().toISOString(); put("settings", st);
   if (read) openExternal(LEGAL.cgu);
 }
@@ -1330,10 +1342,11 @@ function viewLanding() {
     '<section class="lp-sec lp-alt" id="lp-ecrans"><div class="lp-in"><h2>Un coup d\'œil à l\'appli</h2>' +
       '<div class="lp-shots">' + LP_SHOTS.slice(1).map(([k, alt]) => "<figure>" + shot(k, alt, true) + "<figcaption>" + esc(alt) + "</figcaption></figure>").join("") + "</div></div></section>" +
     '<section class="lp-sec" id="lp-tarifs"><div class="lp-in"><h2>Gratuit pour commencer</h2>' +
-      '<p class="lp-lead">À la création de ton compte, tu as <b>' + TRIAL_DAYS + ' jours de Premium offerts</b>, sans carte bancaire. Ensuite, soit tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
+      '<p class="lp-lead">' + (MONETIZATION ? 'À la création de ton compte, tu as <b>' + TRIAL_DAYS + ' jours de Premium offerts</b>, sans carte bancaire. Ensuite, soit' : 'Après le lancement, chaque compte aura <b>' + TRIAL_DAYS + ' jours de Premium offerts</b>, sans carte bancaire ; ensuite, soit') +
+        ' tu passes à Premium, soit tu continues avec la <b>version gratuite, plus limitée</b> (détail ci-dessous). Rien n\'est supprimé : ce qui dépasse les limites est gardé avec un cadenas, et tout revient avec Premium.</p>' +
       (MONETIZATION ? "" : '<p class="lp-note">Les abonnements ne sont pas encore ouverts : en attendant, toute l\'appli est gratuite. Voici les prix prévus.</p>') +
       '<div class="lp-prices">' +
-        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et ' + FREE_VARIANTS + ' séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des ' + FREE_HIST_DAYS + ' derniers jours</li><li>Stats de la semaine</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
+        '<div class="lp-price"><h3>Gratuit</h3><div class="amt num">0 €</div><div class="lp-small">Sans limite de durée</div><ul><li>1 programme et ' + FREE_VARIANTS + ' séances actives, à changer une fois tous les ' + FREE_SWITCH_DAYS + ' jours</li><li>' + FREE_OWN + ' exercices perso</li><li>Historique des ' + FREE_HIST_DAYS + ' derniers jours</li><li>Stats de la semaine</li><li>Suivi du poids sur 30 jours</li><li>Sur un seul appareil, sans synchro</li></ul></div>' +
         [["solo", "Premium Solo", "Pour toi, sur tous tes appareils"], ["family", "Premium Famille", "Toi et 4 proches, chacun avec son compte et ses données"]].map(([k, t, d]) => { const pr = PRICES[k];
           return '<div class="lp-price' + (k === "solo" ? " best" : "") + '"><h3>' + t + '</h3><div class="amt num">' + pr.month + " <small>/ mois</small></div>" +
             '<div class="lp-small">ou ' + pr.year + " par an (soit " + pr.yearMonth + " par mois)<br>" + esc(lifeTxt(pr)) + "</div><ul><li>" + esc(d) + "</li><li>Tout illimité, toutes les stats</li><li>Synchro téléphone et ordinateur</li><li>Les programmes Fiitday</li></ul></div>"; }).join("") +
@@ -3669,7 +3682,7 @@ function fatWorkout(d) {
   if (!d || !Array.isArray(d.exercises)) return d;
   return Object.assign({}, d, { exercises: d.exercises.map(e => Object.assign({ groupId: null, groupKind: null, note: "" }, e, { sets: (Array.isArray(e.sets) ? e.sets : []).map(st => Object.assign({ kg: "", reps: "", sec: "", done: false }, st, { drops: (st.drops || []).map(dr => Object.assign({ kg: "", reps: "" }, dr)) })) })) });
 }
-// contenu complet d'une sauvegarde (fichier, code de transfert, ancien texte)
+// contenu complet d'une sauvegarde (fichier, ancien texte)
 async function backupText() {
   flushPending();
   return packBackup(JSON.stringify({ app: "muscuapp", v: 2, at: Date.now(), owner: db.auth ? db.auth.user.id : undefined, items: Object.values(db.items).filter(x => !x.deleted).map(x => ({ id: x.id, kind: x.kind, data: slimData(x), updated_at: x.updated_at })) }));
@@ -3709,19 +3722,9 @@ function openFile() {
     inp.click();
   });
 }
-// code de transfert : 8 caractères, lettres majuscules et chiffres sans 0 / O / 1 / I (créé et vérifié par Supabase)
+// codes d'invitation Famille : 8 caractères, lettres majuscules et chiffres sans 0 / O / 1 / I (créés et vérifiés par Supabase)
 const XFER_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
 const normCode = t => String(t || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-const xferErr = err => err && (err.code === "PGRST202" || err.status === 404) ? "Les codes de transfert ne sont pas encore activés (SQL transfert.sql à exécuter dans Supabase)"
-  : err && err.message === "Failed to fetch" ? "Pas de connexion : réessaie avec du réseau" : (err && err.message) || "Erreur, réessaie";
-async function useTransferCode(raw) {
-  const c = normCode(raw);
-  if (!XFER_RE.test(c)) { toast("Un code de transfert fait 8 caractères (lettres et chiffres)"); return; }
-  if (!db.auth) { toast("Connecte-toi au compte qui doit recevoir les données"); return; }
-  let txt; try { txt = await rpc("use_transfer", { p_code: c }); } catch (err) { toast(xferErr(err)); return; }
-  if (!txt || typeof txt !== "string") { toast("Code inconnu ou expiré (un code n'est valable qu'une heure)"); return; }
-  restoreBackup(txt, "Ce code ne contient pas une sauvegarde valide");
-}
 // « FIITDAY1: » + données compressées en base64 : bien plus court que le texte brut
 async function packBackup(str) {
   if (!window.CompressionStream) return str;
@@ -3764,10 +3767,11 @@ const FAQ = [
   ["Données et compte", [
     ["synchro", "Mes données sont-elles sur mon téléphone et sur mon ordinateur ?", "Avec Premium (et pendant l'essai) : oui, tout se synchronise automatiquement entre l'appli et fiitday.com. L'heure de la dernière synchro est dans Réglages › Compte. Sans réseau, fais ta séance normalement : elle sera envoyée au retour du réseau. En version gratuite, tes données restent sur l'appareil où tu les notes : pense à faire une sauvegarde de temps en temps."],
     ["sauvegarde", "Comment faire une sauvegarde de mes données ?", "<a href=\"#/settings\">Réglages</a> › Données › « Sauvegarde » crée un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…). « Restaurer » le relit : ce qui a été supprimé depuis revient, et ce que tu as modifié depuis garde sa version la plus récente. Une sauvegarde faite avec ton compte se restaure toujours, même en version gratuite ; celle d'un autre compte est réservée aux abonnés payants."],
-    ["transfert", "Comment passer mes données sur un autre compte ?", "Dans l'ancien compte : Réglages › Données › « Créer un code ». Tu obtiens un code de 8 caractères, valable 1 heure. Dans le nouveau compte : « J'ai un code », puis tape-le. Ne le donne à personne d'autre : il donne accès à toutes tes données. Le code de transfert est réservé aux abonnés payants (pas pendant l'essai)."],
+    ["transfert", "Comment passer mes données sur un autre compte ?", "Dans l'ancien compte : Réglages › Données › « Sauvegarde ». Puis connecte-toi au nouveau compte et touche « Restaurer » en choisissant ce fichier. Restaurer la sauvegarde d'un autre compte est réservé aux abonnés payants (pas pendant l'essai) ; ta propre sauvegarde se restaure toujours."],
     ["partage", "Comment partager une séance avec un ami ?", "Dans la configuration de la séance, appuie sur « Partager » et envoie le lien (WhatsApp, SMS…). Ton ami, connecté à son compte Fiitday, ouvre le lien ou le colle dans Accueil › Importer, puis choisit où ajouter la séance. Partager ses séances est réservé à Premium ; en recevoir est possible pour tout le monde (en version gratuite, la séance reçue prend la place d'une de tes 2 séances actives)."],
     ["mot-de-passe", "J'ai oublié mon mot de passe, que faire ?", "Sur l'écran de connexion, appuie sur « Mot de passe oublié ? » et indique l'e-mail de ton compte. Tu reçois un code par e-mail (regarde aussi dans les spams) : saisis-le avec ton nouveau mot de passe, et tu es connecté. Une fois connecté, tu peux aussi le changer dans <a href=\"#/settings\">Réglages</a> › Compte › « Changer mon mot de passe »."],
-    ["supprimer-compte", "Comment supprimer mon compte ?", "Réglages › Compte › « Supprimer mon compte », puis tape SUPPRIMER pour confirmer. Ton compte et toutes tes données sont effacés définitivement : fais une sauvegarde avant si tu veux les garder."]]],
+    ["supprimer-compte", "Comment supprimer mon compte ?", "Réglages › Compte › « Supprimer mon compte », puis tape SUPPRIMER pour confirmer. Ton compte et toutes tes données sont effacés définitivement : fais une sauvegarde avant si tu veux les garder."],
+    ["inactif", "Mon compte peut-il être supprimé si je ne l'utilise plus ?", "Oui, après <b>2 ans</b> sans aucune utilisation, pour ne pas garder tes données sans raison. Tu reçois d'abord un e-mail, au moins 30 jours avant : il suffit alors d'ouvrir Fiitday (connecté à internet) pour garder ton compte. Un compte avec un abonnement en cours, Premium à vie ou Premium offert n'est jamais supprimé ainsi. Si ton compte est supprimé, les séances encore enregistrées sur ton appareil y restent, et tu peux les reprendre dans un nouveau compte."]]],
   ["Appli et montre", [
     ["montre", "Comment être prévenu sur ma montre ?", "C'est automatique dans l'appli Android : la montre vibre à la fin du repos et quand l'objectif d'un chrono est atteint, avec « Terminer » pour arrêter le chrono. Sur Galaxy Watch, dans l'appli Galaxy Wearable › Paramètres de la montre › Notifications : autorise Fiitday et choisis « Toujours afficher sur les deux » dans « Notifications du téléphone sur la montre »."],
     ["version", "Comment mettre à jour Fiitday ?", "Le site fiitday.com est toujours à jour. L'appli Android se met à jour avec Obtainium, sans perdre tes données. Ta version est écrite en bas de la page <a href=\"#/settings\">Réglages</a> (« Fiitday V1.… »)."]]]
@@ -3805,7 +3809,7 @@ const GUIDE = [
   ["Réglages", "#/settings", "L'appli à ton goût, et ton compte.", [
     "Apparence (clair, sombre, couleur), alerte de fin de repos, objectif de séances par semaine.",
     "Ton compte et la synchronisation entre ton téléphone et fiitday.com.",
-    "Tes données : sauvegarde, restauration et transfert vers un autre compte.",
+    "Tes données : sauvegarde et restauration, aussi vers un autre compte.",
     "L'aide : ce guide et les questions fréquentes."]]
 ];
 function viewGuide() {
@@ -3828,13 +3832,14 @@ const PRICES = { solo: priceTexts(PRICE_EUR.solo), family: priceTexts(PRICE_EUR.
 const LIFE_END = new Date(2028, 0, 1).getTime(), LIFE_END_TXT = "1er janvier 2028", LIFE_LAST_TXT = "31 décembre 2027";
 // questions sur l'abonnement : affichées une fois l'abonnement lancé (et dès maintenant pour le compte testeur)
 const FAQ_PLAN = ["Abonnement Premium", [
-  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Pendant l'essai, tout Premium est ouvert, sauf le code de transfert et la restauration d'une sauvegarde faite avec un autre compte, réservés aux abonnés payants. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
-  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
+  ["essai", "Comment marche l'essai gratuit ?", "À la création de ton compte, tu as <b>" + TRIAL_DAYS + " jours de Premium offerts</b>, sans carte bancaire : rien n'est prélevé. À la fin, tu passes en version gratuite, plus limitée (voir « Que permet la version gratuite ? »), sauf si tu t'abonnes. Pendant l'essai, tout Premium est ouvert, sauf la restauration d'une sauvegarde faite avec un autre compte, réservée aux abonnés payants. Un seul essai par compte : supprimer son compte et le recréer avec la même adresse ne redonne pas d'essai."],
+  ["gratuit", "Que permet la version gratuite ?", "Elle est limitée : 1 programme et " + FREE_VARIANTS + " séances actives (tu choisis lesquelles, et tu peux en changer une fois tous les " + FREE_SWITCH_DAYS + " jours), " + FREE_OWN + " exercices perso, l'historique des " + FREE_HIST_DAYS + " derniers jours, les stats de la semaine, le suivi du poids sur 30 jours et la réception des séances partagées. La synchro entre tes appareils est réservée à Premium. <b>Rien n'est supprimé</b> : tes autres programmes et séances restent visibles avec un cadenas, ton historique complet et tes stats sont gardés, et tout revient dès que tu t'abonnes."],
   ["formules", "Quelles formules et quels prix ?", "<b>Solo</b> : " + PRICES.solo.month + " par mois ou " + PRICES.solo.year + " par an. <b>Famille</b> (toi + " + (FAMILY_SIZE - 1) + " proches, chacun son compte) : " + PRICES.family.month + " par mois ou " + PRICES.family.year + " par an. <b>À vie</b>, en un seul paiement : " + PRICES.solo.life + " en Solo ou " + PRICES.family.life + " en Famille jusqu'au " + LIFE_LAST_TXT + ", puis " + PRICES.solo.lifeAfter + " et " + PRICES.family.lifeAfter + ". Tous les détails sont sur la page <a href=\"#/premium\">Premium</a>."],
   ["souscrire", "Comment m'abonner ?", "Sur fiitday.com, connecté à ton compte (ordinateur, iPhone ou téléphone Android) : page <a href=\"#/premium\">Premium</a>, paiement par carte bancaire. Premium est lié à ton compte : il marche ensuite sur tous tes appareils, dans l'appli Android aussi. Le paiement par Google Play arrivera avec l'appli sur le Play Store."],
   ["resilier", "Comment résilier mon abonnement ?", "Réglages › Tes achats Premium › « Résilier mon abonnement » : tu choisis la date de fin (tout de suite, avec le remboursement de la part non utilisée, ou à la fin de la période déjà payée), tu vérifies le récapitulatif, puis « Notifier la résiliation ». Tu reçois une confirmation par e-mail. Abonné par Google Play : le bouton ouvre ton abonnement dans Google Play. Ensuite, tu passes en version gratuite, plus limitée ; tes données sont gardées."],
   ["famille", "Comment marche la formule Famille ?", "Le titulaire invite jusqu'à 4 proches depuis Réglages › Abonnement : un code ou un lien, valable 7 jours. Chacun garde son propre compte, ses programmes et son historique : personne ne voit les données des autres. Quand quelqu'un part (retiré ou de lui-même), sa place se libère 15 jours après. Si l'abonnement Famille s'arrête, les membres passent en version gratuite, plus limitée, et gardent leurs données."],
-  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Tes achats Premium › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé intégralement, au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."]]];
+  ["rembourser", "Puis-je changer d'avis ou être remboursé ?", "Oui : pendant les 14 jours qui suivent ton achat (abonnement ou Premium à vie), Réglages › Tes achats Premium › « Renoncer au contrat ici ». Premium s'arrête et tu es remboursé du prix payé, moins les jours où tu as déjà utilisé Premium (au prorata, au jour près), au plus tard 14 jours après. Tu peux aussi nous écrire. Le détail est dans les conditions générales de vente."],
+  ["facture", "Vais-je recevoir une facture ?", "Oui : après chaque paiement par carte sur fiitday.com (achat, renouvellement, Premium à vie), ta facture numérotée t'arrive par e-mail. En cas de remboursement, tu reçois un avoir. Pour un achat par Google Play, c'est Google qui t'envoie le reçu."]]];
 const faqList = () => planState() !== "off" || isPlanTester() ? FAQ.concat([FAQ_PLAN]) : FAQ;
 function viewFaq(open) {
   faqIdx = null;
@@ -3880,7 +3885,7 @@ const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
 // Premium ou gratuit : écran Premium et page de présentation du site
 const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives (changement tous les " + FREE_SWITCH_DAYS + " jours)"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
   ["Stats", "Temps, tonnage, Évolution, calendrier, poids (tout l'historique)", "La semaine en cours, ton poids sur 30 jours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
-  ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
+  ["Sauvegarde", "Enregistrer et restaurer, aussi d'un compte à l'autre", "Enregistrer et restaurer dans ce compte"]];
 let premiumFor = "solo", premiumPick = "year", premiumConsent = false; // case à cocher avant le paiement : demande expresse que Premium commence avant la fin du délai de rétractation (Code de la consommation, L221-25)
 // achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
 // « store » quand le paiement Google sera branché, « » sinon (appli Obtainium).
@@ -3993,10 +3998,10 @@ function loadPlan(force) {
   return planLoading;
 }
 const isFree = () => planState() === "free";
-// code de transfert et sauvegarde d'un AUTRE compte : abonnés payants seulement, même pendant l'essai (sinon un nouveau compte par
-// mois avec un nouvel essai, et tout transféré) ; une sauvegarde faite avec son propre compte se restaure toujours
+// sauvegarde d'un AUTRE compte : abonnés payants seulement, même pendant l'essai (sinon un nouveau compte par mois avec un nouvel
+// essai, et tout transféré) ; une sauvegarde faite avec son propre compte se restaure toujours
 const dataLocked = () => { const s = planState(); return s === "free" || s === "trial"; };
-const LOCK_XFER = "Le code de transfert et la restauration d'une sauvegarde faite avec un autre compte sont réservés aux abonnés payants, même pendant l'essai. Une sauvegarde faite avec ce compte se restaure toujours, et faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde.";
+const LOCK_XFER = "La restauration d'une sauvegarde faite avec un autre compte est réservée aux abonnés payants, même pendant l'essai. Une sauvegarde faite avec ce compte se restaure toujours, et faire une sauvegarde (bouton « Sauvegarde ») reste possible pour tout le monde.";
 const ownCount = () => ownNames().length;
 async function premiumGate(text) {
   const trial = planState() === "trial"; // pendant l'essai, on ne vante pas ce que l'essai donne déjà
@@ -4117,14 +4122,14 @@ const pickLabel = () => (premiumPick === "life" ? "Acheter Premium à vie · " :
 // accord exprès avant le paiement (L221-25) : Premium commence tout de suite ; la rétractation reste possible 14 jours.
 // Premium est un « service numérique » (créer, stocker, synchroniser ses données) : l'exception du 13° de L221-28,
 // réservée aux contenus numériques, ne s'applique pas, donc pas de renonciation au droit de rétractation, même à vie.
-// Fiitday choisit de rembourser intégralement dans les 14 jours, abonnement comme achat à vie (plus simple et plus favorable).
+// En cas de rétractation, les jours déjà utilisés sont payés au prorata (L221-25) : abonnement, sur sa période ; à vie, sur 3 ans.
 const consentText = () => premiumPick === "life"
-  ? "Je demande que Premium à vie commence tout de suite. Je garde 14 jours pour me rétracter, avec un remboursement intégral."
-  : "Je demande que Premium commence tout de suite. Je garde 14 jours pour me rétracter, avec un remboursement intégral.";
+  ? "Je demande que Premium à vie commence tout de suite. Je garde 14 jours pour me rétracter ; si je me rétracte, je paie seulement les jours déjà utilisés, au prorata."
+  : "Je demande que Premium commence tout de suite. Je garde 14 jours pour me rétracter ; si je me rétracte, je paie seulement les jours déjà utilisés, au prorata.";
 function pickTerms() {
   const store = billingMode() === "test" ? "Achat de test, sans paiement réel" : isNativeApp() ? "Paiement par Google Play" : "Paiement sécurisé par carte bancaire";
-  return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte. Tu as 14 jours pour te rétracter, remboursement intégral."
-    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation avant la date de renouvellement. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Tes achats Premium") + ". Tu as 14 jours pour te rétracter.";
+  return premiumPick === "life" ? store + ", en une seule fois, sans renouvellement. Premium " + (premiumFor === "family" ? "Famille " : "") + "à vie sur ton compte. Tu as 14 jours pour te rétracter (les jours utilisés restent dus, au prorata)."
+    : store + ". Renouvellement automatique " + (premiumPick === "month" ? "chaque mois" : "chaque année") + " au même prix, sauf résiliation avant la date de renouvellement. Résiliable à tout moment" + (isNativeApp() ? " dans Google Play" : " dans Réglages › Tes achats Premium") + ". Tu as 14 jours pour te rétracter (les jours utilisés restent dus, au prorata).";
 }
 // déjà Premium : d'où il vient, et comment le gérer
 function premiumOwned() {
@@ -4278,13 +4283,24 @@ const ctrWhen = t => ctrDate(t) + " à " + new Date(t).toLocaleTimeString("fr-FR
 const ctrLastDay = t => ctrDate(Date.parse(t) - 60000); // échéance à minuit (heure de Paris) → dernier jour inclus
 function ctrItems() {
   if (!contracts || !contracts.ok) return [];
-  const out = (contracts.subs || []).map(x => ({ type: "sub", store: x.store, product: x.product, label: x.label, until: x.until, renews: x.renews, retract: x.retract_until }));
+  const out = (contracts.subs || []).map(x => ({ type: "sub", store: x.store, product: x.product, label: x.label, until: x.until, renews: x.renews, retract: x.retract_until, first: x.first_at }));
   // achats à vie : chacun à part (Solo et Famille ont chacun leur date et leur délai de rétractation) ; ancien serveur : un seul
   const lifes = Array.isArray(contracts.lifes) ? contracts.lifes : contracts.life ? [contracts.life] : [];
   lifes.forEach(l => out.push({ type: "life", store: l.store, product: l.product, label: l.kind === "family" ? "Premium Famille à vie" : "Premium Solo à vie", at: l.at, retract: l.retract_until }));
   return out;
 }
 const ctrKey = i => i.store + "/" + i.product;
+// estimation du remboursement d'une rétractation (même calcul que le serveur, qui donne le montant exact) : le prix payé moins
+// les jours déjà utilisés, au prorata de la période payée (un mois ou un an) ou, pour Premium à vie, de 3 ans
+function retractEstimate(i) {
+  const pr = PRICE_EUR[/famille/.test(i.product) ? "family" : "solo"], start = Date.parse(i.type === "life" ? i.at : i.first);
+  if (!pr || !start) return null;
+  const life = i.type === "life", monthly = /mensuel/.test(i.product), price = life ? (start < LIFE_END ? pr.life : pr.lifeAfter) : monthly ? pr.month : pr.year;
+  const end = new Date(start); if (life) end.setFullYear(end.getFullYear() + 3); else end.setMonth(end.getMonth() + (monthly ? 1 : 12));
+  const used = Math.min(1, Math.max(0, ctrClock() - start) / (end.getTime() - start));
+  const refund = Math.max(0, Math.min(price, Math.round(price * (1 - used) * 100) / 100));
+  return { price, refund, kept: Math.round((price - refund) * 100) / 100, days: Math.max(1, Math.round((ctrClock() - start) / DAY)) };
+}
 const ctrHref = (page, i) => "#/" + page + "/" + encodeURIComponent(i.store) + "/" + encodeURIComponent(i.product);
 const canRetract = i => !!i.retract && ctrClock() < Date.parse(i.retract);
 const playSubUrl = i => PLAY_SUBS + "&sku=" + encodeURIComponent(i.product);
@@ -4303,7 +4319,7 @@ function contractsCard() {
       (i.type === "sub" ? (i.store === "PLAY_STORE" ? '<a class="btn sm" href="' + esc(playSubUrl(i)) + '" target="_blank" rel="noopener">Résilier mon abonnement</a>' : '<a class="btn sm" href="' + ctrHref("resilier", i) + '">Résilier mon abonnement</a>') : "") +
       (canRetract(i) ? '<a class="btn sm" href="' + ctrHref("retractation", i) + '">Renoncer au contrat ici</a>' : "") + "</div></div>").join("") +
     (reqs.length ? '<div class="ctr-hist small muted">' + reqs.map(r => esc((r.kind === "resiliation" ? "Résiliation notifiée le " : "Rétractation envoyée le ") + ctrDate(Date.parse(r.at)) + " · " + r.label +
-      (r.kind === "resiliation" ? ", fin le " + ctrDate(Date.parse(r.end_at)) : ", remboursement intégral"))).join("<br>") + "</div>" : "") +
+      (r.kind === "resiliation" ? ", fin le " + ctrDate(Date.parse(r.end_at)) : +r.refund > 0 ? ", remboursé " + ctrEur(r.refund) : ""))).join("<br>") + "</div>" : "") +
     '<div class="small muted ctr-note">Résilier ou te rétracter est gratuit et sans motif ; tu reçois une confirmation par e-mail.</div></div>';
 }
 function ctrGrab() {
@@ -4320,7 +4336,8 @@ function viewContract(kind) {
     return head + '<div class="card ctr-done"><h2 class="card-h">' + (res ? "Résiliation enregistrée" : "Rétractation envoyée") + '</h2><p>Le ' + esc(ctrWhen(d.at)) + ".</p>" +
       (res ? "<p>Ton abonnement " + esc(d.label) + " prend fin le <b>" + esc(ctrWhen(d.end_at)) + "</b>. Plus rien ne sera prélevé ; ensuite, ton compte passe en version gratuite, plus limitée, et tu gardes toutes tes données.</p>" +
           (+d.refund > 0 ? "<p>La part non utilisée, <b>" + esc(ctrEur(d.refund)) + "</b>, te sera remboursée avec ton moyen de paiement au plus tard 14 jours après aujourd'hui.</p>" : "")
-        : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, plus limitée ; tes données sont gardées. Tu es remboursé intégralement, avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
+        : "<p>" + esc(d.label) + " s'arrête maintenant et ton compte passe en version gratuite, plus limitée ; tes données sont gardées.</p><p>Tu es remboursé de <b>" + esc(ctrEur(d.refund)) + "</b>" +
+          (+d.kept > 0 ? " : le prix payé (" + esc(ctrEur(d.price)) + ") moins " + esc(ctrEur(d.kept)) + " pour les jours où Premium a été utilisé" : "") + ", avec le même moyen de paiement, au plus tard 14 jours après aujourd'hui.</p>") +
       "<p>" + (d.mail_sent ? "Une confirmation t'a été envoyée par e-mail à <b>" + esc(ctr.email) + "</b>." : "L'e-mail de confirmation n'a pas pu partir pour l'instant : garde cet écran (par exemple en capture d'écran), il fait foi. Nous t'écrirons à " + esc(ctr.email) + ".") + "</p>" +
       '<a class="btn" href="#/settings">Retour aux réglages</a></div>';
   }
@@ -4338,14 +4355,16 @@ function viewContract(kind) {
   if (ctr.step === "recap") {
     const rows = [["Nom", ctr.name], ["E-mail", ctr.email], ["Contrat", it.label + " · " + (STORE_TXT[it.store] || it.store)]];
     if (res) rows.push(["Date de fin", ctr.wish === "fin" ? "le " + ctrDate(Date.parse(it.until)) + ", à la fin de la période déjà payée" : "dès maintenant, avec le remboursement de la part non utilisée"]);
-    else rows.push(["Déclaration", "Je me rétracte de mon contrat " + it.label + "."], ["Remboursement", "intégral"]);
+    else { const est = retractEstimate(it); rows.push(["Déclaration", "Je me rétracte de mon contrat " + it.label + "."],
+      ["Remboursement", est ? "environ " + ctrEur(est.refund) + " : le prix payé (" + ctrEur(est.price) + ") moins " + ctrEur(est.kept) + " pour " + (est.days > 1 ? est.days + " jours" : "1 jour") + " d'utilisation ; le montant exact s'affiche à l'étape suivante et dans l'e-mail"
+        : "le prix payé, moins les jours déjà utilisés (au prorata)"]); }
     return head + '<div class="card ctr-recap"><h2 class="card-h">Vérifie ta demande</h2><dl class="ctr-dl">' + rows.map(([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v) + "</dd>").join("") + "</dl>" +
       '<div class="row duo"><button class="btn" data-act="ctredit"' + (ctr.busy ? " disabled" : "") + '>Modifier</button><button class="btn primary" data-act="ctrsend"' + (ctr.busy ? " disabled" : "") + ">" +
       (ctr.busy ? "Envoi…" : res ? "Notifier la résiliation" : "Confirmer la rétractation") + "</button></div>" + msg + "</div>";
   }
   const play = res && it.store === "PLAY_STORE";
   return head + '<p class="muted ctr-intro">' + (res ? "Gratuit et sans motif. Vérifie ou remplis ces informations, puis vérifie le récapitulatif avant d'envoyer ta résiliation."
-      : "Pendant les 14 jours qui suivent ton achat, tu peux te rétracter sans motif ni frais : Premium s'arrête et tu es remboursé intégralement.") + "</p>" +
+      : "Pendant les 14 jours qui suivent ton achat, tu peux te rétracter sans motif ni frais : Premium s'arrête et tu es remboursé du prix payé, moins les jours où tu as déjà utilisé Premium (au prorata, au jour près).") + "</p>" +
     '<div class="card ctr-form">' +
     '<label class="fl">Nom et prénom<input class="f" data-ctr="name" autocomplete="name" maxlength="120" value="' + esc(ctr.name) + '"></label>' +
     '<label class="fl">E-mail pour recevoir la confirmation<input class="f" type="email" data-ctr="email" autocomplete="email" maxlength="200" value="' + esc(ctr.email) + '"></label>' +
@@ -4697,7 +4716,6 @@ function secAlerts(s) {
   if (s.devices7 > 3) a.push(["orange", "Ton compte s'est connecté depuis " + s.devices7 + " appareils ou navigateurs différents cette semaine."]);
   if (s.recovery24 >= 5) a.push(["orange", s.recovery24 + " demandes de réinitialisation de mot de passe en 24 h."]);
   if (s.signups24 >= 30) a.push(["orange", s.signups24 + " inscriptions en 24 h : pic inhabituel (robots ?)."]);
-  if (s.xferFail24 >= 20) a.push(["orange", s.xferFail24 + " codes de transfert faux en 24 h : quelqu'un essaie peut-être de deviner un code."]);
   return a;
 }
 function secBlock(s) {
@@ -4717,7 +4735,6 @@ function secBlock(s) {
     row("Ta dernière connexion", when(s.lastLogin)) +
     row("Mots de passe oubliés demandés (24 h)", s.recovery24) +
     row("Inscriptions (24 h)", s.signups24) +
-    row("Codes de transfert faux (24 h)", s.xferFail24) +
     row("Comptes bloqués", s.banned) + "</div>" +
     '<div class="small muted" style="margin-top:8px">Les essais de mot de passe ratés ne sont pas comptés ici : Supabase freine automatiquement les essais répétés. Refus gardés 12 mois.</div></div>';
 }
@@ -4771,8 +4788,8 @@ function viewAdminDash() {
       '<div><b class="num">' + esc(eur(w.sales[0])) + "</b> de ventes " + diff(+w.sales[0], +w.sales[1], eur) + (w.other ? ' <span class="muted small">+ ' + w.other + " vente" + (w.other > 1 ? "s" : "") + " dans une autre monnaie</span>" : "") + "</div>")(adminSubs && adminSubs.week) +
     '<div class="muted small">Depuis lundi, comparé à la semaine dernière.' + (adminSubs && adminSubs.week && adminSubs.week.launched ? " Ventes : prix payés par les clients, avant la commission des stores ; les achats de test ne comptent pas." : "") + "</div></div>" +
     secBlock(k.sec) +
-    '<div class="section-title">Partage et transferts</div><div class="stats adm-two">' +
-    tile("Séances partagées", k.shares, k.shares30 + " en 30 jours") + tile("Codes de transfert", k.transfers30, "créés en 30 jours") + "</div>" +
+    '<div class="section-title">Partage</div><div class="stats adm-two">' +
+    tile("Séances partagées", k.shares, k.shares30 + " en 30 jours") + "</div>" +
     '<div class="section-title">Recettes</div><a class="card adm-link" href="#/admin/recettes"><div><div class="muted small">Registre des recettes</div><div class="v num">' + (yr == null ? "Ouvrir" : esc(eur(yr))) + "</div>" +
     '<div class="muted small">' + (yr == null ? "Tes encaissements, totaux et PDF" : "encaissé en " + new Date().getFullYear()) + "</div></div><span aria-hidden=\"true\">›</span></a>" +
     (sc => '<div class="section-title">Abonnements</div><a class="card adm-link" href="#/admin/abonnements"><div><div class="muted small">' + (sc ? (adminSubs.launch_at ? "Abonnement lancé" : "Pas encore lancé") : "Premium offert, familles") + '</div><div class="v num">' +
@@ -4791,8 +4808,8 @@ function adminCtrCard() {
   const warns = (a.conf_fail ? '<p class="msg err" style="margin:8px 0 0">' + a.conf_fail + " confirmation" + (a.conf_fail > 1 ? "s" : "") + " de commande pas encore envoyée" + (a.conf_fail > 1 ? "s" : "") + " (nouvel essai chaque jour ; vérifie Brevo et les CGV).</p>" : "") +
     (a.rc_pending ? '<p class="small muted" style="margin:8px 0 0">' + a.rc_pending + " client" + (a.rc_pending > 1 ? "s" : "") + " RevenueCat de comptes supprimés encore à effacer (nouvel essai automatique chaque jour).</p>" : "");
   return '<div class="section-title">Résiliations et rétractations</div><div class="card adm-ctr">' + warns + '<div class="spread"><span class="small muted">' + reqs.filter(todo).length + " à traiter · " +
-    (a.reminders || 0) + " rappel" + ((a.reminders || 0) > 1 ? "s" : "") + ' avant renouvellement envoyé' + ((a.reminders || 0) > 1 ? "s" : "") + ' en 30 jours</span><button class="btn sm" data-act="ctrcheck"' + (ctrCheckBusy ? " disabled" : "") + ">" + (ctrCheckBusy ? "Vérification…" : "Vérifier RevenueCat et Brevo") + "</button></div>" +
-    (ctrCheck ? '<div class="small adm-ctr-check">RevenueCat : ' + esc(ctrCheck.revenuecat) + "<br>Brevo (e-mails) : " + esc(ctrCheck.brevo) + "<br>Rappels quotidiens : " + esc(ctrCheck.cron) + "</div>" : "") +
+    (a.reminders || 0) + " rappel" + ((a.reminders || 0) > 1 ? "s" : "") + ' avant renouvellement envoyé' + ((a.reminders || 0) > 1 ? "s" : "") + ' en 30 jours</span><button class="btn sm" data-act="ctrcheck"' + (ctrCheckBusy ? " disabled" : "") + ">" + (ctrCheckBusy ? "Vérification…" : "Vérifier RevenueCat, Stripe et Brevo") + "</button></div>" +
+    (ctrCheck ? '<div class="small adm-ctr-check">RevenueCat : ' + esc(ctrCheck.revenuecat) + "<br>Stripe (remboursements) : " + esc(ctrCheck.stripe || "—") + "<br>Brevo (e-mails) : " + esc(ctrCheck.brevo) + "<br>Rappels quotidiens : " + esc(ctrCheck.cron) + "</div>" : "") +
     (reqs.length ? '<ul class="adm-ctr-list">' + reqs.map(r => '<li class="' + (todo(r) ? "todo" : "") + '"><div><b>' + (r.kind === "resiliation" ? "Résiliation" : "Rétractation") + " · " + esc(r.label) + '</b></div><div class="small muted">' +
       esc(ctrWhen(r.at) + " · " + r.name + " · " + r.email + " · " + (STORE_TXT[r.store] || r.store)) + '</div><div class="small">' +
       esc((r.kind === "resiliation" ? (r.wish === "maintenant" ? "Fin immédiate" : "Fin le " + ctrDate(Date.parse(r.end_at))) : "Fin immédiate") + (+r.refund > 0 ? " · remboursement " + (r.refund_all ? "intégral, " : "") + ctrEur(r.refund) : "")) + '</div><div class="small muted">' +
@@ -4882,8 +4899,8 @@ function adminReportCard() {
 // le montant, le mode de paiement et la pièce justificative. Numérotation par année (2026-001…). Toute modification
 // ou suppression est gardée dans un journal côté serveur.
 let ledger = null, ledgerErr = "", ledgerBusy = false, ledgerYear = null;
-// registre automatique : la fonction « ledger-stripe » lit Stripe et prépare une ligne par mois, à valider ici
-let ledgerAuto = null, ledgerAutoBusy = false, ledgerAutoTried = false;
+// registre automatique : la fonction « ledger-stripe » lit Stripe et prépare une ligne par paiement et par remboursement, à valider ici
+let ledgerAuto = null, ledgerAutoBusy = false, ledgerAutoTried = false, ledgerSeller = null;
 const EUR = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
 const eur = v => EUR.format(+v || 0);
 const MOIS_C = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
@@ -4892,7 +4909,7 @@ const LEDGER_STORES = ["Google Play", "App Store"];
 const LEDGER_METHODS = ["Virement bancaire", "Carte bancaire", "PayPal", "Chèque", "Espèces", "Autre"];
 const isoDay = ymd;
 const dayFr = s => s.slice(8, 10) + "/" + s.slice(5, 7) + "/" + s.slice(0, 4);
-const ledgerInfo = () => Object.assign({ name: "", siret: "", addr: "", vat: "" }, settings().ledgerInfo || {});
+const ledgerInfo = () => Object.assign({ name: "", siret: "", addr: "", immat: "", vat: "" }, settings().ledgerInfo || {});
 async function loadLedger(manual) {
   if (ledgerBusy || !isAdmin()) return;
   ledgerBusy = true; ledgerErr = ""; if (manual) render();
@@ -4905,6 +4922,7 @@ async function loadLedgerAuto() {
   try {
     const r = await rpc("admin_ledger_auto"); if (!r || r.denied) return;
     ledgerAuto = r; if (route().name === "admin") render();
+    rpc("admin_seller").then(x => { if (x && !x.denied) { ledgerSeller = x; if (route().name === "admin") render(); } }).catch(() => { });
     // lecture de Stripe toute seule à l'ouverture du registre, au plus une fois toutes les 6 heures
     const sy = r.sync; if (!ledgerAutoTried && (!sy || Date.now() - Date.parse(sy.at) > 6 * 3600e3)) { ledgerAutoTried = true; syncStripe(false); }
   } catch (e) { }
@@ -4924,23 +4942,28 @@ async function syncStripe(manual) {
   if (manual) toast(res && res.ok ? "Stripe lu · " + fmtTimeSec(Date.now()) : "Lecture de Stripe impossible" + (res && res.reason && res.reason !== "no_key" ? " : " + res.reason : ""));
   if (route().name === "admin") render();
 }
-const draftNet = d => { const g = Math.max(+d.gross - +d.refunds, 0); return g - Math.min(+d.fees, g); };
-const monthName = p => { const m = +p.slice(5, 7) - 1; return MOIS[m].charAt(0).toUpperCase() + MOIS[m].slice(1) + " " + p.slice(0, 4); };
+const draftDay = d => new Date(d.paid_at).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
+const sellerOk = v => !!v && String(v.name || "").trim().length > 3 && String(v.addr || "").trim().length > 5 && /^\d{14}$/.test(String(v.siret || ""));
 function ledgerAutoCard() {
   const a = ledgerAuto; if (!a) return "";
-  const sy = a.sync, drafts = a.drafts || [];
+  const sy = a.sync, drafts = a.drafts || [], live = drafts.filter(d => d.livemode), se = ledgerSeller;
   const when = t => fmtDateLong(Date.parse(t)) + " à " + new Date(t).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-  const nextM = p => { const y = +p.slice(0, 4), m = +p.slice(5, 7); return "1er " + MOIS[m % 12] + " " + (m === 12 ? y + 1 : y); };
   let h = '<div class="card adm-auto"><div class="spread"><b>Paiements par carte (Stripe)</b><button class="btn sm" data-act="ledgersync"' + (ledgerAutoBusy ? " disabled" : "") + ">" + (ledgerAutoBusy ? "Lecture…" : "Relire Stripe") + "</button></div>";
   if (!sy) h += '<p class="small muted">Stripe n\'a pas encore été lu.</p>';
   else if (!sy.ok) h += '<p class="small msg err">' + esc(sy.message || "Lecture impossible") + "</p>";
   else h += '<p class="small muted">Lu le ' + esc(when(sy.at)) + (sy.livemode ? "." : " · <b>mode test</b> : paiements d'essai, montrés pour exemple, ils ne vont pas dans le registre.") + "</p>";
+  // factures envoyées aux clients : il faut l'identité du vendeur
+  if (se) h += '<p class="small ' + (sellerOk(se.seller) ? "muted" : "msg err") + '">' + (sellerOk(se.seller) ? "Factures : " + (+se.invoices || 0) + " émise" + (+se.invoices > 1 ? "s" : "") + (+se.unsent ? " · " + se.unsent + " pas encore envoyée" + (se.unsent > 1 ? "s" : "") : "") + "."
+    : "Infos du vendeur à compléter (nom, adresse, SIRET) : sans elles, les vraies factures ne partent pas. Bouton « Infos du vendeur » ci-dessus." + (+se.unsent ? " " + se.unsent + " facture" + (se.unsent > 1 ? "s" : "") + " en attente." : "")) + "</p>";
   if (sy && sy.ok && !drafts.length) h += '<p class="small muted">Rien à ajouter au registre pour l\'instant.</p>';
-  h += drafts.map(d => '<div class="adm-draft"><div class="spread"><b>' + esc(monthName(d.period)) + "</b>" + (d.livemode ? "" : '<span class="tag">Test</span>') + "</div>" +
-    '<div class="small">' + d.n + " paiement" + (d.n > 1 ? "s" : "") + " · payé " + esc(eur(d.gross)) + (+d.refunds ? " · remboursé " + esc(eur(d.refunds)) : "") + " · frais Stripe " + esc(eur(d.fees)) + " · encaissé <b>" + esc(eur(draftNet(d))) + "</b></div>" +
-    (d.note ? '<div class="small muted">' + esc(d.note) + "</div>" : "") +
-    (!d.livemode ? "" : !d.closed ? '<div class="small muted">Mois en cours : à ajouter au registre à partir du ' + esc(nextM(d.period)) + ".</div>"
-      : '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm primary" data-act="ledgerok" data-id="' + esc(d.id) + '">Ajouter au registre</button><button class="btn sm" data-act="ledgerskip" data-id="' + esc(d.id) + '">Ignorer</button></div>') + "</div>").join("");
+  if (live.length > 1) h += '<button class="btn sm primary" style="margin:4px 0 6px" data-act="ledgerall">Tout ajouter au registre (' + live.length + ")</button>";
+  h += drafts.slice(0, 80).map(d => { const neg = d.kind === "remboursement";
+    return '<div class="adm-draft"><div class="spread"><b>' + esc(draftDay(d)) + " · " + (neg ? "Remboursement" : "Paiement") + "</b>" + (d.livemode ? "" : '<span class="tag">Test</span>') + "</div>" +
+      '<div class="small">' + esc(d.label || "Fiitday Premium") + " · " + (neg ? "− " : "") + "<b>" + esc(eur(d.gross)) + "</b>" + (+d.fees ? " · frais Stripe " + esc(eur(d.fees)) : "") + "</div>" +
+      '<div class="small muted">Pièce : ' + esc(d.invoice ? d.invoice.replace(/^sur /, "remboursement sur la facture ") : "paiement Stripe " + d.ref) + "</div>" +
+      (d.note ? '<div class="small muted">' + esc(d.note) + "</div>" : "") +
+      (!d.livemode ? "" : '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm primary" data-act="ledgerok" data-id="' + esc(d.id) + '">Ajouter au registre</button><button class="btn sm" data-act="ledgerskip" data-id="' + esc(d.id) + '">Ignorer</button></div>') + "</div>"; }).join("") +
+    (drafts.length > 80 ? '<p class="small muted">… et ' + (drafts.length - 80) + " autres lignes (« Tout ajouter » les prend toutes).</p>" : "");
   return h + "</div>";
 }
 // recettes d'une année, numérotées dans l'ordre chronologique
@@ -4963,7 +4986,7 @@ function viewLedger() {
   const tile = (label, v, sub) => '<div class="card stat"><div class="muted small">' + label + '</div><div class="v num">' + v + "</div>" + (sub ? '<div class="muted small">' + sub + "</div>" : "") + "</div>";
   const yearSeg = '<div class="seg adm-years" role="group" aria-label="Année">' + years.map(v => '<button class="' + (v === y ? "on" : "") + '" aria-pressed="' + (v === y) + '" data-act="ledgeryear" data-v="' + v + '">' + v + "</button>").join("") + "</div>";
   let h = admBar(ledger.at, ledgerBusy, "données du registre") +
-    '<div class="adm-ltools">' + yearSeg + '<div class="adm-lbtns"><button class="btn sm" data-act="ledgerinfo">Infos du registre</button><button class="btn sm" data-act="ledgerpdf"' + (rows.length ? "" : " disabled") + '>Exporter en PDF</button><button class="btn sm primary" data-act="ledgernew">+ Nouvelle recette</button></div></div>';
+    '<div class="adm-ltools">' + yearSeg + '<div class="adm-lbtns"><button class="btn sm" data-act="ledgerinfo">Infos du vendeur</button><button class="btn sm" data-act="ledgerpdf"' + (rows.length ? "" : " disabled") + '>Exporter en PDF</button><button class="btn sm primary" data-act="ledgernew">+ Nouvelle recette</button></div></div>';
   h += '<div class="stats adm-tiles">' +
     tile("Encaissé en " + y, esc(eur(tot.net)), tot.n + " recette" + (tot.n > 1 ? "s" : "")) +
     (isCur ? tile("Ce mois-ci", esc(eur(months[mo].net)), MOIS[mo] + " " + y) + tile("Trimestre en cours", esc(eur(qTot.net)), "T" + (q + 1) + " · " + MOIS_C[q * 3] + " – " + MOIS_C[q * 3 + 2])
@@ -5052,11 +5075,14 @@ function askLedger(cur) {
 function askLedgerInfo() {
   return new Promise(res => {
     const v = ledgerInfo(), d = document.createElement("div"); d.className = "modal sheet";
+    const srv = ledgerSeller && ledgerSeller.seller; // déjà enregistrées sur le serveur (factures) : reprises si cet appareil ne les a pas
+    if (srv && !v.name && !v.siret && !v.addr) Object.assign(v, { name: srv.name || "", siret: srv.siret || "", addr: srv.addr || "", immat: srv.immat || "", vat: srv.vat ? "franchise" : "" });
     const draw = () => {
-      d.innerHTML = '<div class="modal-box own-box adm-form" role="dialog" aria-modal="true" aria-label="Infos du registre"><h3>Infos du registre</h3><p class="small muted" style="margin:0 0 10px">Elles apparaissent en tête du PDF. Tout est facultatif.</p>' +
+      d.innerHTML = '<div class="modal-box own-box adm-form" role="dialog" aria-modal="true" aria-label="Infos du vendeur"><h3>Infos du vendeur</h3><p class="small muted" style="margin:0 0 10px">En tête du PDF du registre et sur les factures envoyées aux clients. Nom, adresse et SIRET sont obligatoires pour envoyer les vraies factures.</p>' +
         '<label class="fl">Nom ou dénomination<input class="f" data-f="name" maxlength="120" placeholder="Prénom Nom (EI) ou nom commercial" value="' + esc(v.name) + '"></label>' +
         '<label class="fl" style="margin-top:10px">SIRET<input class="f num" data-f="siret" inputmode="numeric" maxlength="17" placeholder="14 chiffres" value="' + esc(v.siret) + '"></label>' +
         '<label class="fl" style="margin-top:10px">Adresse<input class="f" data-f="addr" maxlength="200" value="' + esc(v.addr) + '"></label>' +
+        '<label class="fl" style="margin-top:10px">Immatriculation<input class="f" data-f="immat" maxlength="120" placeholder="Ex. RCS Évry 123 456 789" value="' + esc(v.immat) + '"></label>' +
         '<div class="fl" style="margin-top:10px">TVA<div class="stack" style="gap:8px">' +
         [["", "Pas encore défini", "Aucune mention de TVA sur le PDF"], ["franchise", "Franchise en base", "« TVA non applicable, art. 293 B du CGI » sur le PDF"]].map(([k, l, s]) => '<button type="button" class="btn block choice' + (v.vat === k ? " on" : "") + '" data-vat="' + k + '" aria-pressed="' + (v.vat === k) + '"><b>' + l + '</b><span class="small muted">' + s + "</span></button>").join("") + "</div></div>" +
         '<p class="msg err" data-m></p><div class="modal-btns"><button class="btn" data-r="0">Annuler</button><button class="btn primary" data-r="1">Enregistrer</button></div></div>';
@@ -5070,7 +5096,7 @@ function askLedgerInfo() {
       if (b.dataset.r !== "1") { d.remove(); res(null); return; }
       const siret = v.siret.replace(/\s/g, "");
       if (siret && !/^\d{14}$/.test(siret)) { d.querySelector("[data-m]").textContent = "Le SIRET compte 14 chiffres."; return; }
-      d.remove(); res({ name: v.name.trim(), siret, addr: v.addr.trim(), vat: v.vat });
+      d.remove(); res({ name: v.name.trim(), siret, addr: v.addr.trim(), immat: String(v.immat || "").trim(), vat: v.vat });
     });
   });
 }
@@ -5207,7 +5233,7 @@ function viewSettings() {
   const num_ = (Native && Native.version && Native.version()) || window.APP_VERSION || "";
   const ver = "Fiitday " + (num_ && num_ !== "1.0-dev" ? "V" + num_ : "(version de développement)");
   const fr = dataLocked(), lk = fr ? " locked-btn" : "", li = fr ? LOCK : "";
-  const frNote = fr ? '<div class="small lock-note">' + LOCK + 'Le code de transfert et la restauration d\'une sauvegarde d\'un autre compte sont réservés aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. Ta propre sauvegarde se restaure toujours. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
+  const frNote = fr ? '<div class="small lock-note">' + LOCK + 'La restauration d\'une sauvegarde faite avec un autre compte est réservée aux abonnés Premium' + (planState() === "trial" ? ", pendant l\'essai aussi" : "") + '. Ta propre sauvegarde se restaure toujours. <a class="link" href="#/premium">Voir Premium</a></div>' : "";
   return '<div class="page-head"><h1>Réglages</h1></div><div class="stack set-stack">' + planSettings() +
     '<div class="card"><h2 class="card-h">Apparence</h2><div style="margin-top:10px">' + seg("theme", [["auto", "Auto"], ["clair", "Clair"], ["sombre", "Sombre"]]) + "</div>" +
     '<div class="small muted" style="margin-top:12px">Couleur</div><div class="swatches" role="group" aria-label="Couleur de l\'appli">' + ACCENTS.map(([k, l, c]) => { const on = (ACCENTS.some(x => x[0] === s.accent) ? s.accent : "rose") === k;
@@ -5218,8 +5244,7 @@ function viewSettings() {
     '<div class="card"><h2 class="card-h">Données</h2><div class="small muted" style="margin-top:4px">Tes programmes, séances et réglages.</div>' +
     '<div class="data-sec"><div class="data-t">Sauvegarde</div><div class="small muted">Un fichier à garder sur ton téléphone, ton ordinateur ou dans un cloud (Google Drive…).</div>' +
     '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-act="filesave">Sauvegarde</button><button class="btn sm" data-act="fileopen">Restaurer</button></div></div>' +
-    '<div class="data-sec"><div class="data-t">Transfert vers un autre compte</div><div class="small muted">Un code de 8 caractères, valable 1 heure, à taper dans l\'autre compte.</div>' +
-    '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm' + lk + '" data-act="xfercreate">' + li + 'Créer un code</button><button class="btn sm' + lk + '" data-act="xferuse">' + li + 'J\'ai un code</button></div></div>' + frNote +
+    frNote +
     '<div class="row" style="margin-top:6px;flex-wrap:wrap;gap:4px 14px"><a class="link small" style="padding:0;display:inline-flex;align-items:center" href="#/faq/sauvegarde">Comment ça marche ?</a></div></div>' +
     '<div class="card"><h2 class="card-h">Compte</h2><div style="margin-top:8px">' +
     (db.auth ? '<label class="fl" style="margin-bottom:8px">Prénom<input class="f" data-setname maxlength="40" autocomplete="given-name" value="' + esc(firstName()) + '" placeholder="Ton prénom"></label>' +
@@ -5904,13 +5929,22 @@ $app.addEventListener("click", async e => {
     case "ledgersync": syncStripe(true); break;
     case "ledgerok": case "ledgerskip": {
       const d = ledgerAuto && (ledgerAuto.drafts || []).find(x => x.id === b.dataset.id); if (!d) return;
-      const ok = a === "ledgerok";
-      if (!await ask(ok ? { title: "Ajouter " + monthName(d.period).toLowerCase() + " au registre ?", text: eur(draftNet(d)) + " encaissés (" + d.n + " paiement" + (d.n > 1 ? "s" : "") + " par carte). La ligne prend la date du dernier jour du mois, avec le relevé Stripe comme pièce justificative.", ok: "Ajouter" }
-        : { title: "Ignorer " + monthName(d.period).toLowerCase() + " ?", text: "Cette ligne ne sera plus proposée. Tu pourras toujours ajouter la recette à la main.", ok: "Ignorer" })) return;
+      const ok = a === "ledgerok", neg = d.kind === "remboursement", txt = (neg ? "Remboursement de " : "Paiement de ") + eur(d.gross) + " le " + draftDay(d);
+      if (!await ask(ok ? { title: "Ajouter au registre ?", text: txt + (d.invoice ? " (pièce : " + d.invoice.replace(/^sur /, "facture ") + ")" : "") + ". La ligne prend la date du " + (neg ? "remboursement" : "paiement") + (neg ? ", en négatif." : "."), ok: "Ajouter" }
+        : { title: "Ignorer cette ligne ?", text: txt + ". Elle ne sera plus proposée. Tu pourras toujours ajouter la recette à la main.", ok: "Ignorer" })) return;
       try {
         const r = await rpc(ok ? "admin_ledger_draft_validate" : "admin_ledger_draft_dismiss", { p_id: d.id }); const den = admDenied(r); if (den) { ledgerErr = den; render(); return; }
         if (!r.ok) { toast(r.reason || "Impossible"); return; }
         toast(ok ? "Ajouté au registre" : "Ligne ignorée");
+      } catch (err) { toast("Impossible : " + err.message); return; }
+      await loadLedger();
+    } break;
+    case "ledgerall": {
+      const n = ledgerAuto ? (ledgerAuto.drafts || []).filter(d => d.livemode).length : 0; if (!n) return;
+      if (!await ask({ title: "Tout ajouter au registre ?", text: n + " lignes (paiements et remboursements par carte), chacune à sa date, avec sa facture ou son avoir comme pièce justificative ; les remboursements sont inscrits en négatif.", ok: "Tout ajouter" })) return;
+      try {
+        const r = await rpc("admin_ledger_draft_validate", { p_id: null }); const den = admDenied(r); if (den) { ledgerErr = den; render(); return; }
+        toast(r && r.ok ? (r.added > 1 ? r.added + " lignes ajoutées au registre" : r.added + " ligne ajoutée au registre") : (r && r.reason) || "Impossible");
       } catch (err) { toast("Impossible : " + err.message); return; }
       await loadLedger();
     } break;
@@ -5922,7 +5956,11 @@ $app.addEventListener("click", async e => {
       catch (err) { toast(err.message === "Failed to fetch" ? "Pas de connexion internet : rien n'a été supprimé" : "Suppression impossible : " + err.message); return; }
       loadLedger();
     } break;
-    case "ledgerinfo": { const v = await askLedgerInfo(); if (v) { setSetting("ledgerInfo", v); toast("Infos du registre enregistrées"); } } break;
+    case "ledgerinfo": { const v = await askLedgerInfo(); if (!v) break; setSetting("ledgerInfo", v);
+      // aussi sur le serveur : les factures envoyées aux clients en ont besoin
+      try { const r = await rpc("admin_seller_save", { p: { name: v.name, addr: v.addr, siret: v.siret, immat: v.immat, vat: v.vat === "franchise" ? "TVA non applicable, article 293 B du CGI" : "" } });
+        const den = admDenied(r); toast(den || "Infos du vendeur enregistrées"); if (!den) loadLedgerAuto(); }
+      catch (err) { toast("Enregistrées sur cet appareil ; serveur injoignable, réessaie pour les factures"); } } break;
     case "ledgerpdf": {
       const yy = ledgerYear || new Date().getFullYear(), st = await saveBytes("registre-des-recettes-" + yy + ".pdf", "application/pdf", ledgerPdf(yy));
       toast(st === "ok" ? "PDF enregistré" : st === "download" ? "PDF téléchargé" : st === "old-app" ? "Mets à jour l'appli pour enregistrer le PDF (ou utilise fiitday.com)" : st === "cancel" ? "Enregistrement annulé" : "Le PDF n'a pas pu être enregistré");
@@ -6006,7 +6044,7 @@ $app.addEventListener("click", async e => {
       if (ctrCheckBusy) break;
       ctrCheckBusy = true; render();
       const j = await contractCall({ action: "verifier" });
-      ctrCheckBusy = false; ctrCheck = j && j.ok ? j : { revenuecat: (j && j.reason) || "vérification impossible", brevo: "—", cron: "—" }; render();
+      ctrCheckBusy = false; ctrCheck = j && j.ok ? j : { revenuecat: (j && j.reason) || "vérification impossible", stripe: "—", brevo: "—", cron: "—" }; render();
     } break;
     case "ctrdone": {
       if (!await ask({ title: "Demande traitée ?", text: "Le remboursement ou l'arrêt de l'abonnement a bien été fait (Stripe, RevenueCat ou Play Console) ?", ok: "Oui, c'est fait" })) break;
@@ -6021,9 +6059,8 @@ $app.addEventListener("click", async e => {
       catch (err) { toast("Page de gestion indisponible : " + ((err && err.message) || "réessaie plus tard")); }
     } break;
     case "importvar": { const code = await ask({ title: "Importer une séance", text: "Colle le lien de la séance qu'on t'a envoyé.", input: "", ok: "Continuer" }); if (!code) return;
-      if (dataLocked() && XFER_RE.test(normCode(code)) && code.trim().length <= 12) { premiumGate(LOCK_XFER); return; } // une sauvegarde collée : vérifiée par restoreBackup (compte d'origine)
       if (/^\s*FIITDAY\d:/.test(code)) { if (await ask({ title: "C'est une sauvegarde", text: "Ce texte est une sauvegarde complète (programmes, séances, réglages), pas un lien de séance. La restaurer dans ce compte ?", ok: "Restaurer" })) restoreBackup(code); return; }
-      if (XFER_RE.test(normCode(code)) && code.trim().length <= 12) { if (await ask({ title: "C'est un code de transfert", text: "Ce code sert à récupérer toutes les données d'un autre compte (programmes, séances, réglages). Les récupérer dans ce compte ?", ok: "Récupérer" })) useTransferCode(code); return; }
+      if (XFER_RE.test(normCode(code)) && code.trim().length <= 12) { toast("Ce code n'est pas un lien de séance : les codes de transfert n'existent plus, utilise une sauvegarde (Réglages › Données)"); return; }
       importShared(code); } break;
     case "launchvar": flushPending(); startWorkout(b.dataset.t, b.dataset.v, true); break;
     case "deltpl": { const { t } = currentProgram(); if (!t) return; if (!await ask({ title: "Supprimer « " + t.name + " » ?", text: "Ses séances et exercices seront supprimés. L'historique des séances déjà faites est conservé.", ok: "Supprimer", danger: true })) return; remove(t.id); go("home"); } break;
@@ -6060,26 +6097,9 @@ $app.addEventListener("click", async e => {
       if (txt === false) toast("Ce fichier n'a pas pu être lu");
       else if (txt != null) restoreBackup(txt, "Ce fichier n'est pas une sauvegarde Fiitday");
     } break;
-    case "xfercreate": {
-      if (dataLocked()) { premiumGate(LOCK_XFER); return; }
-      if (!db.auth) { toast("Connecte-toi à ton compte pour créer un code"); return; }
-      const txt = await backupText();
-      let row; try { row = await rpc("create_transfer", { p_payload: txt }); } catch (err) { toast(xferErr(err)); return; }
-      row = Array.isArray(row) ? row[0] : row;
-      if (!row || !XFER_RE.test(row.transfer_code || "")) { toast("Impossible de créer un code, réessaie"); return; }
-      const copy = await ask({ title: "Code de transfert", html: '<div class="xfer-code" aria-label="Code ' + esc(row.transfer_code.split("").join(" ")) + '">' + esc(row.transfer_code) + "</div>",
-        text: "Valable jusqu'à " + fmtTime(Date.parse(row.valid_until)) + " (1 heure).\nDans l'autre compte : Réglages › Données › « J'ai un code ».\nCe code donne accès à toutes tes données : ne le partage pas.", ok: "Copier le code", cancel: "Fermer" });
-      if (copy) { try { await navigator.clipboard.writeText(row.transfer_code); toast("Code copié"); } catch (err) { toast("Note le code : " + row.transfer_code); } }
-    } break;
-    case "xferuse": {
-      if (dataLocked()) { premiumGate(LOCK_XFER); return; }
-      if (!db.auth) { toast("Connecte-toi au compte qui doit recevoir les données"); return; }
-      const c = await ask({ title: "J'ai un code", text: "Tape le code de 8 caractères créé dans l'autre compte (Réglages › Données › Créer un code). Il n'est valable qu'une heure.", input: "", code: true, ok: "Récupérer" });
-      if (c) useTransferCode(c);
-    } break;
   }
 });
-// sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
+// sauvegarde (fichier, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
 // Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
 // repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
 const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt", "weightOk", "weightGoneAt"]; // accords (fréquence cardiaque, poids) et leur retrait : jamais repris d'une sauvegarde

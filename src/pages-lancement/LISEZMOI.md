@@ -40,8 +40,21 @@ Changer `LEGAL.version` dans `src/app.js` (l'appli remontre la politique de conf
 n'active le bouton d'achat (hors achats de test) que si `LEGAL.cgv` est rempli, que le serveur a ouvert les ventes
 (date de lancement atteinte) et que cette version de l'appli sait encaisser (`MONETIZATION`).
 
+## Factures, avoirs et remboursements (V1.146)
+
+- Chaque paiement par carte reçoit une facture numérotée (F2027-00001…) par e-mail, chaque remboursement un avoir
+  (A2027-00001…). Une vraie facture ne part qu'une fois l'identité du vendeur saisie dans Administration › Registre des
+  recettes › « Infos du vendeur » (nom « (EI) », adresse, SIRET, immatriculation) : elle est gardée dans la base, pas dans
+  ce dépôt public.
+- Rétractation : les jours déjà utilisés sont payés au prorata (L221-25), le reste est remboursé ; résiliation « tout de
+  suite » : la part non utilisée est remboursée. Le remboursement partiel est fait tout seul dans Stripe avec la clé
+  restreinte `STRIPE_REFUND_KEY` (Balance, Customers et PaymentIntents en lecture, Charges en écriture), qui sert aussi au
+  registre des recettes (une ligne par paiement et par remboursement). Au passage aux vrais paiements, remplacer la clé de
+  test par une clé « live » avec les mêmes droits.
+
 ## Ordre conseillé le jour du lancement
 
-1. Remplir les champs et publier ces pages (copie dans `src/pages/`), mettre `LEGAL.cgv` et `MONETIZATION = true`.
+1. Remplir les champs et publier ces pages (copie dans `src/pages/`), mettre `LEGAL.cgv` et `MONETIZATION = true`, et
+   saisir les « Infos du vendeur » dans l'Administration (factures).
 2. Publier cette version et laisser quelques jours aux appareils pour se mettre à jour.
 3. Seulement ensuite, remplir la date de lancement dans Supabase (`app_config.launch_at`).

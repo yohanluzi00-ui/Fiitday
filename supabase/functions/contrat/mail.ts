@@ -72,3 +72,43 @@ export async function envoyer(to: string, nom: string, sujet: string, html: stri
     return "pas envoyé : Brevo injoignable";
   }
 }
+
+/* ---------- factures et avoirs (paiements par carte sur fiitday.com) ---------- */
+// identité du vendeur saisie dans Administration › Registre des recettes › « Infos du vendeur » (gardée dans la base)
+export type Vendeur = { name?: string; addr?: string; siret?: string; immat?: string; vat?: string };
+export const vendeurOk = (s: Vendeur | null) => !!s && String(s.name || "").trim().length > 3 && String(s.addr || "").trim().length > 5 && /^\d{14}$/.test(String(s.siret || ""));
+export type Facture = { id: string; number: string; kind: string; test: boolean; email: string; client: string; product: string; label: string; amount: number;
+  currency?: string; paid_at: string; period_start?: string | null; period_end?: string | null; ref_number?: string | null; created_at?: string };
+const manque = (t: string) => "[" + t + " à compléter]";
+export function factureHtml(f: Facture, s: Vendeur): [string, string] {
+  const avoir = f.kind === "avoir", montant = euros(Number(f.amount));
+  const titre = (avoir ? "Avoir" : "Facture") + " n° " + f.number;
+  const vendeur = [String(s.name || "").trim() || manque("nom"), String(s.addr || "").trim() || manque("adresse"), "SIRET " + (s.siret || manque("SIRET")),
+    String(s.immat || "").trim(), "contact@fiitday.com"].filter(Boolean).map(esc).join("<br>");
+  const periode = /_vie_/.test(f.product) ? " (à vie)" : f.period_start && f.period_end ? " (du " + quand(f.period_start, false) + " au " + quand(f.period_end, false) + ")" : "";
+  const cell = 'style="padding:8px 6px;border-bottom:1px solid #E4E0EC;text-align:right;white-space:nowrap"';
+  const table = '<table style="border-collapse:collapse;width:100%;margin:8px 0 6px;font-size:14px"><tr style="color:#5D586B">' +
+    '<td style="padding:6px 6px 6px 0;border-bottom:1px solid #E4E0EC">Désignation</td><td ' + cell + ">Qté</td><td " + cell + ">Prix unitaire</td><td " + cell + ">Montant</td></tr>" +
+    '<tr><td style="padding:8px 6px 8px 0;border-bottom:1px solid #E4E0EC">' + fr(esc((avoir ? "Remboursement : " : "") + "Fiitday " + f.label + periode)) + "</td><td " + cell + ">1</td><td " + cell + ">" + esc(montant) + "</td><td " + cell + ">" + esc(montant) + "</td></tr>" +
+    '<tr><td colspan="3" style="padding:8px 6px 8px 0;text-align:right"><b>' + (avoir ? "Total remboursé" : "Total payé") + "</b></td><td " + cell + "><b>" + esc(montant) + "</b></td></tr></table>";
+  const corps = (f.test ? p("<b>Document de test</b> : achat de test, aucun paiement réel.") : "") +
+    lignes([["Numéro", esc(f.number)], ["Date", esc(quand(f.created_at || f.paid_at, false))], ["Vendeur", vendeur],
+      ["Client", esc([String(f.client || "").trim(), f.email].filter(Boolean).join(" · ") || "—")]].concat(avoir && f.ref_number ? [["Facture d'origine", esc(f.ref_number)]] : []) as [string, string][]) +
+    table + p(esc(String(s.vat || "").trim() || "TVA non applicable, article 293 B du CGI") + ". Prix en euros.") +
+    (avoir ? p("Ce montant t'est remboursé avec le moyen de paiement utilisé lors de l'achat.")
+      : p("Payée le " + esc(quand(f.paid_at)) + " par carte bancaire sur fiitday.com (paiement traité par Stripe).")) +
+    p("Garde ce document : c'est ton justificatif.");
+  return [(f.test ? "[Test] " : "") + (avoir ? "Avoir" : "Facture") + " Fiitday n° " + f.number, page(titre, corps)];
+}
+// envoie une facture ou un avoir et note le résultat ; une vraie facture n'est jamais envoyée sans l'identité du vendeur
+// deno-lint-ignore no-explicit-any
+export async function envoyerFacture(sb: any, f: Facture): Promise<string> {
+  const { data: s } = await sb.rpc("seller_info");
+  let st: string;
+  if (!f.test && !vendeurOk(s)) st = "pas envoyé : identité du vendeur à compléter (Administration › Registre des recettes › Infos du vendeur)";
+  else if (!f.email) st = "pas envoyé : adresse e-mail introuvable";
+  else { const [sujet, html] = factureHtml(f, s || {}); st = await envoyer(f.email, String(f.client || "").trim(), sujet, html); }
+  await sb.rpc("invoice_mark", { p_id: f.id, p_mail: st });
+  if (!st.startsWith("envoyé")) console.error((f.kind === "avoir" ? "avoir " : "facture ") + f.number + " : " + st);
+  return st;
+}

@@ -7,8 +7,10 @@
 // rétractation, CGV (intégrées à la fonction par build.js, cgv-texte.ts) et formulaire de rétractation. L'envoi se fait
 // après la réponse à RevenueCat ; chaque confirmation est notée (order_confirmations) et retentée chaque jour si elle
 // a échoué (« relance », lancée par pg_cron avec le secret du coffre de Supabase). Clé Brevo : BREVO_API_KEY.
+// Chaque paiement par carte (achat, renouvellement, achat à vie) reçoit aussi sa facture numérotée par e-mail ; une vraie
+// facture n'est envoyée qu'une fois l'identité du vendeur saisie dans Administration (nouvel essai chaque jour).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
-import { envoyer, PRIX } from "./mail.ts";
+import { envoyer, envoyerFacture, type Facture, PRIX } from "./mail.ts";
 import { confirmationHtml } from "./confirmation.ts";
 import { CGV_COMPLET, CGV_HTML, CGV_VERSION } from "./cgv-texte.ts";
 
@@ -62,7 +64,11 @@ async function relance(sb: any) {
   if (error) { console.error("relance : " + error.message); return json(500, { ok: false }); }
   let sent = 0;
   for (const c of (data || []) as Conf[]) if ((await envoyerConfirmation(sb, c)).startsWith("envoyé")) sent++;
-  return json(200, { ok: true, due: (data || []).length, sent });
+  // factures pas encore envoyées (identité du vendeur pas encore saisie, Brevo injoignable…)
+  let factures = 0;
+  const { data: due } = await sb.rpc("invoices_due");
+  for (const f of (due || []) as Facture[]) if ((await envoyerFacture(sb, f)).startsWith("envoyé")) factures++;
+  return json(200, { ok: true, due: (data || []).length, sent, factures });
 }
 
 Deno.serve(async (req: Request) => {
@@ -84,6 +90,22 @@ Deno.serve(async (req: Request) => {
   if (!ev || typeof ev !== "object") return json(400, { error: "event manquant" });
   const { data, error } = await sb.rpc("rc_apply", { ev });
   if (error) { console.error("rc_apply : " + error.message); return json(500, { error: "erreur du serveur" }); }
+  // deno-lint-ignore no-explicit-any
+  const rt = (globalThis as any).EdgeRuntime;
+  const later = (job: Promise<unknown>) => rt && typeof rt.waitUntil === "function" ? rt.waitUntil(job) : job;
+  // paiement par carte (achat, renouvellement, achat à vie) : facture numérotée, envoyée après la réponse
+  const payType = ["INITIAL_PURCHASE", "RENEWAL", "NON_RENEWING_PURCHASE"].includes(String(data?.type || ""));
+  if (data?.applied && payType && String(data.store) === "RC_BILLING" && PRIX[String(data.product || "")]) {
+    const product = String(data.product), price = Number(ev.price_in_purchased_currency ?? PRIX[product].amount);
+    if (price > 0) {
+      const paid = new Date(Number(ev.purchased_at_ms || ev.event_timestamp_ms || Date.now())).toISOString();
+      const end = !/_vie_/.test(product) && ev.expiration_at_ms ? new Date(Number(ev.expiration_at_ms)).toISOString() : null;
+      const { data: fi, error: fe } = await sb.rpc("invoice_create", { p: { kind: "facture", test: data.env !== "PRODUCTION", user_id: data.user_id, product, amount: price,
+        currency: String(ev.currency || "EUR"), paid_at: paid, store: "RC_BILLING", event_id: String(ev.id || ""), period_start: end ? paid : null, period_end: end } });
+      if (fe) console.error("facture : " + fe.message);
+      else if (fi?.ok && !fi.existing) await later(envoyerFacture(sb, fi.invoice as Facture).catch(e => console.error("facture : " + String((e as Error).message || e))));
+    }
+  }
   // nouveau contrat : confirmation notée tout de suite, envoyée après la réponse (RevenueCat n'attend pas l'e-mail)
   if (data?.applied && data.new_contract && PRIX[String(data.product || "")]) {
     const c: Conf = { event_id: String(ev.id || crypto.randomUUID()).slice(0, 100), user_id: data.user_id, product: String(data.product), store: String(data.store),
@@ -91,10 +113,7 @@ Deno.serve(async (req: Request) => {
     const { error: ie } = await sb.from("order_confirmations").insert(c);
     if (ie) console.error("journal des confirmations : " + ie.message);
     else {
-      const job = envoyerConfirmation(sb, c).catch(e => console.error("confirmation de commande : " + String((e as Error).message || e)));
-      // deno-lint-ignore no-explicit-any
-      const rt = (globalThis as any).EdgeRuntime;
-      if (rt && typeof rt.waitUntil === "function") rt.waitUntil(job); else await job;
+      await later(envoyerConfirmation(sb, c).catch(e => console.error("confirmation de commande : " + String((e as Error).message || e))));
     }
   }
   return json(200, data);

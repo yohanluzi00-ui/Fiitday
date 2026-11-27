@@ -1199,3 +1199,17 @@ input.f::placeholder, textarea.f::placeholder { color: var(--muted); opacity: 1;
 .report-foot a { white-space: nowrap; }
 .adm-rep-res { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .adm-rep-ex { margin: 8px 0 10px; padding-left: 18px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }
+
+/* ===== Stats › Évolution : poids (facultatif) ===== */
+.evo-weight { margin: 0 0 12px; }
+.w-ask h3 { margin: 0 0 6px; }
+.w-ask p { margin: 0 0 12px; }
+.w-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.w-btns .btn { flex: 1 1 200px; }
+.w-form { display: grid; gap: 10px; margin-bottom: 12px; }
+.w-form p { margin: 0; }
+.w-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.w-row .fl { flex: 1 1 140px; min-width: 0; }
+.w-free { margin: 0 2px 10px; }
+.w-list > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.w-r { display: inline-flex; align-items: center; gap: 12px; }

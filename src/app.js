@@ -160,7 +160,7 @@ document.addEventListener("visibilitychange", () => {
 // identifiants : lettres, chiffres, « _ » et « - » seulement (ils sont insérés dans les attributs HTML)
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const okId = x => typeof x === "string" && ID_RE.test(x);
-const KINDS = { template: 1, workout: 1, settings: 1 }, NOTE_MAX = 1000; // genres d'éléments connus (une sauvegarde n'en apporte pas d'autres)
+const KINDS = { template: 1, workout: 1, settings: 1, weight: 1 }, NOTE_MAX = 1000; // genres d'éléments connus (une sauvegarde n'en apporte pas d'autres)
 function validItem(it) {
   if (!it || !okId(it.id) || typeof it.kind !== "string" || !it.data || typeof it.data !== "object") return false;
   if (it.deleted) return true;
@@ -168,6 +168,7 @@ function validItem(it) {
   if (d.id !== it.id) return false;
   if (it.kind === "template") return Array.isArray(d.variants) && d.variants.every(v => v && okId(v.id) && Array.isArray(v.exercises) && v.exercises.every(e => e && okId(e.id) && (!e.groupId || okId(e.groupId))));
   if (it.kind === "workout") return okId(d.templateId) && okId(d.variantId) && typeof d.startedAt === "number" && Array.isArray(d.exercises) && d.exercises.every(e => e && okId(e.exId) && (!e.groupId || okId(e.groupId)) && Array.isArray(e.sets));
+  if (it.kind === "weight") return /^\d{4}-\d{2}-\d{2}$/.test(d.date || "") && it.id === "poids-" + d.date && typeof d.kg === "number" && d.kg >= 20 && d.kg <= 400;
   return true;
 }
 // anciens noms « Variante N » → « Séance N » (affichage, et renommage enregistré quand les données sont à jour)
@@ -719,7 +720,7 @@ async function sync() {
     if (gone()) return;
     purgeBody(); // plus de page Corps : les anciennes mesures sont effacées, contenu compris
     freezeNotes(); renameVariants(); // après la récupération : les données sont à jour, aucun risque d'écraser une modif récente
-    hrGoneSweep();
+    hrGoneSweep(); weightGoneSweep();
     // 2) envoyer ce qui a changé ici, par paquets de 200 ; le serveur renvoie ce qu'il a enregistré (il garde sa version
     //    si elle est plus récente) ; un élément qu'il refuse (texte invalide, trop gros…) est mis de côté sans bloquer les autres
     const dirty = Object.values(db.items).filter(i => i.dirty && !i.refused);
@@ -1061,7 +1062,7 @@ function renderNow() {
     case "program": body = viewProgram(r.args[0], r.args[1]); break;
     case "history": body = viewHistory(r.args[0]); break;
     case "progress": if (r.args[0]) { history.replaceState(history.state, "", "#/evolution/" + encodeURIComponent(r.args[0])); body = viewEvolutionDetail(r.args[0]); } else body = viewProgress(); break; // ancien lien d'un exercice
-    case "evolution": body = isPC() && !isFree() && progressData().length ? viewEvolutionPc(r.args[0]) : r.args[0] ? viewEvolutionDetail(r.args[0]) : viewEvolution(); break;
+    case "evolution": body = isPC() && !isFree() && progressData().length ? viewEvolutionPc(r.args[0]) : r.args[0] === "poids" ? viewWeight() : r.args[0] ? viewEvolutionDetail(r.args[0]) : viewEvolution(); break;
     case "calendar": body = viewCalendar(r.args[0], r.args[1]); break;
     case "body": history.replaceState(history.state, "", "#/progress"); body = viewProgress(); break; // ancienne page Corps
     case "s":
@@ -2778,7 +2779,8 @@ const EVO_M = {
   orm: { label: "1RM estimé", short: "1RM estimé", unit: " kg" },
   reps: { label: "Répétitions max", short: "Répétitions", unit: " reps" },
   sec: { label: "Temps max", short: "Temps", unit: " s" },
-  run: { label: "Meilleur temps", short: "Temps", unit: "", low: true, clock: true }
+  run: { label: "Meilleur temps", short: "Temps", unit: "", low: true, clock: true },
+  poids: { label: "Poids", short: "Poids", unit: " kg", neutral: true } // ni « record » ni « mieux » : une courbe, sans objectif
 };
 // courbe d'un indicateur de cardio (« cv:dist ») ou de la durée (« dur »)
 function evoDef(m) {
@@ -2804,7 +2806,7 @@ function evoMetrics(p) {
   const out = []; if (has("kg")) out.push("kg"); if (has("orm")) out.push("orm"); if (has("reps")) out.push("reps"); if (has("ton")) out.push("ton");
   return out.length ? out : ["reps"];
 }
-const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
+const evoFmt = (m, v) => { const M = evoDef(m); return v == null ? "—" : m === "poids" ? wFmt(v) : M.clock ? fmtClock(v) + (M.cv && M.cv.u ? " " + M.cv.u : "") : m === "sec" ? fmtHold(v) : m === "ton" ? fmtTon(v) : fmtNum(m === "orm" ? Math.round(v * 2) / 2 : M.cv && M.cv.int ? Math.round(v) : v) + M.unit; };
 function evoDiff(m, d) {
   if (d == null) return "—";
   const r = Math.round(Math.abs(d) * (m === "orm" ? 2 : 100)) / (m === "orm" ? 2 : 100);
@@ -2852,22 +2854,22 @@ function evoListHtml() {
 }
 let evoSel = null; // exercice affiché à droite de la liste (PC)
 function viewEvolutionPc(key) {
-  const all_ = progressData(), hits = evoSearch(evo.q), p = all_.find(x => x.key === key) || (hits[0] && hits[0].p) || all_[0];
-  evoSel = p ? p.key : null;
-  const detail = p ? viewEvolutionDetail(p.key, true) : "";
-  evoSel = p ? p.key : null;
-  return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + '<div class="pc-cols evo"><div class="pc-main">' +
+  const all_ = progressData(), hits = evoSearch(evo.q), wsel = key === "poids", p = wsel ? null : all_.find(x => x.key === key) || (hits[0] && hits[0].p) || all_[0];
+  evoSel = wsel ? "poids" : p ? p.key : null;
+  const detail = wsel ? viewWeight(true) : p ? viewEvolutionDetail(p.key, true) : "";
+  evoSel = wsel ? "poids" : p ? p.key : null;
+  return '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + '<div class="pc-cols evo"><div class="pc-main">' + weightRowHtml() +
     '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
-    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe à droite. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div></div>" +
+    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe à droite. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + weightShowLink() + "</div>" +
     '<div class="pc-side pc-pane">' + detail + "</div></div>";
 }
 function viewEvolution() {
   evoSel = null;
-  let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution");
-  if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.");
-  if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>';
+  let h = '<div class="page-head"><h1>Stats</h1></div>' + statsTabs("evolution") + weightRowHtml();
+  if (isFree()) return h + planCard("La courbe de chaque exercice et de chaque machine de cardio (charge, répétitions, distance, calories, records) est réservée à Premium. Tes séances sont gardées : la courbe sera complète dès que tu t'abonnes.") + weightShowLink();
+  if (!progressData().length) return h + '<div class="card empty">Termine une séance pour voir l\'évolution de tes exercices. Seuls les exercices faits pendant une séance terminée apparaissent ici.</div>' + weightShowLink();
   return h + '<label class="evo-search"><span class="sr">Rechercher un exercice</span><input type="search" class="f" data-evo-q placeholder="Rechercher un exercice" autocomplete="off" value="' + esc(evo.q) + '"></label>' +
-    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe dans le temps. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>";
+    '<p class="muted small" style="margin:6px 2px 10px">Choisis un exercice pour voir sa courbe dans le temps. Seuls ceux que tu as faits en séance apparaissent.</p><div id="evo-list">' + evoListHtml() + "</div>" + weightShowLink();
 }
 document.addEventListener("input", e => {
   if (!e.target.matches || !e.target.matches("input[data-evo-q]")) return;
@@ -2892,9 +2894,9 @@ function evoChart(p, m, pts, W) {
   if (y1 === y0) { y0 = Math.max(0, y0 - step); y1 += step; }
   const t0 = pts[0].t, t1 = pts[pts.length - 1].t, span = t1 - t0;
   const X = t => L + (span ? ((t - t0) / span) * pw : pw / 2), Y = v => T + (1 - (v - y0) / (y1 - y0)) * ph;
-  const recV = M.low ? mn : mx, recK = pts.map(x => x.v).lastIndexOf(recV), lastK = pts.length - 1;
+  const recV = M.low ? mn : mx, recK = M.neutral ? -1 : pts.map(x => x.v).lastIndexOf(recV), lastK = pts.length - 1;
   pts.forEach(x => { x.x = X(x.t); x.y = Y(x.v); });
-  let svg = '<svg class="chart evo-svg" viewBox="0 0 ' + W + " " + H + '" tabindex="0" role="img" aria-label="' + esc(M.label + " de " + p.name + " : " + pts.length + " séances, record " + evoFmt(m, recV) + ", dernière " + evoFmt(m, pts[lastK].v)) + '">' +
+  let svg = '<svg class="chart evo-svg" viewBox="0 0 ' + W + " " + H + '" tabindex="0" role="img" aria-label="' + esc(M.neutral ? M.label + " : " + pts.length + " pesée" + (pts.length > 1 ? "s" : "") + ", dernière " + evoFmt(m, pts[lastK].v) : M.label + " de " + p.name + " : " + pts.length + " séances, record " + evoFmt(m, recV) + ", dernière " + evoFmt(m, pts[lastK].v)) + '">' +
     '<defs><linearGradient id="evoG" x1="0" x2="0" y1="0" y2="1"><stop offset="0"></stop><stop offset="1"></stop></linearGradient></defs>';
   for (let v = y0; v <= y1 + step / 1000; v += step) {
     const y = Y(v).toFixed(1);
@@ -2915,7 +2917,8 @@ function evoChart(p, m, pts, W) {
   const lab = (k, txt) => { const x = Math.min(W - R - 2, Math.max(L + 2, pts[k].x)), y = pts[k].y - 11 < T - 14 ? pts[k].y + 20 : pts[k].y - 11;
     const anchor = pts[k].x > W - R - 40 ? "end" : pts[k].x < L + 40 ? "start" : "middle";
     return '<text class="lab" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" text-anchor="' + anchor + '">' + esc(txt) + "</text>"; };
-  if (pts.length > 1) { svg += lab(recK, "Record " + evoFmt(m, recV)); if (lastK !== recK && Math.abs(pts[lastK].x - pts[recK].x) > 90) svg += lab(lastK, evoFmt(m, pts[lastK].v)); }
+  if (pts.length > 1 && M.neutral) svg += lab(lastK, evoFmt(m, pts[lastK].v));
+  else if (pts.length > 1) { svg += lab(recK, "Record " + evoFmt(m, recV)); if (lastK !== recK && Math.abs(pts[lastK].x - pts[recK].x) > 90) svg += lab(lastK, evoFmt(m, pts[lastK].v)); }
   svg += '<line class="xhair" x1="0" x2="0" y1="' + T + '" y2="' + (T + ph) + '" visibility="hidden"></line><circle class="focus" r="6" cx="0" cy="0" visibility="hidden"></circle></svg>';
   return svg;
 }
@@ -2926,7 +2929,7 @@ function evoPick(k) {
   xh.setAttribute("x1", x.x); xh.setAttribute("x2", x.x); xh.setAttribute("visibility", "visible");
   f.setAttribute("cx", x.x); f.setAttribute("cy", x.y); f.setAttribute("visibility", "visible");
   out.querySelector("b").textContent = evoFmt(evoCur.m, x.v);
-  out.querySelector(".d").textContent = fmtDateLong(x.t) + " · " + x.ses;
+  out.querySelector(".d").textContent = fmtDateLong(x.t) + (x.ses ? " · " + x.ses : "");
   out.querySelector(".s").textContent = x.sum;
 }
 function evoNearest(ev) {
@@ -2992,6 +2995,108 @@ function viewEvolutionDetail(key, pane) {
   return h;
 }
 
+/* ================= Stats › Évolution : poids (facultatif, avec accord exprès) ================= */
+// Une pesée par jour : élément « weight », id « poids-AAAA-MM-JJ » (deux appareils le même jour : la dernière pesée gagne).
+// Le poids peut renseigner sur la santé : il n'est noté qu'après un accord exprès, séparé et retirable ; « Retirer mon accord »
+// efface toutes les pesées. Pas d'objectif, pas d'IMC, pas d'interprétation : une courbe neutre.
+// Version gratuite : les 30 derniers jours ; Premium : tout l'historique (les pesées plus anciennes sont gardées, juste masquées).
+const W_FREE_DAYS = 30, W_MIN = 20, W_MAX = 400;
+const W_CONSENT = "C'est facultatif. Ton poids peut renseigner sur ta santé : si tu le notes, il est enregistré (et synchronisé entre tes appareils avec Premium), visible de toi seul, jamais partagé ni utilisé pour autre chose, et supprimé avec ton compte. Tu peux retirer ton accord quand tu veux (« Ne plus suivre mon poids », puis « Retirer mon accord ») : tes pesées sont alors effacées.";
+const weightOk = () => !!settings().weightOk;
+const weights = () => all("weight").filter(x => /^\d{4}-\d{2}-\d{2}$/.test(x.date || "") && typeof x.kg === "number").sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+const wTime = d => new Date(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10), 12).getTime();
+const wFmt = kg => (Math.round(kg * 10) / 10).toFixed(1).replace(".", ",") + " kg"; // toujours une décimale : 79,0 kg
+const wFreeFrom = () => ymd(Date.now() - (W_FREE_DAYS - 1) * 86400000);
+const weightsShown = () => isFree() ? weights().filter(x => x.date >= wFreeFrom()) : weights();
+function eraseWeights() { flushPending(); let n = 0; for (const it of Object.values(db.items)) if (it.kind === "weight" && !it.deleted) { remove(it.id); n++; } return n; }
+// accord retiré : une pesée revenue d'un appareil qui ne le savait pas encore (hors ligne) est effacée à son tour
+function weightGoneSweep() { if (!weightOk() && settings().weightGoneAt && weights().length) eraseWeights(); }
+// ligne « Poids » en haut de Stats › Évolution (aussi en version gratuite)
+function weightRowHtml() {
+  if (settings().weightHidden) return "";
+  const ws = weightsShown(), last = ws[ws.length - 1], ok = weightOk();
+  const sub = !ok ? "Facultatif : suis l'évolution de ton poids" : last ? ws.length + " pesée" + (ws.length > 1 ? "s" : "") + " · " + dfDay.format(wTime(last.date)) : "Note ton poids pour voir sa courbe";
+  const right = ok && last ? '<span class="evo-r">' + sparkline(ws.slice(-12).map(x => x.kg)) + '<span class="small"><b>' + wFmt(last.kg) + '</b> <span class="muted">dernière</span></span></span>' : "";
+  return '<div class="list evo-weight"><a href="#/evolution/poids"' + (evoSel ? " data-pane" : "") + (evoSel === "poids" ? ' class="pc-on" aria-current="true"' : "") + '><div><b>Poids</b><div class="muted small">' + esc(sub) + "</div></div>" + right + "</a></div>";
+}
+const weightShowLink = () => settings().weightHidden ? '<button type="button" class="linkbtn" data-act="wshow">+ Suivre mon poids</button>' : "";
+let wPer = "all";
+function viewWeight(pane) {
+  evoCur = null; if (!pane) evoSel = null;
+  let h = (pane ? "" : '<a class="back" href="#/evolution">‹ Évolution</a>') + '<div class="page-head"><h1>Poids</h1></div>';
+  if (!weightOk()) return h + '<div class="card w-ask"><h3>Suivre ton poids ?</h3><p class="small">' + esc(W_CONSENT) + '</p>' +
+    '<div class="w-btns"><button type="button" class="btn primary" data-act="wok">J\'accepte de noter mon poids</button><button type="button" class="btn" data-act="wno">Non merci</button></div></div>';
+  const all_ = weights(), ws = weightsShown(), today = ymd(Date.now()), cur = all_.find(x => x.date === today);
+  h += '<div class="card w-form"><div class="muted small" style="font-weight:600">Noter mon poids</div><div class="w-row">' +
+    '<label class="fl">Jour<input type="date" class="f" data-w-date max="' + today + '"' + (isFree() ? ' min="' + wFreeFrom() + '"' : "") + ' value="' + today + '"></label>' +
+    '<label class="fl">Poids (kg)<input class="f" data-w-kg inputmode="decimal" autocomplete="off" maxlength="6" placeholder="ex. 72,4" value="' + (cur ? esc(fmtNum(cur.kg)) : "") + '"></label></div>' +
+    '<button type="button" class="btn primary" data-act="wsave">Enregistrer</button><p class="muted small">Une valeur par jour, en kg avec une décimale : en noter une autre pour le même jour la remplace.</p></div>';
+  if (isFree()) h += '<p class="muted small w-free">Version gratuite : les ' + W_FREE_DAYS + ' derniers jours. Avec <a href="#/premium">Premium</a>, tout l\'historique de ton poids.</p>';
+  const span = ws.length > 1 ? wTime(ws[ws.length - 1].date) - wTime(ws[0].date) : 0;
+  const pers = isFree() ? [] : EVO_P.filter(x => !x[2] || span > x[2] * 86400000 * 0.9);
+  const per = pers.some(x => x[0] === wPer) ? wPer : "all", days = (EVO_P.find(x => x[0] === per) || [0, 0, 0])[2];
+  const from = days ? ymd(Date.now() - (days - 1) * 86400000) : "", ent = ws.filter(x => !from || x.date >= from);
+  if (pers.length > 1) h += '<div class="evo-filters"><div class="seg evo-seg" role="group" aria-label="Période">' + pers.map(x => '<button type="button" data-act="wper" data-v="' + x[0] + '"' + (x[0] === per ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + esc(x[1]) + "</button>").join("") + "</div></div>";
+  if (!ent.length) h += '<div class="card empty">' + (ws.length ? "Aucune pesée sur cette période." : "Note ton poids ci-dessus pour commencer ta courbe.") + "</div>";
+  else {
+    const first = ent[0], last = ent[ent.length - 1], dlt = ent.length > 1 ? Math.round((last.kg - first.kg) * 10) / 10 : null;
+    h += '<div class="stats">' +
+      '<div class="card stat"><div class="muted small">Dernière pesée</div><div class="v">' + wFmt(last.kg) + '</div><div class="muted small">' + esc(fmtDate(wTime(last.date))) + "</div></div>" +
+      '<div class="card stat"><div class="muted small">Évolution</div><div class="v">' + (dlt == null ? "—" : !dlt ? "Stable" : (dlt > 0 ? "+" : "−") + wFmt(Math.abs(dlt))) + '</div><div class="muted small">' + (ent.length > 1 ? ent.length + " pesées depuis le " + esc(fmtDate(wTime(first.date))) : "une seule pesée") + "</div></div></div>";
+    const pts = ent.map(x => ({ t: wTime(x.date), v: x.kg, ses: "", sum: "" })), p = { name: "Poids" };
+    evoCur = { pts, m: "poids", k: pts.length - 1, W: 360, p };
+    h += '<div class="card evo-card"><div class="muted small" style="font-weight:600">Poids</div>' +
+      '<div class="evo-read" aria-live="polite"><b>' + wFmt(last.kg) + '</b><span class="d">' + esc(fmtDateLong(wTime(last.date))) + '</span><span class="s"></span></div>' + evoChart(p, "poids", pts) +
+      '<p class="muted small" style="margin:8px 0 0">' + (pts.length === 1 ? "Une seule pesée pour l'instant : la courbe se dessinera dès la prochaine." : "Fais glisser le doigt sur la courbe pour voir chaque pesée.") + "</p></div>";
+    h += '<div class="section-title">Pesées</div><div class="list w-list">' + ent.slice().reverse().map(x => '<div><b>' + esc(fmtDate(wTime(x.date))) + '</b><span class="w-r"><b class="num">' + wFmt(x.kg) + '</b>' +
+      '<button type="button" class="cv-del" data-act="wdel" data-id="' + x.id + '" aria-label="Supprimer la pesée du ' + esc(fmtDate(wTime(x.date))) + '">×</button></span></div>').join("") + "</div>";
+    setTimeout(evoFit, 0);
+  }
+  return h + '<button type="button" class="linkbtn" data-act="woff">Ne plus suivre mon poids</button>';
+}
+async function weightAction(act, b) {
+  const st = settings();
+  if (act === "wok") { st.weightOk = new Date().toISOString(); st.weightHidden = false; put("settings", st); render(); return; }
+  if (act === "wno") { st.weightHidden = true; put("settings", st); toast("Le poids n'est plus proposé. « + Suivre mon poids », en bas de l'onglet Évolution, le réaffiche"); go("evolution"); return; }
+  if (act === "wshow") { st.weightHidden = false; put("settings", st); go("evolution/poids"); return; }
+  if (act === "wper") { wPer = b.dataset.v; render(); return; }
+  if (act === "wsave") {
+    if (!weightOk()) return;
+    const di = document.querySelector("[data-w-date]"), ki = document.querySelector("[data-w-kg]"); if (!di || !ki) return;
+    const date = di.value, today = ymd(Date.now()), kg = Math.round(Number(String(ki.value).replace(",", ".").replace(/\s/g, "")) * 10) / 10;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > today) { toast("Choisis un jour passé ou aujourd'hui"); return; }
+    if (isFree() && date < wFreeFrom()) { toast("En version gratuite, tu peux noter les " + W_FREE_DAYS + " derniers jours"); return; }
+    if (!ki.value.trim() || !(kg >= W_MIN && kg <= W_MAX)) { toast("Note un poids entre " + W_MIN + " et " + W_MAX + " kg"); ki.focus(); return; }
+    const id = "poids-" + date, had = getItem(id);
+    put("weight", { id, date, kg, at: Date.now() });
+    toast(had ? "Pesée du " + fmtDate(wTime(date)) + " remplacée : " + wFmt(kg) : "Poids enregistré : " + wFmt(kg)); render(); return;
+  }
+  if (act === "wdel") {
+    const x = getItem(b.dataset.id); if (!x) return;
+    if (!await ask({ title: "Supprimer cette pesée ?", text: fmtDate(wTime(x.date)) + " : " + wFmt(x.kg), ok: "Supprimer", danger: true })) return;
+    remove(x.id); render(); return;
+  }
+  if (act === "woff") {
+    const n = weights().length;
+    const c = await choose("Suivi du poids", [
+      ["hide", "Masquer seulement", "Le poids disparaît de l'onglet Évolution ; ton accord et " + (n > 1 ? "tes " + n + " pesées sont gardés" : n ? "ta pesée sont gardés" : "ton suivi sont gardés") + ". « + Suivre mon poids », en bas de l'onglet, le réaffiche."],
+      ["erase", n > 1 ? "Retirer mon accord et effacer mes " + n + " pesées" : n ? "Retirer mon accord et effacer ma pesée" : "Retirer mon accord",
+        "Ton poids n'est plus noté" + (n ? ", et " + (n > 1 ? "tes pesées sont effacées" : "ta pesée est effacée") + " (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard."]
+    ], "Que veux-tu faire ?");
+    if (!c) return;
+    if (c === "hide") { st.weightHidden = true; put("settings", st); toast("Poids masqué : ton accord et tes pesées sont gardés"); go("evolution"); return; }
+    eraseWeights();
+    const s2 = settings(); s2.weightOk = null; s2.weightGoneAt = new Date().toISOString(); s2.weightHidden = true; put("settings", s2);
+    toast(n ? "Accord retiré : " + (n > 1 ? n + " pesées effacées" : "1 pesée effacée") : "Accord retiré : ton poids n'est plus noté"); go("evolution");
+  }
+}
+// jour choisi : le poids déjà noté ce jour-là s'affiche (pour le corriger)
+document.addEventListener("change", e => {
+  if (!e.target.matches || !e.target.matches("input[data-w-date]")) return;
+  const x = getItem("poids-" + e.target.value), ki = document.querySelector("[data-w-kg]");
+  if (ki) ki.value = x && typeof x.kg === "number" ? fmtNum(x.kg) : "";
+});
+
 /* ================= Records et 1RM estimé ================= */
 // 1RM estimé (formule d'Epley), fiable jusqu'à une quinzaine de répétitions
 const e1rm = (kg, r) => (kg == null || kg <= 0 || r == null || r <= 0 || r > 20) ? null : (r === 1 ? kg : kg * (1 + r / 30));
@@ -3024,7 +3129,7 @@ function celebrate(rec) {
 // de simples liens (celui de la page affichée porte aria-current), pas une « liste d'onglets »
 function statsTabs(on) {
   return '<div class="tabs stabs">' + [["progress", "Séances"], ["evolution", "Évolution"], ["calendar", "Calendrier"], ["history", "Historique"]].map(t =>
-    '<a href="#/' + t[0] + '" class="tab' + (t[0] === on ? " on" : "") + '"' + (t[0] === on ? ' aria-current="page"' : "") + ">" + (isFree() && (t[0] === "evolution" || t[0] === "calendar") ? LOCK : "") + t[1] + "</a>").join("") + "</div>";
+    '<a href="#/' + t[0] + '" class="tab' + (t[0] === on ? " on" : "") + '"' + (t[0] === on ? ' aria-current="page"' : "") + ">" + (isFree() && t[0] === "calendar" ? LOCK : "") + t[1] + "</a>").join("") + "</div>";
 }
 
 /* ================= Calendrier ================= */
@@ -3651,6 +3756,7 @@ const FAQ = [
     ["gris", "À quoi servent les chiffres en gris ?", "Ce sont tes valeurs de la dernière fois pour cet exercice. Le bouton ✓ les reprend si tu as fait pareil ; sinon, tape simplement tes nouveaux chiffres."]]],
   ["Progrès et exercices", [
     ["progression", "Comment voir ma progression sur un exercice ?", "Dans <a href=\"#/evolution\">Stats › Évolution</a>, cherche un exercice déjà fait : tu vois sa courbe (charge, 1RM estimé, répétitions ou temps), ton record et ton historique, sur 1 mois, 3 mois, 6 mois, 1 an ou depuis le début."],
+    ["poids", "Comment suivre mon poids ?", "Dans <a href=\"#/evolution/poids\">Stats › Évolution › Poids</a>. C'est facultatif : Fiitday te demande d'abord ton accord, car le poids peut renseigner sur ta santé. Note un poids par jour (en kg, avec une décimale) pour voir sa courbe ; en version gratuite, tu vois les 30 derniers jours. Ton poids est visible de toi seul et jamais partagé. « Ne plus suivre mon poids » permet de le masquer, ou de retirer ton accord : tes pesées sont alors effacées."],
     ["record", "Comment est calculé un record ?", "Pour un exercice avec poids, Fiitday estime ton 1RM (la charge que tu pourrais soulever une seule fois) avec la formule d'Epley : charge × (1 + répétitions ÷ 30). Un record est fêté quand ce 1RM dépasse ton meilleur, à partir de ta 2e séance avec cet exercice. Pour la course, le record est ton meilleur temps."],
     ["corriger", "Comment corriger ou supprimer une séance terminée ?", "Ouvre-la depuis l'accueil (Dernières séances) ou <a href=\"#/history\">Stats › Historique</a> pour corriger une valeur. Pour la supprimer, fais glisser sa ligne de droite à gauche, puis appuie sur « Supprimer »."],
     ["etirements", "Quand et comment m'étirer ?", "L'onglet <a href=\"#/exercices/etirements\">Exercices › Étirements</a> propose 23 étirements avec le mannequin 3D, et le guide « Bien s'étirer » explique quand et comment le faire. Après une séance, l'accueil te propose pendant 15 minutes des étirements adaptés aux muscles travaillés (tu peux couper ces propositions dans Réglages › Étirements après la séance)."],
@@ -3691,7 +3797,7 @@ const GUIDE = [
     "Filtre « Mes exercices » : crée, modifie ou supprime tes propres exercices, avec ce que tu veux noter (poids, reps, temps, distance ou tes indicateurs)."]],
   ["Stats", "#/progress", "Tes progrès, en quatre onglets.", [
     "Séances : ta semaine par rapport à ton objectif, le temps de sport et les séances par semaine.",
-    "Évolution : la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records.",
+    "Évolution : la courbe de chaque exercice (charge, répétitions, durée, distance…) et tes records, et ton poids si tu choisis de le suivre.",
     "Calendrier : les jours où tu t'es entraîné.",
     "Historique : toutes tes séances terminées, à revoir ou à corriger."]],
   ["Programmes", "#/programs", "Les programmes Fiitday prêts à l'emploi.", [
@@ -3773,7 +3879,7 @@ const MONETIZATION = false;
 const PLAN_TESTERS = ["8d8a867f-e766-41ca-b197-7694f5f5e1c4"];
 // Premium ou gratuit : écran Premium et page de présentation du site
 const PLAN_ROWS = [["Comptes", "1 (Solo) ou " + FAMILY_SIZE + " (Famille)", "1"], ["Programmes et séances", "Illimités", "1 programme, 2 séances actives (changement tous les " + FREE_SWITCH_DAYS + " jours)"], ["Exercices perso", "Illimités", "5 au plus"], ["Historique", "Complet", "30 derniers jours"],
-  ["Stats", "Temps, tonnage, Évolution, calendrier", "La semaine en cours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
+  ["Stats", "Temps, tonnage, Évolution, calendrier, poids (tout l'historique)", "La semaine en cours, ton poids sur 30 jours"], ["Programmes Fiitday", "Prêts à l'emploi : musculation et circuit training", "Non"], ["Synchro téléphone ↔ ordinateur", "Oui", "Non"], ["Partager une séance", "Envoyer et recevoir", "Recevoir"],
   ["Sauvegarde", "Enregistrer et restaurer, code de transfert", "Enregistrer (pendant l'essai aussi)"]];
 let premiumFor = "solo", premiumPick = "year", premiumConsent = false; // case à cocher avant le paiement : demande expresse que Premium commence avant la fin du délai de rétractation (Code de la consommation, L221-25)
 // achat dans l'appli Android (RevenueCat) : « test » dans l'appli Fiitday Test (magasin de test, achats factices),
@@ -5259,6 +5365,7 @@ $app.addEventListener("click", async e => {
     case "recapok": try { localStorage.setItem("fiitday-recap-ok", b.dataset.id); } catch (err) { } render(); break;
     case "evometric": evo.m[b.dataset.k] = b.dataset.v; render(); break;
     case "evoper": evo.per = b.dataset.v; render(); break;
+    case "wok": case "wno": case "wshow": case "wper": case "wsave": case "wdel": case "woff": await weightAction(a, b); break;
     case "exoview": exoReturn = location.hash; go("exercices/" + b.dataset.id + (b.dataset.arg === "cardio" ? "/cardio" : "")); break;
     case "cardiohome": cardioStart(); break;
     case "freestart": freeStart(); break;
@@ -5975,7 +6082,7 @@ $app.addEventListener("click", async e => {
 // sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
 // Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
 // repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
-const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt"]; // hrOk / hrGoneAt : accord pour la fréquence cardiaque et son retrait, jamais repris d'une sauvegarde
+const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt", "weightOk", "weightGoneAt"]; // accords (fréquence cardiaque, poids) et leur retrait : jamais repris d'une sauvegarde
 async function restoreBackup(txt, badMsg) {
   let j;
   try { j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items) || (j.v != null && !(j.v >= 1 && j.v <= 2))) throw new Error(); }
@@ -5996,6 +6103,7 @@ async function restoreBackup(txt, badMsg) {
   if (j.at) lines.push("Sauvegarde du " + new Date(j.at).toLocaleDateString("fr-FR") + " à " + fmtTime(j.at) + ".");
   if (nb("template")) lines.push("• " + pl(nb("template"), "programme ajouté ou remplacé par sa version de la sauvegarde", "programmes ajoutés ou remplacés par leur version de la sauvegarde"));
   if (nb("workout")) lines.push("• " + pl(nb("workout"), "séance ajoutée à l'historique ou remplacée", "séances ajoutées à l'historique ou remplacées"));
+  if (nb("weight")) lines.push("• " + pl(nb("weight"), "pesée ajoutée ou remplacée", "pesées ajoutées ou remplacées"));
   if (nb("settings")) lines.push("• Réglages de la sauvegarde (thème, alertes, objectif…) ; tes exercices perso sont gardés et complétés");
   if (back.length) lines.push("• Dont " + pl(back.length, "élément supprimé depuis qui reviendra", "éléments supprimés depuis qui reviendront"));
   if (same) lines.push("• " + pl(same, "élément déjà à jour dans l'appli : gardé tel quel", "éléments déjà à jour dans l'appli : gardés tels quels"));
@@ -6008,6 +6116,14 @@ async function restoreBackup(txt, badMsg) {
       ok: hrN > 1 ? "J'accepte de les garder" : "J'accepte de la garder", cancel: hrN > 1 ? "Les effacer" : "L'effacer" });
     if (keep) { const st = settings(); st.hrOk = new Date().toISOString(); put("settings", st); }
     else take.forEach(x => { if (x.kind === "workout") stripHr(x.data); });
+  }
+  // poids dans la sauvegarde sans accord en cours : le garder demande ton accord, sinon les pesées ne sont pas reprises
+  const wN = weightOk() ? 0 : take.filter(x => x.kind === "weight").length;
+  if (wN) {
+    const keep = await ask({ title: "Poids dans la sauvegarde", text: "Cette sauvegarde contient " + (wN > 1 ? wN + " pesées" : "1 pesée") + ". Ton poids peut renseigner sur ta santé : il n'est gardé qu'avec ton accord, visible de toi seul, jamais partagé, et effacé si tu retires ton accord (« Ne plus suivre mon poids »).",
+      ok: wN > 1 ? "J'accepte de les garder" : "J'accepte de la garder", cancel: wN > 1 ? "Les effacer" : "L'effacer" });
+    if (keep) { const st = settings(); st.weightOk = new Date().toISOString(); st.weightHidden = false; put("settings", st); }
+    else for (let k = take.length - 1; k >= 0; k--) if (take[k].kind === "weight") take.splice(k, 1);
   }
   for (const it of take) {
     const cur = db.items[it.id];

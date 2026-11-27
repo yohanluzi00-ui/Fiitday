@@ -5,6 +5,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
+import android.graphics.Insets;
 import android.app.NotificationManager;
 import android.net.Uri;
 import android.os.Build;
@@ -15,6 +17,7 @@ import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.JavascriptInterface;
@@ -24,6 +27,9 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -46,7 +52,14 @@ import java.util.HashMap;
  */
 public class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
+    /** site public : ses liens de séance partagée et d'invitation Famille ouvrent l'appli (Android 15 et plus, voir le manifeste release) */
+    private static final String SITE = "fiitday.com";
     private WebView web;
+    /** cadre de la page : sous les barres du téléphone et au-dessus du clavier (Android 15 et plus affiche l'appli « bord à bord ») */
+    private FrameLayout root;
+    /** Android 13 et plus : bouton retour (et geste retour) branché seulement quand la page a un écran précédent */
+    private Object backCallback;
+    private boolean backOn = false;
     /** l'appli est-elle à l'écran ? (sinon le minuteur de repos prévient par une notification) */
     static volatile boolean visible = false;
     /** sauvegarde en fichier : le téléphone demande où l'enregistrer, puis quel fichier relire */
@@ -63,18 +76,85 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         currentActivity = new WeakReference<>(this);
         Billing.setup(this); // achats : seulement dans l'appli de test pour l'instant
+        root = new FrameLayout(this);
+        root.setBackgroundColor(getColor(R.color.bars));
+        setContentView(root);
+        // Android 15 et plus : l'appli s'affiche sous la barre d'état et la barre de navigation, et le clavier ne réduit plus
+        // la fenêtre. La page est donc décalée de la hauteur de ces barres (fond de la couleur des barres) et, clavier ouvert,
+        // s'arrête au-dessus du clavier : le champ en cours de saisie reste visible.
+        if (Build.VERSION.SDK_INT >= 35) root.setOnApplyWindowInsetsListener((v, ins) -> {
+            Insets bars = ins.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            Insets ime = ins.getInsets(WindowInsets.Type.ime());
+            v.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+            return WindowInsets.CONSUMED;
+        });
         makeWeb();
         // toujours charger la page (même après une fermeture par Android) : l'appli relit tout dans son stockage ;
-        // on revient à la même page de l'appli si on la connaît
+        // on revient à la même page de l'appli si on la connaît, ou à l'écran du lien fiitday.com qui a ouvert l'appli
         String url = savedInstanceState != null ? savedInstanceState.getString("url") : null;
         if (url == null || !url.startsWith("https://" + HOST + "/")) url = "https://" + HOST + "/index.html";
+        // (pas quand Android rouvre l'appli depuis les applis récentes avec le lien d'origine : il a déjà été ouvert)
+        boolean fromRecents = getIntent() != null && (getIntent().getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+        String link = savedInstanceState == null && !fromRecents ? linkRoute(getIntent()) : null;
+        if (link != null) url = "https://" + HOST + "/index.html" + link;
         web.loadUrl(url);
+    }
+
+    /**
+     * lien fiitday.com reçu d'une autre appli (séance partagée #/s/CODE ou #/import/…, invitation Famille #/famille/CODE) :
+     * l'écran correspondant de l'appli (« #/s/CODE »), ou null si ce n'est pas un de ces liens
+     */
+    static String linkRoute(Intent i) {
+        if (i == null || !Intent.ACTION_VIEW.equals(i.getAction())) return null;
+        Uri u = i.getData();
+        if (u == null || !"https".equalsIgnoreCase(u.getScheme()) || !SITE.equalsIgnoreCase(u.getHost())) return null;
+        String path = u.getEncodedPath();
+        if (path != null && !path.isEmpty() && !path.equals("/")) return null;
+        String f = u.getEncodedFragment();
+        if (f == null || f.length() > 200000 || !f.matches("/(s|famille|import)/[A-Za-z0-9_.~%-]+")) return null;
+        return "#" + f;
+    }
+
+    /** appli déjà ouverte et lien fiitday.com reçu : la page passe à l'écran du lien */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String link = linkRoute(intent);
+        if (link == null) return;
+        if (web == null) { makeWeb(); web.loadUrl("https://" + HOST + "/index.html" + link); return; }
+        web.evaluateJavascript("location.hash=" + JSONObject.quote(link), null);
+    }
+
+    /** thème clair ou sombre du téléphone changé : couleur des barres */
+    @Override
+    public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        if (root != null) root.setBackgroundColor(getColor(R.color.bars));
+    }
+
+    /**
+     * Android 13 et plus (retour prédictif) : Android n'appelle plus onBackPressed. Tant que la page a un écran précédent,
+     * le retour y revient ; sur le premier écran, le retour est laissé à Android (l'appli passe en arrière-plan, comme avant).
+     */
+    private void syncBack() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        boolean want = web != null && web.canGoBack();
+        if (want == backOn) return;
+        OnBackInvokedDispatcher d = getOnBackInvokedDispatcher();
+        if (backCallback == null) backCallback = (OnBackInvokedCallback) () -> {
+            if (web != null && web.canGoBack()) web.goBack();
+            syncBack();
+        };
+        if (want) d.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, (OnBackInvokedCallback) backCallback);
+        else d.unregisterOnBackInvokedCallback((OnBackInvokedCallback) backCallback);
+        backOn = want;
     }
 
     /** crée l'affichage de l'appli (au démarrage, et après un plantage du moteur d'affichage) */
     private void makeWeb() {
         web = new WebView(this);
-        setContentView(web);
+        root.addView(web, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
@@ -109,6 +189,12 @@ public class MainActivity extends Activity {
                 return true;
             }
 
+            /** nouvel écran dans la page (aussi les changements d'adresse #/… de l'appli) : le bouton retour suit */
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                if (view == web) syncBack();
+            }
+
             /** le moteur d'affichage s'est arrêté (manque de mémoire, vues 3D…) : on recrée la page au lieu de fermer l'appli */
             @Override
             public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
@@ -116,6 +202,7 @@ public class MainActivity extends Activity {
                 try { ((ViewGroup) view.getParent()).removeView(view); } catch (Exception ignored) { }
                 try { view.destroy(); } catch (Exception ignored) { }
                 web = null;
+                syncBack();
                 if (isFinishing() || isDestroyed()) return true;
                 makeWeb();
                 web.loadUrl("https://" + HOST + "/index.html");
@@ -443,6 +530,7 @@ public class MainActivity extends Activity {
         super.onResume();
         visible = true;
         if (web != null) { web.resumeTimers(); web.onResume(); }
+        syncBack();
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null) nm.cancel(RestTimerService.ALERT_ID); // de retour dans l'appli : l'alerte de fin n'est plus utile
     }
@@ -455,6 +543,7 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
+    /** Android 12 et moins (à partir d'Android 13 : syncBack) */
     @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();

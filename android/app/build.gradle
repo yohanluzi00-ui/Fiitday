@@ -8,12 +8,12 @@ def vName = System.getenv("VERSION_NAME") ?: "1.0-dev"
 
 android {
     namespace 'com.fiitday.app'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
         applicationId 'com.fiitday.app'
         minSdk 24
-        targetSdk 34
+        targetSdk 36
         versionCode vCode
         versionName vName
         manifestPlaceholders = [appLabel: 'Fiitday']

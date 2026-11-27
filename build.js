@@ -134,8 +134,16 @@ self.addEventListener("fetch", e => {
 });
 `);
 fs.writeFileSync(path.join(dist, ".nojekyll"), "");
+// preuve que l'appli Android vient bien du site (Android 15 et plus : les liens de séance partagée et d'invitation Famille
+// ouvrent l'appli). Empreinte SHA-256 PUBLIQUE du certificat de signature de l'APK (pas un secret).
+const APK_CERT_SHA256 = "8B:8B:DC:F2:78:D2:4D:AD:CE:A0:03:0A:20:51:F7:07:23:59:59:DA:56:B2:61:40:6F:DD:C5:AF:C8:7E:69:38";
+fs.mkdirSync(path.join(dist, ".well-known"), { recursive: true });
+fs.writeFileSync(path.join(dist, ".well-known", "assetlinks.json"), JSON.stringify([{
+  relation: ["delegate_permission/common.handle_all_urls"],
+  target: { namespace: "android_app", package_name: "com.fiitday.app", sha256_cert_fingerprints: [APK_CERT_SHA256] },
+}], null, 2) + "\n");
 
-// Pages légales (confidentialité, mentions légales, suppression de compte), servies sur fiitday.com
+// Pages légales (confidentialité, mentions légales, conditions d'utilisation, suppression de compte), servies sur fiitday.com
 const CONTACT = "contact@fiitday.com"; // adresse de contact affichée sur les pages légales
 const pageCss = `
 :root{--bg:#F4F2F8;--card:#FFFFFF;--line:#E4E0EC;--ink:#16131F;--muted:#5D586B;--accent:#C81E64;color-scheme:light}
@@ -174,7 +182,7 @@ ${pageCss}
 <main>
 ${body}
 </main>
-<footer><a href="confidentialite.html">Confidentialité</a><a href="mentions-legales.html">Mentions légales</a><a href="suppression-compte.html">Supprimer son compte</a><a href="./">Ouvrir l'appli</a></footer>
+<footer><a href="confidentialite.html">Confidentialité</a><a href="mentions-legales.html">Mentions légales</a><a href="cgu.html">Conditions d'utilisation</a><a href="suppression-compte.html">Supprimer son compte</a><a href="./">Ouvrir l'appli</a></footer>
 </div></body>
 </html>
 `);

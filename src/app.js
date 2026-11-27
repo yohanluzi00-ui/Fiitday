@@ -447,7 +447,7 @@ function ask(o) {
     d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(o.title) + '"><h3>' + esc(frNb(o.title)) + "</h3>" +
       (o.html || "") + (o.text ? "<p>" + esc(frNb(o.text)) + "</p>" : "") +
       (o.input !== undefined ? (o.code ? '<input class="f code-in" aria-label="' + esc(o.title) + '" maxlength="12" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="ex. K7P2X9QM" value="' + esc(o.input) + '">' : o.multiline ? '<textarea class="f" rows="6" aria-label="' + esc(o.title) + '">' + esc(o.input) + "</textarea>" : o.suggest ? '<div class="fl"><input class="f" data-suggest autocomplete="off" maxlength="80" placeholder="Tape un nom ou un muscle" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '"><div class="sugg" hidden></div></div>' : '<input class="f" aria-label="' + esc(o.title) + '" value="' + esc(o.input) + '">') : "") +
-      '<div class="modal-btns">' + (o.cancel === false ? "" : '<button class="btn" data-r="0">' + esc(o.cancel || "Annuler") + "</button>") +
+      (o.foot || "") + '<div class="modal-btns">' + (o.cancel === false ? "" : '<button class="btn" data-r="0">' + esc(o.cancel || "Annuler") + "</button>") +
       '<button class="btn ' + (o.danger ? "strong" : "primary") + '" data-r="1">' + esc(o.ok || "OK") + "</button></div></div>";
     document.body.appendChild(d);
     const inp = d.querySelector("input, textarea");
@@ -943,9 +943,12 @@ function softRender() {
   render();
 }
 
-const LEGAL = { version: "2026-11-09", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html",
-  cgv: "" }; // cgv : « https://fiitday.com/cgv.html » le jour où les conditions générales de vente sont publiées (lien dans la page de présentation)
-let consentAsked = false, nameAsked = false;
+const LEGAL = { version: "2026-11-27", privacy: "https://fiitday.com/confidentialite.html", legal: "https://fiitday.com/mentions-legales.html", deletion: "https://fiitday.com/suppression-compte.html",
+  cgu: "https://fiitday.com/cgu.html", cgv: "" }; // cgv : « https://fiitday.com/cgv.html » le jour où les conditions générales de vente sont publiées (lien dans la page de présentation)
+let consentAsked = false, nameAsked = false, cguAsked = false;
+// conditions d'utilisation (CGU) publiées le 27 novembre 2026 : acceptées à l'inscription ; un compte plus ancien les voit une fois
+const CGU_SINCE = "2026-11-27";
+const cguLink = t => '<a href="' + LEGAL.cgu + '" target="_blank" rel="noopener">' + (t || "conditions d'utilisation") + "</a>";
 // un e-mail n'est jamais un prénom (le remplissage automatique du téléphone a pu en glisser un dans le champ Prénom)
 const cleanName = n => (n && !/@/.test(n) ? String(n) : "");
 const firstName = () => cleanName(settings().firstName) || cleanName(db.auth && db.auth.user && db.auth.user.name) || "";
@@ -986,9 +989,23 @@ async function askConsentIfNeeded() {
   // attendre une première synchro réussie (même si le compte est encore vide)
   if (consentAsked || !db.auth || (!db.lastServerAt && !syncState.at) || settings().consentAt) return;
   consentAsked = true;
-  const ok = await ask({ title: "Confidentialité", text: "Tes séances et tes réglages sont enregistrés pour faire fonctionner ton compte, comme expliqué dans la politique de confidentialité (Réglages › Informations légales). Pour continuer, confirme que tu as 15 ans ou plus.", ok: "J'ai 15 ans ou plus", cancel: "Plus tard" });
+  const ok = await ask({ title: "Confidentialité et conditions", text: "Tes séances et tes réglages sont enregistrés pour faire fonctionner ton compte, comme expliqué dans la politique de confidentialité. Pour continuer, confirme que tu as 15 ans ou plus et que tu acceptes les conditions d'utilisation (les deux sont dans Réglages › Informations légales).", ok: "J'ai 15 ans ou plus et j'accepte", cancel: "Plus tard" });
   if (!ok) return;
   const st = settings(); st.consentAt = new Date().toISOString(); st.consentVersion = LEGAL.version; put("settings", st);
+}
+// compte créé avant les conditions d'utilisation : on les présente une fois (continuer à utiliser Fiitday vaut acceptation, CGU art. 12)
+async function cguNoticeIfNeeded() {
+  const st0 = settings();
+  if (cguAsked || !db.auth || !st0.consentAt || (st0.consentVersion || "") >= CGU_SINCE) return;
+  if (document.querySelector("body > .modal")) return;
+  cguAsked = true;
+  const read = await ask({ title: "Conditions d'utilisation", text: "Fiitday a maintenant des conditions d'utilisation : les règles des séances partagées, comment signaler un contenu, et ce que l'appli fait ou ne fait pas. Nouveau : un lien de partage est effacé 1\u00a0an après sa création. Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" });
+  const st = settings(); st.consentVersion = LEGAL.version; st.cguAt = new Date().toISOString(); put("settings", st);
+  if (read) openExternal(LEGAL.cgu);
+}
+// lien externe (page légale…) : navigateur sur le site, navigateur du téléphone dans l'appli Android
+function openExternal(url) {
+  const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove();
 }
 // menu : 4 onglets ; l'historique est dans Stats, les programmes Fiitday (bientôt) en carte sur l'accueil
 // titre de l'onglet du navigateur (et annoncé par les lecteurs d'écran) : « Stats · Fiitday »
@@ -1064,7 +1081,7 @@ function renderNow() {
   keepScreen(immersive);
   if (r.name === "exercices") mountExercises(r.args[0], r.args[1]);
   tick();
-  setTimeout(() => askConsentIfNeeded().then(askNameIfNeeded).then(welcomeIfNew), 800);
+  setTimeout(() => askConsentIfNeeded().then(cguNoticeIfNeeded).then(askNameIfNeeded).then(welcomeIfNew), 800);
 }
 
 /* ================= Écran : exercices (bibliothèque 3D, chargée à la demande) ================= */
@@ -1232,7 +1249,7 @@ function viewLogin() {
     '<label class="fl">Mot de passe<input class="f" type="password" name="password" minlength="' + (up ? PW_MIN : 6) + '" autocomplete="' + (up ? "new-password" : "current-password") + '" required></label>' +
     (up
       // le compte et les séances reposent sur le contrat (service demandé), pas sur un « accord » : on informe, et on fait confirmer l'âge
-      ? '<label class="consent"><input type="checkbox" name="consent" id="consent"><span>J\'ai 15 ans ou plus.</span></label>' +
+      ? '<label class="consent"><input type="checkbox" name="consent" id="consent"><span>J\'ai 15 ans ou plus et j\'accepte les ' + cguLink() + ".</span></label>" +
         '<p class="small muted consent-info">Tes séances et tes réglages sont enregistrés pour faire fonctionner ton compte, comme expliqué dans la <a href="' + LEGAL.privacy + '" target="_blank" rel="noopener">politique de confidentialité</a>.</p>' +
         '<button class="btn primary big" type="submit" value="up">Créer mon compte</button>'
       : '<button class="btn primary big" type="submit" value="in">Se connecter</button>') +
@@ -1320,7 +1337,7 @@ function viewLanding() {
       '<p class="lp-small">Une autre question ? Écris à <a href="mailto:contact@fiitday.com">contact@fiitday.com</a>.</p></div></section>' +
     '<section class="lp-sec"><div class="lp-in"><div class="hero lp-end"><h2>Prêt pour ta prochaine séance ?</h2><p>Crée ton compte en une minute et retrouve tes séances partout.</p>' + cta + "</div></div></section>" +
     '<footer class="lp-foot"><div class="lp-in">' + brand +
-      '<nav aria-label="Informations légales"><a href="' + LEGAL.legal + '">Mentions légales</a><a href="' + LEGAL.privacy + '">Confidentialité</a>' + (LEGAL.cgv ? '<a href="' + LEGAL.cgv + '">Conditions générales de vente</a>' : "") +
+      '<nav aria-label="Informations légales"><a href="' + LEGAL.legal + '">Mentions légales</a><a href="' + LEGAL.privacy + '">Confidentialité</a><a href="' + LEGAL.cgu + '">Conditions d\'utilisation</a>' + (LEGAL.cgv ? '<a href="' + LEGAL.cgv + '">Conditions générales de vente</a>' : "") +
       '<a href="' + LEGAL.deletion + '">Supprimer son compte</a><a href="#/resilier">Résilier un abonnement</a><a href="mailto:contact@fiitday.com">Contact</a></nav>' +
       '<p class="lp-small">© ' + new Date().getFullYear() + " Fiitday</p></div></footer></div>";
 }
@@ -1507,7 +1524,7 @@ async function onLogin(form, mode) {
       const fname = form.firstname.value.trim().slice(0, 40);
       if (password.length < PW_MIN) { msg.className = "msg err"; msg.textContent = "Choisis un mot de passe d'au moins " + PW_MIN + " caractères."; return; }
       if (!fname) { msg.className = "msg err"; msg.textContent = "Indique ton prénom."; return; }
-      if (!form.consent.checked) { msg.className = "msg err"; msg.textContent = "Coche la case pour confirmer que tu as 15 ans ou plus."; return; }
+      if (!form.consent.checked) { msg.className = "msg err"; msg.textContent = "Coche la case pour confirmer que tu as 15 ans ou plus et que tu acceptes les conditions d'utilisation."; return; }
       const consentAt = new Date().toISOString();
       const j = await authReq("signup", { email, password, data: { consent_at: consentAt, consent_version: LEGAL.version, first_name: fname } });
       // e-mail déjà inscrit : Supabase renvoie un utilisateur sans identité
@@ -2254,12 +2271,12 @@ const ADD_CHOICES = [
   ["biset", "Biset", "2 exercices enchaînés sans repos pour le même muscle"],
   ["triset", "Triset", "3 exercices enchaînés sans repos"],
 ];
-function choose(title, opts, text) {
+function choose(title, opts, text, foot) {
   return new Promise(res => {
     const d = document.createElement("div"); d.className = "modal";
     d.innerHTML = '<div class="modal-box" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><h3>' + esc(frNb(title)) + "</h3>" + (text ? '<p class="small muted" style="margin:0">' + esc(frNb(text)) + "</p>" : "") + '<div class="stack" style="gap:8px">' +
       opts.map(o => '<button class="btn block choice" data-c="' + o[0] + '"><b>' + esc(frNb(o[1])) + "</b>" + (o[2] ? '<span class="choice-desc">' + esc(frNb(o[2])) + "</span>" : "") + "</button>").join("") +
-      '</div><div class="modal-btns"><button class="btn" data-c="">Annuler</button></div></div>';
+      "</div>" + (foot || "") + '<div class="modal-btns"><button class="btn" data-c="">Annuler</button></div></div>';
     document.body.appendChild(d);
     d.addEventListener("click", e => {
       if (e.target === d) { d.remove(); res(null); return; }
@@ -3058,7 +3075,7 @@ async function shareVariant(t, v) {
     catch (e) { console.warn("partage court indisponible", e); }
   }
   if (!url) url = SHARE_BASE + b64url(JSON.stringify(data));
-  const text = "Je te partage ma séance « " + t.name + " · " + vLabel(v.name) + " » sur Fiitday :\n" + url + "\n\nDans l'appli : Accueil › Importer, puis colle ce lien.";
+  const text = "Je te partage ma séance « " + t.name + " · " + vLabel(v.name) + " » sur Fiitday :\n" + url + "\n\nDans l'appli : Accueil › Importer, puis colle ce lien." + (url.startsWith(SHARE_SHORT) ? " Il reste valable 1 an." : "");
   try {
     if (Native && Native.share) { Native.share(text); return; }
     if (navigator.share) { await navigator.share({ title: "Séance Fiitday", text }); return; }
@@ -3066,22 +3083,32 @@ async function shareVariant(t, v) {
   try { await navigator.clipboard.writeText(text); toast("Lien copié : envoie-le à la personne"); }
   catch (e) { await ask({ title: "Partager la séance", text: "Copie ce texte et envoie-le :", input: text, multiline: true, cancel: false, ok: "Fermer" }); }
 }
+// « Signaler ce contenu » (règlement européen sur les services numériques, art. 16) : e-mail prérempli avec ce qu'il faut
+// pour traiter le signalement (code, raisons, nom et e-mail, bonne foi) ; examiné par l'éditeur (Administration › Signalements)
+function reportMail(code) {
+  const sub = "Signalement d'une séance partagée (code " + code + ")";
+  const body = "Code de la séance : " + code + "\nLien : " + SHARE_SHORT + code + "\n\nCe qui pose problème, et pourquoi (contenu illégal ou contraire aux conditions d'utilisation) :\n\n\n" +
+    "Ton nom et ton adresse e-mail :\n\n\nJe déclare de bonne foi que les informations de ce signalement sont exactes et complètes.";
+  return "mailto:contact@fiitday.com?subject=" + encodeURIComponent(sub) + "&body=" + encodeURIComponent(body);
+}
+const reportFoot = code => '<p class="small muted report-foot">Contenu illégal ou choquant ? <a class="link" href="' + esc(reportMail(code)) + '">Signaler ce contenu</a></p>';
 async function importShared(code) {
-  let data;
+  let data, shareCode = "";
   try {
     const str = String(code || "").trim();
     const short = str.match(/(?:#\/s\/|^)([A-Za-z0-9]{6,12})$/);
     if (short) {
       try { data = await fetchShare(short[1]); }
       catch (e) { toast(e && e.login ? "Connecte-toi à ton compte pour importer cette séance" : navigator.onLine === false ? "Pas de connexion internet" : "Impossible de récupérer la séance, réessaie"); return; }
-      if (!data) { toast("Cette séance partagée n'existe plus"); return; }
+      if (!data) { toast("Cette séance partagée n'existe plus (un lien de partage est effacé au bout d'1 an)"); return; }
+      shareCode = short[1];
     } else {
       const m = str.match(/import\/([A-Za-z0-9_-]+)/);
       data = JSON.parse(unb64url(m ? m[1] : str));
     }
     if (!data || data.app !== "muscuapp-share" || !Array.isArray(data.ex) || !data.ex.length || data.ex.length > 60) throw new Error();
   } catch (e) { toast("Ce lien de séance n'est pas valide"); return; }
-  const ts = templates(), title = "Importer « " + data.prog + " · " + data.name + " » (" + data.ex.length + " exercices)";
+  const ts = templates(), title = "Importer « " + data.prog + " · " + data.name + " » (" + data.ex.length + " exercice" + (data.ex.length > 1 ? "s" : "") + ")";
   let opts;
   if (isFree()) {
     // version gratuite : 1 programme et 2 séances actives ; la séance reçue va dans le programme actif (place libre, ou à la
@@ -3091,11 +3118,11 @@ async function importShared(code) {
     else if (at.variants.length < FREE_VARIANTS) opts = [["t:" + at.id, "Ajouter à « " + at.name + " »", "Elle sera une de tes 2 séances actives"]];
     else if (freeCanSwitch()) opts = [["swap:" + at.id, "Remplacer une de mes séances actives", "Ajoutée à « " + at.name + " », puis tu choisis tes 2 séances actives (prochain changement dans " + FREE_SWITCH_DAYS + " jours)"]];
     else {
-      if (await ask({ title: "Séance reçue", text: "En version gratuite, tu as 2 séances actives. " + freeSwitchTxt() + " Avec Premium, toutes tes séances sont actives.", ok: "Voir Premium", cancel: "Plus tard" })) go("premium");
+      if (await ask({ title: "Séance reçue", text: "En version gratuite, tu as 2 séances actives. " + freeSwitchTxt() + " Avec Premium, toutes tes séances sont actives.", ok: "Voir Premium", cancel: "Plus tard", foot: shareCode ? reportFoot(shareCode) : "" })) go("premium");
       return;
     }
   } else opts = [["new", "Nouveau programme « " + data.prog + " »", "Crée un programme avec cette séance"]].concat(ts.map(t => ["t:" + t.id, "Ajouter à « " + t.name + " »", "Comme nouvelle séance de ce programme"]));
-  let dest = await choose(title, opts);
+  let dest = await choose(title, opts, "", shareCode ? reportFoot(shareCode) : "");
   if (!dest) return;
   const swap = dest.startsWith("swap:"); if (swap) dest = "t:" + dest.slice(5);
   const gmap = {};
@@ -4585,7 +4612,7 @@ function viewAdmin() {
   const back = '<a class="back" href="#/settings">‹ Réglages</a>';
   if (!isAdmin()) return back + '<div class="card empty">Cette page n\'existe pas.</div>';
   const tab = ["recettes", "abonnements"].includes(route().args[0]) ? route().args[0] : "";
-  const head = back + '<div class="page-head adm-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · ' + (tab === "recettes" ? "registre de ta micro-entreprise" : tab ? "Premium offert, familles à surveiller" : "des totaux, aucune donnée personnelle") + "</div></div>" + admTabs(tab) + "</div>";
+  const head = back + '<div class="page-head adm-head"><div><h1>Administration</h1><div class="muted small">Visible seulement par toi · ' + (tab === "recettes" ? "registre de ta micro-entreprise" : tab ? "Premium offert, familles à surveiller, signalements" : "des totaux, aucune donnée personnelle") + "</div></div>" + admTabs(tab) + "</div>";
   if (!isAal2() || adminErr === "mfa" || ledgerErr === "mfa" || adminSubsErr === "mfa") { adminKpi = null; ledger = null; adminSubs = null; return head + mfaBox(); } // double authentification d'abord
   return head + (tab === "recettes" ? viewLedger() : tab ? viewAdminSubs() : viewAdminDash());
 }
@@ -4699,7 +4726,36 @@ function viewAdminSubs() {
       '<button class="btn sm' + (x.blocked ? "" : " danger") + '" style="margin-top:8px" data-act="famblock" data-id="' + esc(x.id) + '" data-v="' + (x.blocked ? "0" : "1") + '">' + (x.blocked ? "Débloquer les invitations" : "Bloquer les invitations") + "</button></div>").join("")
       : '<div class="card empty">Aucune famille à surveiller.</div>') +
     '<div class="card adm-legal"><h2 class="card-h">Règles de surveillance</h2><ul class="small muted"><li>Plus de 3 départs (retraits ou départs volontaires) en 60 jours</li><li>Plus de 8 personnes différentes en 6 mois</li><li>3 invitations ou plus jamais acceptées en 6 mois</li><li>Un membre qui a rejoint 3 familles ou plus en 6 mois</li></ul>' +
-    '<div class="small muted" style="margin-top:6px">Calculées à chaque ouverture de cette page. Bloquer les invitations n\'enlève personne : les membres gardent Premium, mais plus personne ne peut rejoindre. Journal effacé après 12 mois.</div></div></div></div>';
+    '<div class="small muted" style="margin-top:6px">Calculées à chaque ouverture de cette page. Bloquer les invitations n\'enlève personne : les membres gardent Premium, mais plus personne ne peut rejoindre. Journal effacé après 12 mois.</div></div>' + adminReportCard() + '</div></div>';
+}
+
+// Administration › Signalements : une séance partagée signalée (par son code), son retrait et l'e-mail des raisons à son
+// auteur (règlement européen sur les services numériques, art. 16 et 17 ; CGU art. 5 et 6). Examen par toi, sans automatisme.
+let shareRep = { code: "", res: null, busy: false, err: "" };
+function reasonsMail(r) {
+  const d = r.data || {}, title = (d.prog || "Programme") + " · " + (d.name || "Séance");
+  const sub = "Fiitday : ta séance partagée « " + title + " » a été retirée";
+  const body = "Bonjour,\n\nTa séance partagée « " + title + " » (code " + r.code + "), partagée le " + fmtDateLong(Date.parse(r.created_at)) + ", a été retirée de Fiitday le " + fmtDateLong(Date.now()) + ".\n\n" +
+    "Ce qui a été constaté : [à compléter : le passage concerné]\n" +
+    "Règle appliquée : [la loi enfreinte, ou l'article 4 des conditions d'utilisation de Fiitday : " + LEGAL.cgu + "]\n" +
+    "Origine : [un signalement reçu / constaté par l'éditeur]. La décision a été prise par une personne, sans outil automatique.\n" +
+    "Conséquence : le lien de partage ne fonctionne plus pour personne. Ton compte et tes autres données ne sont pas touchés.\n\n" +
+    "Tu peux contester cette décision en répondant à cet e-mail : elle sera réexaminée. Tu peux aussi saisir le juge compétent.\n\nL'équipe Fiitday";
+  return "mailto:" + encodeURIComponent(r.author_email || "") + "?subject=" + encodeURIComponent(sub) + "&body=" + encodeURIComponent(body);
+}
+function adminReportCard() {
+  const r = shareRep.res, d = (r && r.data) || {}, exs = Array.isArray(d.ex) ? d.ex : [];
+  return '<div class="section-title">Signalements</div><div class="card adm-report">' +
+    '<label class="fl">Code ou lien de la séance signalée<input class="f" data-sr="code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="80" placeholder="ex. K7p2X9qM ou fiitday.com/#/s/…" value="' + esc(shareRep.code) + '"></label>' +
+    '<button class="btn sm" style="margin-top:8px" data-act="shrlook"' + (shareRep.busy ? " disabled" : "") + ">" + (shareRep.busy ? "Recherche…" : "Voir la séance") + "</button>" +
+    (shareRep.err ? '<p class="small msg err" style="margin:8px 0 0">' + esc(shareRep.err) + "</p>" : "") +
+    (r && !r.found ? '<p class="small muted" style="margin:8px 0 0">Aucune séance partagée avec ce code : déjà retirée, effacée au bout d\'1 an ou supprimée avec le compte de son auteur.</p>' : "") +
+    (r && r.found ? '<div class="adm-rep-res"><div class="spread"><b>' + esc((d.prog || "Programme") + " · " + (d.name || "Séance")) + "</b>" + (r.removed ? '<span class="tag">retirée</span>' : "") + "</div>" +
+      '<div class="small muted">Partagée le ' + esc(fmtDate(Date.parse(r.created_at))) + " par " + esc(r.author_email || "un compte supprimé") + " · " + (r.author_shares || 0) + " partage" + ((r.author_shares || 0) > 1 ? "s" : "") + " pour ce compte</div>" +
+      '<ul class="small adm-rep-ex">' + exs.slice(0, 60).map(x => "<li>" + esc(String((x && x.n) || "Exercice")) + (x && x.no ? " : <i>" + esc(String(x.no)) + "</i>" : "") + "</li>").join("") + "</ul>" +
+      '<div class="row duo">' + (r.removed ? "" : '<button class="btn sm danger" data-act="shrremove">Retirer ce partage</button>') +
+      (r.author_email ? '<a class="btn sm" href="' + esc(reasonsMail(r)) + '">Prévenir l\'auteur</a>' : "") + "</div></div>" : "") +
+    '<p class="small muted" style="margin:10px 0 0">Après un signalement reçu sur ' + "contact@fiitday.com" + ' : réponds pour accuser réception, regarde la séance ici, puis décide. Si tu la retires, envoie à l\'auteur la décision et ses raisons (« Prévenir l\'auteur », à compléter) et réponds à la personne qui a signalé. Garde ces e-mails.</p></div>';
 }
 
 /* ---------- Registre des recettes ---------- */
@@ -5056,7 +5112,8 @@ function viewSettings() {
     '<div class="card"><h2 class="card-h">Informations légales</h2><div class="row duo">' +
     '<a class="btn sm" href="' + LEGAL.privacy + '" target="_blank" rel="noopener">Politique de confidentialité</a>' +
     '<a class="btn sm" href="' + LEGAL.legal + '" target="_blank" rel="noopener">Mentions légales</a></div>' +
-    (LEGAL.cgv ? '<div class="row duo"><a class="btn sm" href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a></div>' : "") +
+    '<div class="row duo"><a class="btn sm" href="' + LEGAL.cgu + '" target="_blank" rel="noopener">Conditions d\'utilisation</a>' +
+    (LEGAL.cgv ? '<a class="btn sm" href="' + LEGAL.cgv + '" target="_blank" rel="noopener">Conditions générales de vente</a>' : "") + "</div>" +
     '<div class="small muted" style="margin-top:10px">Une question, un souci ? <a class="link" href="mailto:contact@fiitday.com">contact@fiitday.com</a></div></div>' +
     '<div class="credit"><div class="credit-msg">L\'équipe Fiitday te souhaite de belles séances</div><div class="appver"><img src="icon-192.png" alt="" width="24" height="24">' + esc(ver) + "</div></div></div>";
 }
@@ -5683,6 +5740,23 @@ $app.addEventListener("click", async e => {
       toast(blk ? "Invitations bloquées" : "Invitations débloquées"); loadAdminSubs();
     } break;
     case "admper": adminPeriod = +b.dataset.v || 8; render(); break;
+    case "shrlook": {
+      const inp = document.querySelector('[data-sr="code"]'), raw = inp ? inp.value.trim() : "";
+      const m = raw.match(/(?:#\/s\/)?([A-Za-z0-9]{6,12})\s*$/);
+      shareRep = { code: raw, res: null, busy: false, err: "" };
+      if (!m) { shareRep.err = "Colle le code de la séance (6 à 12 lettres et chiffres) ou son lien."; render(); break; }
+      shareRep.busy = true; render();
+      try { const r = await rpc("admin_share", { p_code: m[1] }); const den = admDenied(r); if (den) { if (den === "mfa") adminSubsErr = "mfa"; else shareRep.err = den; } else shareRep.res = r || { found: false }; }
+      catch (err) { const t = admErrText(err, "La séance n'a pas pu être chargée"); if (t === "mfa") adminSubsErr = "mfa"; else shareRep.err = t; }
+      finally { shareRep.busy = false; render(); }
+    } break;
+    case "shrremove": {
+      const r = shareRep.res; if (!r || !r.found || r.removed) break;
+      if (!await ask({ title: "Retirer ce partage ?", text: "Le lien de cette séance ne fonctionnera plus pour personne (ceux qui l'ont déjà importée la gardent). Ensuite, préviens l'auteur avec les raisons de la décision.", ok: "Retirer", danger: true })) break;
+      try { const x = await rpc("admin_share_remove", { p_code: r.code }); const den = admDenied(x); if (den) { if (den === "mfa") adminSubsErr = "mfa"; else toast(den); render(); break; } }
+      catch (err) { toast(admErrText(err, "Le partage n'a pas pu être retiré")); break; }
+      r.removed = true; toast("Partage retiré : pense à prévenir l'auteur"); render();
+    } break;
     case "ledgeryear": ledgerYear = +b.dataset.v; render(); break;
     case "ledgernew": { const e = await askLedger(null); if (e) ledgerSave(e); } break;
     case "ledgeredit": { const cur = ledger && ledgerYearRows(+(ledger.rows.find(r => r.id === b.dataset.id) || { paid_on: "0000" }).paid_on.slice(0, 4)).find(r => r.id === b.dataset.id); if (!cur) return;

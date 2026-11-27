@@ -25,6 +25,11 @@ renouvellement annuel : prêts (fonction Edge « contrat », webhook « revenuec
 Il faut seulement enregistrer dans Supabase › Edge Functions › Secrets la clé Brevo (BREVO_API_KEY) et la clé secrète
 RevenueCat API v2 (RC_V2_SECRET_KEY), puis vérifier dans Administration › Abonnements › « Vérifier RevenueCat et Brevo ».
 
+## Conditions d'utilisation (CGU)
+
+`src/pages/cgu.html` est déjà publiée (depuis la V1.140) et reste valable au lancement : elle renvoie aux mentions
+légales pour l'identité de l'éditeur. Les CGV s'ajoutent aux CGU pour les achats.
+
 ## Le jour de la publication
 
 Changer `LEGAL.version` dans `src/app.js` (l'appli remontre la politique de confidentialité), mettre `LEGAL.cgv = "https://fiitday.com/cgv.html"` (lien sur l'écran Premium et sur la page de présentation) et ajouter le lien « CGV » dans le pied des pages (`build.js`).

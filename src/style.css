@@ -1194,3 +1194,8 @@ input.f::placeholder, textarea.f::placeholder { color: var(--muted); opacity: 1;
 /* version gratuite : rappel de sauvegarde sur l'accueil */
 .backup-nudge { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
 .backup-nudge p { margin: 0; }
+/* séance reçue : lien « Signaler ce contenu » ; Administration › Signalements */
+.report-foot { margin: 12px 0 0; text-align: center; }
+.report-foot a { white-space: nowrap; }
+.adm-rep-res { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.adm-rep-ex { margin: 8px 0 10px; padding-left: 18px; max-height: 240px; overflow: auto; overflow-wrap: anywhere; }

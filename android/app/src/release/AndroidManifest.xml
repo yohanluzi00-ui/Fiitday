@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ajouts pour la vraie appli Fiitday seulement (pas l'appli de test, pour qu'une seule appli ouvre les liens). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity android:name=".MainActivity">
+            <!-- Android 15 et plus : les liens fiitday.com de séance partagée (#/s/…, #/import/…) et d'invitation Famille
+                 (#/famille/…) ouvrent l'appli ; le site publie la preuve (.well-known/assetlinks.json, empreinte de la clé).
+                 Les autres liens du site (présentation, Premium, pages légales, connexion) restent dans le navigateur.
+                 Avant Android 15, les groupes ci-dessous sont ignorés : le chemin seul ne correspond à aucun lien réel,
+                 donc tous les liens s'ouvrent dans le navigateur comme avant. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="fiitday.com" />
+                <data android:path="/aucun-lien-avant-android-15" />
+                <uri-relative-filter-group>
+                    <data android:path="/" />
+                    <data android:fragmentPrefix="/s/" />
+                </uri-relative-filter-group>
+                <uri-relative-filter-group>
+                    <data android:path="/" />
+                    <data android:fragmentPrefix="/import/" />
+                </uri-relative-filter-group>
+                <uri-relative-filter-group>
+                    <data android:path="/" />
+                    <data android:fragmentPrefix="/famille/" />
+                </uri-relative-filter-group>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

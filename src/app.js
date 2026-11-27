@@ -244,6 +244,18 @@ const hrOk = () => !!settings().hrOk; // accord donné pour noter la fréquence 
 const hasHr = e => Array.isArray(e.sets) && e.sets.some(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "");
 const cardioShown = e => { const h = cardioHidden(cardioKey(e)), hr = hrOk() || hasHr(e); return cardioDefs(e).filter(d => !h.includes(d.k) && (d.k !== "fc" || hr)); };
 function setCardioHidden(key, list) { const st = settings(), hh = Object.assign({}, st.cardioHidden); hh[key] = list; st.cardioHidden = hh; put("settings", st); }
+// fréquence cardiaque notée dans des séances (sets[].cv.fc) : comptée, puis effacée quand l'accord est retiré (RGPD, art. 7.3 et 17)
+const hrCount = ws => ws.reduce((a, w) => a + (Array.isArray(w.exercises) ? w.exercises : []).reduce((b, e) => b + (Array.isArray(e.sets) ? e.sets.filter(st => st && st.cv && st.cv.fc != null && st.cv.fc !== "").length : 0), 0), 0);
+function stripHr(w) {
+  let ch = false;
+  (Array.isArray(w.exercises) ? w.exercises : []).forEach(e => (Array.isArray(e.sets) ? e.sets : []).forEach(st => {
+    if (st && st.cv && typeof st.cv === "object" && "fc" in st.cv) { const cv = Object.assign({}, st.cv); delete cv.fc; st.cv = cv; ch = true; }
+  }));
+  return ch;
+}
+function eraseHr() { flushPending(); let n = 0; all("workout").forEach(w => { if (stripHr(w)) { put("workout", w); n++; } }); return n; }
+// accord retiré : une valeur revenue d'un appareil qui ne le savait pas encore (hors ligne) est effacée à son tour
+function hrGoneSweep() { if (!hrOk() && settings().hrGoneAt && hrCount(all("workout"))) eraseHr(); }
 // définition d'un indicateur d'après sa clé (indicateurs perso : cherchés sur toutes les machines)
 function cvDef(k) {
   if (CARDIO_M[k]) return Object.assign({ k }, CARDIO_M[k]);
@@ -707,6 +719,7 @@ async function sync() {
     if (gone()) return;
     purgeBody(); // plus de page Corps : les anciennes mesures sont effacées, contenu compris
     freezeNotes(); renameVariants(); // après la récupération : les données sont à jour, aucun risque d'écraser une modif récente
+    hrGoneSweep();
     // 2) envoyer ce qui a changé ici, par paquets de 200 ; le serveur renvoie ce qu'il a enregistré (il garde sa version
     //    si elle est plus récente) ; un élément qu'il refuse (texte invalide, trop gros…) est mis de côté sans bloquer les autres
     const dirty = Object.values(db.items).filter(i => i.dirty && !i.refused);
@@ -999,7 +1012,7 @@ async function cguNoticeIfNeeded() {
   if (cguAsked || !db.auth || !st0.consentAt || (st0.consentVersion || "") >= CGU_SINCE) return;
   if (document.querySelector("body > .modal")) return;
   cguAsked = true;
-  const read = await ask({ title: "Conditions d'utilisation", text: "Fiitday a maintenant des conditions d'utilisation : les règles des séances partagées, comment signaler un contenu, et ce que l'appli fait ou ne fait pas. Nouveau : un lien de partage est effacé 1\u00a0an après sa création. Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" });
+  const read = await ask({ title: "Conditions d'utilisation", text: "Fiitday a maintenant des conditions d'utilisation : les règles des séances partagées, comment signaler un contenu, et ce que l'appli fait ou ne fait pas. Nouveau : un lien de partage est effacé 7\u00a0jours après sa création. Tu les retrouves dans Réglages › Informations légales.", ok: "Les lire", cancel: "J'ai compris" });
   const st = settings(); st.consentVersion = LEGAL.version; st.cguAt = new Date().toISOString(); put("settings", st);
   if (read) openExternal(LEGAL.cgu);
 }
@@ -3075,7 +3088,7 @@ async function shareVariant(t, v) {
     catch (e) { console.warn("partage court indisponible", e); }
   }
   if (!url) url = SHARE_BASE + b64url(JSON.stringify(data));
-  const text = "Je te partage ma séance « " + t.name + " · " + vLabel(v.name) + " » sur Fiitday :\n" + url + "\n\nDans l'appli : Accueil › Importer, puis colle ce lien." + (url.startsWith(SHARE_SHORT) ? " Il reste valable 1 an." : "");
+  const text = "Je te partage ma séance « " + t.name + " · " + vLabel(v.name) + " » sur Fiitday :\n" + url + "\n\nDans l'appli : Accueil › Importer, puis colle ce lien." + (url.startsWith(SHARE_SHORT) ? " Il reste valable 7 jours." : "");
   try {
     if (Native && Native.share) { Native.share(text); return; }
     if (navigator.share) { await navigator.share({ title: "Séance Fiitday", text }); return; }
@@ -3100,7 +3113,7 @@ async function importShared(code) {
     if (short) {
       try { data = await fetchShare(short[1]); }
       catch (e) { toast(e && e.login ? "Connecte-toi à ton compte pour importer cette séance" : navigator.onLine === false ? "Pas de connexion internet" : "Impossible de récupérer la séance, réessaie"); return; }
-      if (!data) { toast("Cette séance partagée n'existe plus (un lien de partage est effacé au bout d'1 an)"); return; }
+      if (!data) { toast("Cette séance partagée n'existe plus (un lien de partage est effacé au bout de 7 jours)"); return; }
       shareCode = short[1];
     } else {
       const m = str.match(/import\/([A-Za-z0-9_-]+)/);
@@ -4749,7 +4762,7 @@ function adminReportCard() {
     '<label class="fl">Code ou lien de la séance signalée<input class="f" data-sr="code" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" maxlength="80" placeholder="ex. K7p2X9qM ou fiitday.com/#/s/…" value="' + esc(shareRep.code) + '"></label>' +
     '<button class="btn sm" style="margin-top:8px" data-act="shrlook"' + (shareRep.busy ? " disabled" : "") + ">" + (shareRep.busy ? "Recherche…" : "Voir la séance") + "</button>" +
     (shareRep.err ? '<p class="small msg err" style="margin:8px 0 0">' + esc(shareRep.err) + "</p>" : "") +
-    (r && !r.found ? '<p class="small muted" style="margin:8px 0 0">Aucune séance partagée avec ce code : déjà retirée, effacée au bout d\'1 an ou supprimée avec le compte de son auteur.</p>' : "") +
+    (r && !r.found ? '<p class="small muted" style="margin:8px 0 0">Aucune séance partagée avec ce code : déjà retirée, effacée au bout de 7 jours ou supprimée avec le compte de son auteur.</p>' : "") +
     (r && r.found ? '<div class="adm-rep-res"><div class="spread"><b>' + esc((d.prog || "Programme") + " · " + (d.name || "Séance")) + "</b>" + (r.removed ? '<span class="tag">retirée</span>' : "") + "</div>" +
       '<div class="small muted">Partagée le ' + esc(fmtDate(Date.parse(r.created_at))) + " par " + esc(r.author_email || "un compte supprimé") + " · " + (r.author_shares || 0) + " partage" + ((r.author_shares || 0) > 1 ? "s" : "") + " pour ce compte</div>" +
       '<ul class="small adm-rep-ex">' + exs.slice(0, 60).map(x => "<li>" + esc(String((x && x.n) || "Exercice")) + (x && x.no ? " : <i>" + esc(String(x.no)) + "</i>" : "") + "</li>").join("") + "</ul>" +
@@ -5340,7 +5353,7 @@ $app.addEventListener("click", async e => {
           const k = c.slice(2);
           if (k === "fc" && !hrOk()) {
             // accord exprès, séparé et retirable : la fréquence cardiaque peut être une donnée de santé (art. 9 du RGPD)
-            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux : enlève l'indicateur avec « × », tes valeurs déjà notées restent effaçables avec la séance.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
+            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux avec « × » sur l'indicateur : tes valeurs déjà notées sont alors effacées.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
             setSetting("hrOk", new Date().toISOString());
           }
           setCardioHidden(key, hid.filter(x => x !== k)); render(); return;
@@ -5354,8 +5367,19 @@ $app.addEventListener("click", async e => {
     } break;
     case "cvdel": if (w && w.exercises[i]) { // retiré de la carte (pour cette machine) ; il reste dans « + Ajouter un indicateur » et ses valeurs restent dans tes séances
       const e = w.exercises[i], key = cardioKey(e), d = cardioDefs(e).find(x => x.k === b.dataset.k); if (!d) return;
+      // fréquence cardiaque : « × » retire l'accord et efface les valeurs déjà notées, dans toutes les séances
+      const n = d.k === "fc" ? hrCount(all("workout")) : 0;
+      if (d.k === "fc" && (hrOk() || n)) {
+        const vals = n > 1 ? "les " + n + " valeurs déjà notées seront effacées" : "la valeur déjà notée sera effacée";
+        if (!await ask({ title: "Retirer ton accord ?", text: "Ta fréquence cardiaque ne sera plus proposée" + (n ? ", et " + vals + " de toutes tes séances (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard avec « + Ajouter un indicateur ».",
+          ok: n > 1 ? "Retirer mon accord et effacer mes " + n + " valeurs" : n ? "Retirer mon accord et effacer ma valeur" : "Retirer mon accord", cancel: "Annuler", danger: n > 0 })) return;
+        eraseHr();
+        const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
+        const st = settings(); st.hrOk = null; st.hrGoneAt = new Date().toISOString(); put("settings", st);
+        toast(n ? "Accord retiré : " + (n > 1 ? n + " valeurs effacées" : "1 valeur effacée") + " de tes séances" : "Accord retiré : la fréquence cardiaque ne sera plus proposée");
+        render(); return;
+      }
       const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
-      if (d.k === "fc" && hrOk()) { setSetting("hrOk", null); toast("Fréquence cardiaque retirée : ton accord est retiré, elle ne sera plus proposée"); } // retrait de l'accord
       render();
     } break;
     case "sesspick": if (w) {
@@ -5942,7 +5966,7 @@ $app.addEventListener("click", async e => {
 // sauvegarde (fichier, code de transfert, texte) : on montre d'abord ce qu'elle contient et ce qui va changer.
 // Les réglages personnels du compte (prénom, accord, séances actives de la version gratuite, première visite) ne sont jamais
 // repris d'une sauvegarde ; les exercices et machines perso sont ajoutés à ceux du compte.
-const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk"]; // hrOk : accord pour la fréquence cardiaque, jamais repris d'une sauvegarde
+const SETTINGS_OWN = ["firstName", "consentAt", "consentVersion", "freeActive", "welcomeAt", "hrOk", "hrGoneAt"]; // hrOk / hrGoneAt : accord pour la fréquence cardiaque et son retrait, jamais repris d'une sauvegarde
 async function restoreBackup(txt, badMsg) {
   let j;
   try { j = JSON.parse(await unpackBackup(txt)); if (!j || j.app !== "muscuapp" || !Array.isArray(j.items) || (j.v != null && !(j.v >= 1 && j.v <= 2))) throw new Error(); }
@@ -5968,6 +5992,14 @@ async function restoreBackup(txt, badMsg) {
   if (same) lines.push("• " + pl(same, "élément déjà à jour dans l'appli : gardé tel quel", "éléments déjà à jour dans l'appli : gardés tels quels"));
   if (bad) lines.push("• " + pl(bad, "élément illisible ignoré", "éléments illisibles ignorés"));
   if (!await ask({ title: "Restaurer cette sauvegarde ?", text: lines.join("\n"), ok: "Restaurer" })) return;
+  // fréquence cardiaque dans la sauvegarde sans accord en cours : la garder demande ton accord, sinon elle est effacée
+  const hrN = hrOk() ? 0 : hrCount(take.filter(x => x.kind === "workout").map(x => x.data));
+  if (hrN) {
+    const keep = await ask({ title: "Fréquence cardiaque dans la sauvegarde", text: "Cette sauvegarde contient " + (hrN > 1 ? hrN + " valeurs" : "1 valeur") + " de fréquence cardiaque. Elle peut renseigner sur ta santé : elle n'est gardée qu'avec ton accord, visible de toi seul, jamais partagée, et effacée si tu retires ton accord (« × » sur l'indicateur).",
+      ok: hrN > 1 ? "J'accepte de les garder" : "J'accepte de la garder", cancel: hrN > 1 ? "Les effacer" : "L'effacer" });
+    if (keep) { const st = settings(); st.hrOk = new Date().toISOString(); put("settings", st); }
+    else take.forEach(x => { if (x.kind === "workout") stripHr(x.data); });
+  }
   for (const it of take) {
     const cur = db.items[it.id];
     let data = it.data;

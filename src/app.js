@@ -5353,7 +5353,7 @@ $app.addEventListener("click", async e => {
           const k = c.slice(2);
           if (k === "fc" && !hrOk()) {
             // accord exprès, séparé et retirable : la fréquence cardiaque peut être une donnée de santé (art. 9 du RGPD)
-            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux avec « × » sur l'indicateur : tes valeurs déjà notées sont alors effacées.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
+            if (!await ask({ title: "Noter ta fréquence cardiaque ?", text: "C'est facultatif. Ta fréquence cardiaque peut renseigner sur ta santé : si tu la notes, elle est enregistrée avec tes séances (et synchronisée entre tes appareils avec Premium), visible de toi seul, jamais partagée ni utilisée pour autre chose, et supprimée avec ton compte. Tu peux retirer ton accord quand tu veux (« × » sur l'indicateur, puis « Retirer mon accord ») : tes valeurs déjà notées sont alors effacées.", ok: "J'accepte de la noter", cancel: "Non merci" })) return;
             setSetting("hrOk", new Date().toISOString());
           }
           setCardioHidden(key, hid.filter(x => x !== k)); render(); return;
@@ -5370,9 +5370,18 @@ $app.addEventListener("click", async e => {
       // fréquence cardiaque : « × » retire l'accord et efface les valeurs déjà notées, dans toutes les séances
       const n = d.k === "fc" ? hrCount(all("workout")) : 0;
       if (d.k === "fc" && (hrOk() || n)) {
-        const vals = n > 1 ? "les " + n + " valeurs déjà notées seront effacées" : "la valeur déjà notée sera effacée";
-        if (!await ask({ title: "Retirer ton accord ?", text: "Ta fréquence cardiaque ne sera plus proposée" + (n ? ", et " + vals + " de toutes tes séances (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard avec « + Ajouter un indicateur ».",
-          ok: n > 1 ? "Retirer mon accord et effacer mes " + n + " valeurs" : n ? "Retirer mon accord et effacer ma valeur" : "Retirer mon accord", cancel: "Annuler", danger: n > 0 })) return;
+        // deux choix : masquer pour cette machine (accord et valeurs gardés), ou retirer l'accord et effacer les valeurs
+        const vals = n > 1 ? "les " + n + " valeurs déjà notées sont effacées" : "la valeur déjà notée est effacée";
+        const c = await choose("Fréquence cardiaque", [
+          ["hide", "Masquer seulement", "Pour « " + e.name + " » ; " + (hrOk() ? "ton accord et tes valeurs sont gardés" : "tes valeurs sont gardées") + ". Tu peux la réafficher avec « + Ajouter un indicateur »."],
+          ["erase", n > 1 ? "Retirer mon accord et effacer mes " + n + " valeurs" : n ? "Retirer mon accord et effacer ma valeur" : "Retirer mon accord",
+            "Elle n'est plus proposée" + (n ? ", et " + vals + " de toutes tes séances (aussi sur tes autres appareils, à la prochaine synchronisation)" : "") + ". Tu pourras redonner ton accord plus tard."]
+        ], "Que veux-tu faire ?");
+        if (!c) return;
+        if (c === "hide") {
+          const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
+          toast("Fréquence cardiaque masquée pour « " + e.name + " »"); render(); return;
+        }
         eraseHr();
         const hid = cardioHidden(key); if (!hid.includes(d.k)) setCardioHidden(key, hid.concat([d.k]));
         const st = settings(); st.hrOk = null; st.hrGoneAt = new Date().toISOString(); put("settings", st);

@@ -46,6 +46,7 @@ function ago(t) {
 function startOfDay(t) { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }
 const norm = s => String(s || "").trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
+const PENCIL = '<svg class="pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/></svg>';
 const ICON = {
   home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
   list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
@@ -1601,7 +1602,9 @@ function viewHome() {
     const lastAny = st.filter(x => x.last).sort((a, b) => b.last.startedAt - a.last.startedAt)[0];
     const pl = progLocked(t.id);
     // en-tête sur une ligne : nom du programme, puis la dernière séance (« mar 17 nov · Pull », sans points)
-    h += '<div class="card tpl' + (pl ? " locked" : "") + '" data-sort-id="' + t.id + '"><div class="tpl-head"><h2>' + (pl ? LOCK : "") + esc(t.name) + "</h2>" +
+    // le nom se touche pour renommer le programme
+    h += '<div class="card tpl' + (pl ? " locked" : "") + '" data-sort-id="' + t.id + '"><div class="tpl-head"><h2><button type="button" class="tpl-name" data-act="tplrename" data-t="' + t.id + '" title="Renommer le programme" aria-label="Renommer le programme « ' + esc(t.name) + ' »">' +
+      (pl ? LOCK : "") + "<span>" + esc(t.name) + "</span>" + PENCIL + "</button></h2>" +
       '<span class="tpl-side"><span class="muted small tpl-last">' + (lastAny ? "Dernière : " + esc(vLabel(lastAny.v.name)) : t.variants.length ? "Jamais faite" : "Aucune séance") + "</span>" +
       (ts.length > 1 ? '<span class="grip" data-drag title="Maintiens et fais glisser pour changer l\'ordre">' + GRIP + "</span>" : "") + "</span></div>" +
       // une ligne par séance : nom, puis « 6 exos · il y a 3 j », et ›
@@ -2230,6 +2233,13 @@ function exFields(e, k, letter, inGroup) {
     (time || dist || rep || cardio ? "" : '<label class="fl">Dégressif<select class="f" data-p="drops" data-e="' + k + '">' + [0, 1, 2, 3].map(n => '<option value="' + n + '"' + (d === n ? " selected" : "") + ">" + (n ? "Oui · " + n + " baisse" + (n > 1 ? "s" : "") : "Non") + "</option>").join("") + "</select></label>") +
     (time || dist || rep || cardio || !d ? "" : '<label class="fl">Dégressif sur<select class="f" data-p="dscope" data-e="' + k + '"><option value="all"' + (e.dropScope !== "last" ? " selected" : "") + '>Toutes les séries</option><option value="last"' + (e.dropScope === "last" ? " selected" : "") + ">La dernière série</option></select></label>") +
     '<label class="fl full">Notes<textarea class="f" data-p="note" data-e="' + k + '" maxlength="' + NOTE_MAX + '" placeholder="Réglages de la machine, consignes…">' + esc(e.note) + "</textarea></label></div>";
+}
+// nouveau nom d'un programme : aussi dans la séance en cours et dans l'historique de ce programme (stats, dernières séances)
+function renameTpl(tid, name) {
+  flushPending();
+  const t = getItem(tid); if (!t) return;
+  if (t.name !== name) { t.name = name; put("template", t); }
+  all("workout").forEach(w => { if (w.templateId === tid && w.templateName !== name) { w.templateName = name; put("workout", w); } });
 }
 function viewProgram(tid, vid) {
   const t = getItem(tid);
@@ -3881,7 +3891,7 @@ async function unpackBackup(txt) {
 // [thème, [[id, question, réponse (HTML écrit ici, sans donnée de l'utilisateur)]]] ; #/faq/id ouvre directement une question
 const FAQ = [
   ["Démarrer", [
-    ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer »."],
+    ["creer", "Comment créer mon premier programme ?", "Sur l'accueil, appuie sur « + Nouveau programme » et donne-lui un nom (par exemple « Push » ou « Haut du corps »). Ajoute ensuite une séance avec « + Nouvelle séance », puis ses exercices avec « + Ajouter un exercice » : cherche (« dev », « pec »…) ou filtre par muscle, coche les exercices voulus, puis choisis leur ordre dans la séance. Ils arrivent avec les répétitions et le repos conseillés. Un exercice qui n'est pas dans la liste ? Tape son nom et coche « + Créer ». Pour renommer un programme plus tard, touche son nom sur l'accueil (le petit crayon)."],
     ["programme", "Quelle différence entre un programme et une séance ?", "Un programme regroupe plusieurs séances : par exemple le programme « Push Pull » avec « Séance 1 » et « Séance 2 », chacune avec ses exercices. Un appui prolongé sur une séance affiche la liste de ses exercices."],
     ["types", "Quels types d'exercices puis-je créer ?", "Cinq types : <b>Poids × reps</b> (kilos et répétitions), <b>Reps uniquement</b> (pompes, tractions sans charge), <b>Temps</b> (gainage, étirements : le temps est pris par le chrono), <b>Distance</b> (course, rameur, ateliers Hyrox, avec ou sans charge) et <b>Cardio</b> (une machine : durée et indicateurs comme la distance ou les calories). Le type se choisit dans la configuration de l'exercice. Exercice avec assistance (tractions ou dips à la machine à contrepoids, élastique) : note un poids négatif, par exemple −20 kg ; moins d'assistance = progrès dans Stats › Évolution."],
     ["cardio", "Comment noter une séance de cardio ?", "Sur l'accueil, touche « Séance cardio ». <b>Lancer maintenant</b> : choisis une ou plusieurs machines (tapis, vélo, elliptique, escalier, rameur…), lance le chrono, touche « Terminer » à la fin, puis note tes indicateurs (distance, vitesse, calories, étages…). <b>Ajouter une séance faite</b> : indique le jour et l'heure, choisis les machines, puis note la durée et les indicateurs. Tu peux aussi ajouter une machine dans une séance de musculation (filtre « Cardio »), par exemple 20 min de vélo à la fin de ta séance Push : elle compte dans tes stats. Il manque un indicateur (fréquence cardiaque, watts max…) ? « + Ajouter un indicateur » sous la machine, puis « Créer un indicateur » avec le nom et l'unité de ton choix : il sera proposé à chaque fois (la première fois, Fiitday te demande ton accord, voir « Comment suivre mon poids ou une autre mesure ? »)."],
@@ -5839,6 +5849,15 @@ $app.addEventListener("click", async e => {
     } break;
 
     /* programmes */
+    case "tplrename": {
+      const t = getItem(b.dataset.t); if (!t) return;
+      const n = await ask({ title: "Renommer le programme", input: t.name, ok: "Renommer" });
+      if (n == null) return;
+      const name = cutStr(n.replace(/\s+/g, " ").trim(), 60);
+      if (!name) { toast("Donne un nom au programme"); return; }
+      if (name === t.name) return;
+      renameTpl(t.id, name); render(); toast("Programme renommé : « " + name + " »");
+    } break;
     case "newtpl": {
       if (isFree() && templates().length >= 1) { premiumGate("En version gratuite, tu as 1 programme."); return; }
       const n = await ask({ title: "Nouveau programme", input: "", ok: "Créer" });
@@ -6327,6 +6346,7 @@ $app.addEventListener("input", e => {
 });
 $app.addEventListener("change", e => {
   const el = e.target;
+  if (el.dataset.p === "tname") { const { t } = currentProgram(); const name = cutStr(el.value.replace(/\s+/g, " ").trim(), 60); if (t && name) renameTpl(t.id, name); return; }
   if (el.matches && el.matches("input[data-setname]")) {
     if (/@/.test(el.value)) { toast("Tape ton prénom, pas ton e-mail"); return; }
     const st = settings(); st.firstName = el.value.trim().slice(0, 40); put("settings", st); toast("Prénom enregistré"); return;

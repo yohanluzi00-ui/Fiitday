@@ -808,6 +808,12 @@ button.card.exo-guide, .home-more button.card { width: 100%; font: inherit; colo
 .tpl-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .tpl-head h2 { flex: 0 1 auto; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tpl-head .tpl-side { margin-left: auto; flex: 0 1 auto; min-width: 0; }
+/* nom du programme : se touche pour le renommer (petit crayon) */
+.tpl-name { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tpl-name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tpl-name .pencil { flex: none; width: 15px; height: 15px; color: var(--muted); opacity: .75; }
+.tpl-name:hover .pencil, .tpl-name:focus-visible .pencil { opacity: 1; color: var(--accent); }
+.tpl-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .tpl-head .tpl-last { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .variants.rows { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .variants.rows .variant { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; min-height: 46px; padding: 9px 12px; }
